@@ -16,6 +16,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+venv/
 env/
 build/
 develop-eggs/
@@ -49,8 +50,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
+yarn.lock
 
 # Environment files
 .env
 .env.local
-.env.*.local 
+.env.*.local
+
+# Rust specific
+.cargo/ 

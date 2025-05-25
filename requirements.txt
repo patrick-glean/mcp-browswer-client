@@ -1,0 +1,2 @@
+# These are built-in Python modules, no need to specify versions
+# asyncio and logging are part of Python's standard library 
