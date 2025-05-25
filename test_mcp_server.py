@@ -32,6 +32,18 @@ class MCPServer:
                 message = data.decode()
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
+                # Handle health check
+                if message == "HEALTH_CHECK":
+                    response = {
+                        "timestamp": timestamp,
+                        "status": "healthy",
+                        "message": "MCP server is running",
+                        "type": "health_check"
+                    }
+                    writer.write(json.dumps(response).encode())
+                    await writer.drain()
+                    continue
+
                 # Log the message
                 log_message = f"Received from {addr}: {message}"
                 logging.info(log_message)
@@ -41,7 +53,8 @@ class MCPServer:
                 response = {
                     "timestamp": timestamp,
                     "message": message,
-                    "status": "received"
+                    "status": "received",
+                    "type": "message"
                 }
                 writer.write(json.dumps(response).encode())
                 await writer.drain()

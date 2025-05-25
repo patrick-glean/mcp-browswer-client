@@ -1,8 +1,55 @@
 <!DOCTYPE html>
 <html>
-<head><title>MCP Client Test</title></head>
+<head>
+  <title>MCP Client Test</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    .container {
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .health-status {
+      margin: 10px 0;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .status-ok {
+      background-color: #e6ffe6;
+      border-color: #00cc00;
+    }
+    .status-error {
+      background-color: #ffe6e6;
+      border-color: #cc0000;
+    }
+    button {
+      padding: 8px 16px;
+      margin: 5px;
+      border: none;
+      border-radius: 4px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    textarea {
+      width: 100%;
+      margin: 10px 0;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+  </style>
+</head>
 <body>
-  <chat-shell></chat-shell>
+  <div class="container">
+    <h1>MCP Client Test Interface</h1>
+    <chat-shell></chat-shell>
+  </div>
 
   <script>
     class ChatShell extends HTMLElement {
@@ -10,21 +57,63 @@
         super();
         this.attachShadow({ mode: "open" });
         this.shadowRoot.innerHTML = `
-          <textarea id="input" rows="5" cols="40"></textarea><br>
+          <div class="health-status" id="wasm-status">WASM Status: Not checked</div>
+          <div class="health-status" id="mcp-status">MCP Server Status: Not checked</div>
+          <button id="check-wasm">Check WASM</button>
+          <button id="check-mcp">Check MCP Server</button>
+          <hr>
+          <textarea id="input" rows="5" cols="40" placeholder="Enter message to send to MCP server..."></textarea><br>
           <button id="send">Send to MCP</button>
           <pre id="log"></pre>
         `;
 
+        this.setupServiceWorker();
+        this.setupEventListeners();
+      }
+
+      setupServiceWorker() {
         navigator.serviceWorker.register("/sw.js").then(() => {
           navigator.serviceWorker.addEventListener("message", (e) => {
-            this.shadowRoot.querySelector("#log").textContent += e.data + "\n";
+            const log = this.shadowRoot.querySelector("#log");
+            
+            if (e.data.startsWith("DEBUG:")) {
+              console.log(e.data.substring(7));
+            } else {
+              log.textContent += e.data + "\n";
+              log.scrollTop = log.scrollHeight;
+            }
+
+            // Update status based on health check responses
+            if (e.data.includes("Health check completed successfully")) {
+              this.updateStatus("mcp-status", true, "MCP Server is healthy");
+            } else if (e.data.includes("Health check failed")) {
+              this.updateStatus("mcp-status", false, "MCP Server check failed");
+            }
           });
         });
+      }
+
+      setupEventListeners() {
+        this.shadowRoot.querySelector("#check-wasm").onclick = () => {
+          this.updateStatus("wasm-status", true, "WASM is loaded and ready");
+        };
+
+        this.shadowRoot.querySelector("#check-mcp").onclick = () => {
+          navigator.serviceWorker.controller?.postMessage("HEALTH_CHECK");
+        };
 
         this.shadowRoot.querySelector("#send").onclick = () => {
           const msg = this.shadowRoot.querySelector("#input").value;
-          navigator.serviceWorker.controller?.postMessage(msg);
+          if (msg.trim()) {
+            navigator.serviceWorker.controller?.postMessage(msg);
+          }
         };
+      }
+
+      updateStatus(elementId, isOk, message) {
+        const element = this.shadowRoot.querySelector(`#${elementId}`);
+        element.textContent = `${elementId.split('-')[0].toUpperCase()} Status: ${message}`;
+        element.className = `health-status ${isOk ? 'status-ok' : 'status-error'}`;
       }
     }
     customElements.define("chat-shell", ChatShell);

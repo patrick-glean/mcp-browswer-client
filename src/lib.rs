@@ -12,6 +12,32 @@ pub extern "C" fn alloc(len: usize) -> *mut u8 {
 }
 
 #[no_mangle]
+pub extern "C" fn health_check() -> u32 {
+    log("Performing WASM health check...");
+    
+    // Try to connect to MCP server
+    if let Ok(mut stream) = TcpStream::connect("localhost:8081") {
+        if let Err(e) = stream.write_all(b"HEALTH_CHECK") {
+            log(&format!("Error sending health check: {}", e));
+            return 1;
+        }
+
+        // Read response
+        let mut response = String::new();
+        if let Err(e) = stream.read_to_string(&mut response) {
+            log(&format!("Error reading health check response: {}", e));
+            return 1;
+        }
+
+        log(&format!("Health check response: {}", response));
+        0
+    } else {
+        log("Failed to connect to MCP server for health check");
+        1
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn handle_message(ptr: *const u8, len: usize) -> u32 {
     let input = unsafe { slice::from_raw_parts(ptr, len) };
     if let Ok(s) = str::from_utf8(input) {
