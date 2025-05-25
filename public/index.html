@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head><title>MCP Client Test</title></head>
+<body>
+  <chat-shell></chat-shell>
+
+  <script>
+    class ChatShell extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this.shadowRoot.innerHTML = \`
+          <textarea id="input" rows="5" cols="40"></textarea><br>
+          <button id="send">Send to MCP</button>
+          <pre id="log"></pre>
+        \`;
+
+        navigator.serviceWorker.register("/sw.js").then(() => {
+          navigator.serviceWorker.addEventListener("message", (e) => {
+            this.shadowRoot.querySelector("#log").textContent += e.data + "\n";
+          });
+        });
+
+        this.shadowRoot.querySelector("#send").onclick = () => {
+          const msg = this.shadowRoot.querySelector("#input").value;
+          navigator.serviceWorker.controller?.postMessage(msg);
+        };
+      }
+    }
+    customElements.define("chat-shell", ChatShell);
+  </script>
+</body>
+</html>

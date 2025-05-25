@@ -1,0 +1,56 @@
+# Rust specific
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# WASM specific
+/public/mcp_client_bg.wasm
+/public/mcp_client.js
+/public/mcp_client.d.ts
+/public/mcp_client_bg.d.ts
+/public/mcp_client_bg.wasm.d.ts
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+mcp_server.log
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Node specific
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.local
+.env.*.local 

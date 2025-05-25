@@ -1,0 +1,43 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# MCP Browser Client Project Structure
+
+This project implements a Rust WebAssembly (WASM) module that runs as a service worker, providing a connective layer for browser-based MCP (Message Control Protocol) functionality.
+
+## Core Components
+
+### Rust WASM Module
+- Main entry point: [src/lib.rs](mdc:src/lib.rs)
+  - Exports `alloc` and `handle_message` functions for WASM-JS interop
+  - Handles core message processing logic
+
+### Service Worker
+- Implementation: [public/sw.js](mdc:public/sw.js)
+  - Manages WASM module loading and lifecycle
+  - Handles message passing between web pages and WASM
+  - Supports multi-tab operation through service worker architecture
+
+### Web Interface
+- Main interface: [public/index.html](mdc:public/index.html)
+  - Implements custom `<chat-shell>` element
+  - Provides user interface for message input and display
+  - Communicates with service worker for MCP operations
+
+## Build System
+- Project configuration: [Cargo.toml](mdc:Cargo.toml)
+- WASM build script: [wasm-build.sh](mdc:wasm-build.sh)
+
+## Key Features
+- Multi-tab support through service worker architecture
+- WASM-based message processing
+- Web component-based UI
+- Service worker-based communication layer
+
+## Development Workflow
+1. Modify Rust code in `src/lib.rs`
+2. Build WASM using `wasm-build.sh`
+3. Test through web interface in `public/index.html`
+4. Service worker automatically handles WASM loading and message passing
