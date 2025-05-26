@@ -4,119 +4,238 @@
   <title>MCP Client Test</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
+    body {
+      font-family: monospace;
+      margin: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
     .container {
-      max-width: 800px;
-      margin: 20px auto;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
     }
-    .health-status {
-      margin: 10px 0;
+    .status-container {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .status {
       padding: 10px;
-      border: 1px solid #ccc;
       border-radius: 4px;
+      background: #2d2d2d;
     }
-    .status-ok {
-      background-color: #e6ffe6;
-      border-color: #00cc00;
+    .status.healthy {
+      background: #2d2d2d;
+      border: 1px solid #4CAF50;
     }
-    .status-error {
-      background-color: #ffe6e6;
-      border-color: #cc0000;
+    .status.unhealthy {
+      background: #2d2d2d;
+      border: 1px solid #f44336;
+    }
+    .uptime {
+      font-size: 1.2em;
+      color: #4CAF50;
+      margin-bottom: 10px;
+    }
+    .log-container {
+      height: 400px;
+      overflow-y: auto;
+      background: #2d2d2d;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-radius: 2px;
+    }
+    .log-entry.DEBUG {
+      color: #9cdcfe;
+    }
+    .log-entry.INFO {
+      color: #4CAF50;
+    }
+    .log-entry.ERROR {
+      color: #f44336;
+    }
+    .log-timestamp {
+      color: #858585;
+      margin-right: 10px;
+    }
+    .log-level {
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    .log-message {
+      color: #d4d4d4;
     }
     button {
-      padding: 8px 16px;
-      margin: 5px;
-      border: none;
-      border-radius: 4px;
-      background-color: #007bff;
+      background: #0e639c;
       color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
       cursor: pointer;
+      margin: 5px;
     }
     button:hover {
-      background-color: #0056b3;
+      background: #1177bb;
     }
     textarea {
       width: 100%;
+      height: 100px;
       margin: 10px 0;
-      padding: 8px;
-      border: 1px solid #ddd;
+      padding: 10px;
+      background: #2d2d2d;
+      color: #d4d4d4;
+      border: 1px solid #3d3d3d;
       border-radius: 4px;
+      font-family: monospace;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>MCP Client Test Interface</h1>
-    <chat-shell></chat-shell>
+    <div class="status-container">
+      <div class="status" id="wasm-status">
+        <div>WASM Status: <span id="wasm-health">Unknown</span></div>
+        <button onclick="checkWasm()">Check WASM</button>
+      </div>
+      <div class="status" id="mcp-status">
+        <div>MCP Server Status: <span id="mcp-health">Unknown</span></div>
+        <button onclick="checkMcp()">Check MCP</button>
+      </div>
+    </div>
+    <div class="uptime" id="uptime">Uptime: 0 seconds</div>
+    <div class="log-container" id="log-container"></div>
+    <textarea id="message-input" placeholder="Enter message to send to MCP server..."></textarea>
+    <button onclick="sendMessage()">Send Message</button>
   </div>
 
   <script>
-    class ChatShell extends HTMLElement {
+    class ChatShell {
       constructor() {
-        super();
-        this.attachShadow({ mode: "open" });
-        this.shadowRoot.innerHTML = `
-          <div class="health-status" id="wasm-status">WASM Status: Not checked</div>
-          <div class="health-status" id="mcp-status">MCP Server Status: Not checked</div>
-          <button id="check-wasm">Check WASM</button>
-          <button id="check-mcp">Check MCP Server</button>
-          <hr>
-          <textarea id="input" rows="5" cols="40" placeholder="Enter message to send to MCP server..."></textarea><br>
-          <button id="send">Send to MCP</button>
-          <pre id="log"></pre>
-        `;
-
+        this.logContainer = document.getElementById('log-container');
+        this.wasmHealth = document.getElementById('wasm-health');
+        this.mcpHealth = document.getElementById('mcp-health');
+        this.uptimeDisplay = document.getElementById('uptime');
+        this.messageInput = document.getElementById('message-input');
         this.setupServiceWorker();
-        this.setupEventListeners();
       }
 
       setupServiceWorker() {
-        navigator.serviceWorker.register("/sw.js").then(() => {
-          navigator.serviceWorker.addEventListener("message", (e) => {
-            const log = this.shadowRoot.querySelector("#log");
-            
-            if (e.data.startsWith("DEBUG:")) {
-              console.log(e.data.substring(7));
-            } else {
-              log.textContent += e.data + "\n";
-              log.scrollTop = log.scrollHeight;
-            }
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('ServiceWorker registration successful');
+              
+              // Wait for the service worker to be ready
+              if (registration.active) {
+                this.setupMessageListener();
+                this.checkWasm();
+              } else {
+                registration.addEventListener('activate', () => {
+                  this.setupMessageListener();
+                  this.checkWasm();
+                });
+              }
+            })
+            .catch(err => {
+              console.error('ServiceWorker registration failed:', err);
+            });
+        }
+      }
 
-            // Update status based on health check responses
-            if (e.data.includes("Health check completed successfully")) {
-              this.updateStatus("mcp-status", true, "MCP Server is healthy");
-            } else if (e.data.includes("Health check failed")) {
-              this.updateStatus("mcp-status", false, "MCP Server check failed");
+      setupMessageListener() {
+        navigator.serviceWorker.addEventListener('message', event => {
+          const message = event.data;
+          if (message.startsWith('DEBUG:')) {
+            this.addLog('DEBUG', message.substring(6));
+          } else if (message.startsWith('WASM_LOG:')) {
+            try {
+              const logEntry = JSON.parse(message.substring(9));
+              this.addLog(logEntry.level, logEntry.message, logEntry.timestamp);
+            } catch (e) {
+              console.error('Error parsing WASM log:', e);
             }
-          });
+          } else if (message.startsWith('UPTIME:')) {
+            const uptime = message.substring(7);
+            this.uptimeDisplay.textContent = `Uptime: ${uptime} seconds`;
+          } else if (message === 'Health check completed successfully') {
+            this.wasmHealth.textContent = 'Healthy';
+            this.wasmHealth.parentElement.parentElement.classList.add('healthy');
+            this.wasmHealth.parentElement.parentElement.classList.remove('unhealthy');
+          } else if (message === 'Health check failed') {
+            this.wasmHealth.textContent = 'Unhealthy';
+            this.wasmHealth.parentElement.parentElement.classList.add('unhealthy');
+            this.wasmHealth.parentElement.parentElement.classList.remove('healthy');
+          }
         });
       }
 
-      setupEventListeners() {
-        this.shadowRoot.querySelector("#check-wasm").onclick = () => {
-          this.updateStatus("wasm-status", true, "WASM is loaded and ready");
-        };
-
-        this.shadowRoot.querySelector("#check-mcp").onclick = () => {
-          navigator.serviceWorker.controller?.postMessage("HEALTH_CHECK");
-        };
-
-        this.shadowRoot.querySelector("#send").onclick = () => {
-          const msg = this.shadowRoot.querySelector("#input").value;
-          if (msg.trim()) {
-            navigator.serviceWorker.controller?.postMessage(msg);
-          }
-        };
+      addLog(level, message, timestamp = Date.now()) {
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${level}`;
+        
+        const time = new Date(timestamp).toISOString();
+        entry.innerHTML = `
+          <span class="log-timestamp">[${time}]</span>
+          <span class="log-level">${level}</span>
+          <span class="log-message">${message}</span>
+        `;
+        
+        this.logContainer.appendChild(entry);
+        this.logContainer.scrollTop = this.logContainer.scrollHeight;
       }
 
-      updateStatus(elementId, isOk, message) {
-        const element = this.shadowRoot.querySelector(`#${elementId}`);
-        element.textContent = `${elementId.split('-')[0].toUpperCase()} Status: ${message}`;
-        element.className = `health-status ${isOk ? 'status-ok' : 'status-error'}`;
+      checkWasm() {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage('HEALTH_CHECK');
+        } else {
+          this.addLog('ERROR', 'Service worker not ready yet');
+        }
+      }
+
+      checkMcp() {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage('CHECK_MCP');
+        } else {
+          this.addLog('ERROR', 'Service worker not ready yet');
+        }
+      }
+
+      sendMessage() {
+        if (navigator.serviceWorker.controller) {
+          const message = this.messageInput.value.trim();
+          if (message) {
+            navigator.serviceWorker.controller.postMessage(message);
+            this.messageInput.value = '';
+          }
+        } else {
+          this.addLog('ERROR', 'Service worker not ready yet');
+        }
       }
     }
-    customElements.define("chat-shell", ChatShell);
+
+    // Initialize the chat shell when the page loads
+    window.addEventListener('load', () => {
+      window.chatShell = new ChatShell();
+    });
+
+    // Global functions for button clicks
+    function checkWasm() {
+      window.chatShell.checkWasm();
+    }
+
+    function checkMcp() {
+      window.chatShell.checkMcp();
+    }
+
+    function sendMessage() {
+      window.chatShell.sendMessage();
+    }
   </script>
 </body>
 </html>

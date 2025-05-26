@@ -1,5 +1,6 @@
 let wasmInstance;
 let debugMode = true;
+let uptimeInterval;
 
 function debugLog(message, data = null) {
   if (!debugMode) return;
@@ -29,12 +30,40 @@ self.addEventListener("activate", (event) => {
 function logFromWasm(ptr, len) {
   const memory = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
   const text = new TextDecoder().decode(memory);
-  debugLog("WASM Log", { message: text });
-  self.clients.matchAll().then(clients => {
-    clients.forEach(client => {
-      client.postMessage(`WASM Log: ${text}`);
+  try {
+    const logEntry = JSON.parse(text);
+    debugLog("WASM Log", logEntry);
+    self.clients.matchAll().then(clients => {
+      clients.forEach(client => {
+        client.postMessage(`WASM_LOG: ${text}`);
+      });
     });
-  });
+  } catch (e) {
+    debugLog("Error parsing WASM log", { error: e.message, text });
+  }
+}
+
+// Function to provide timestamp to WASM
+function getTimestamp() {
+  return BigInt(Date.now());
+}
+
+function startUptimeCounter() {
+  if (uptimeInterval) {
+    clearInterval(uptimeInterval);
+  }
+  
+  uptimeInterval = setInterval(() => {
+    if (wasmInstance) {
+      wasmInstance.exports.increment_uptime();
+      const uptime = wasmInstance.exports.get_uptime();
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage(`UPTIME: ${uptime}`);
+        });
+      });
+    }
+  }, 1000);
 }
 
 async function initializeWasm() {
@@ -47,11 +76,22 @@ async function initializeWasm() {
       
       const { instance } = await WebAssembly.instantiate(bytes, {
         env: {
-          log_js: logFromWasm
+          log_js: logFromWasm,
+          get_timestamp_js: () => Number(Date.now())
         }
       });
       wasmInstance = instance;
       debugLog("WASM module initialized successfully");
+
+      // Get version info
+      const versionPtr = instance.exports.get_version();
+      const versionMemory = new Uint8Array(instance.exports.memory.buffer, versionPtr);
+      const nullIndex = versionMemory.indexOf(0);
+      const versionText = new TextDecoder().decode(versionMemory.slice(0, nullIndex));
+      debugLog("WASM Module Version", { version: versionText });
+
+      // Start the uptime counter
+      startUptimeCounter();
     } catch (error) {
       debugLog("WASM initialization failed", { error: error.message });
       throw error;
