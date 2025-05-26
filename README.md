@@ -15,6 +15,9 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 .
 ├── src/               # Rust source code
 ├── public/           # Web assets and service worker
+│   ├── mcp_client_bg.wasm  # Compiled WASM module
+│   ├── sw.js         # Service worker
+│   └── index.html    # Web interface
 ├── target/           # Build output
 ├── venv/             # Python virtual environment
 ├── node_modules/     # Node.js dependencies
@@ -23,6 +26,15 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 ├── requirements.txt  # Python dependencies
 └── wasm-build.sh     # WASM build script
 ```
+
+## File Naming Conventions
+
+The project uses specific file naming conventions to ensure consistency:
+
+- WASM Module: `mcp_client_bg.wasm`
+  - Built from: `target/wasm32-unknown-unknown/release/mcp_browser_client.wasm`
+  - Copied to: `public/mcp_client_bg.wasm`
+  - Referenced in: `public/sw.js` as `/mcp_client_bg.wasm`
 
 ## Quick Start
 
@@ -128,6 +140,12 @@ You can test the system by:
    - Check the MCP server log file
    - Ensure port 8081 is available
    - Verify the connection settings in `src/lib.rs`
+
+3. If WASM module fails to load:
+   - Verify `mcp_client_bg.wasm` exists in the `public` directory
+   - Check that the file name matches exactly (case-sensitive)
+   - Ensure the build script completed successfully
+   - Check browser console for specific error messages
 
 ## License
 

@@ -30,83 +30,57 @@ function debugLog(message, data = null) {
 // Initialize WASM module
 async function initializeWasm() {
     try {
-        debugLog("Initializing WASM module...");
-        const response = await fetch('/mcp_client_bg.wasm');
-        if (!response.ok) {
-            throw new Error(`Failed to fetch WASM module: ${response.status} ${response.statusText}`);
+        debugLog('Initializing WASM module...');
+        
+        // Fetch the wasm-bindgen JS file
+        const bindingsResponse = await fetch('/mcp_browser_client.js');
+        debugLog('WASM bindings fetched successfully');
+        const bindingsText = await bindingsResponse.text();
+        
+        // Replace 'let wasm_bindgen;' with 'self.wasm_bindgen = undefined;' so the IIFE assigns to self.wasm_bindgen
+        const patchedBindingsText = bindingsText.replace(/^let wasm_bindgen;/, 'self.wasm_bindgen = undefined;');
+        eval(patchedBindingsText);
+        debugLog('WASM bindings loaded via eval');
+        debugLog('typeof wasm_bindgen after eval', { type: typeof self.wasm_bindgen });
+        debugLog('wasm_bindgen keys', { keys: Object.keys(self.wasm_bindgen || {}) });
+        
+        // Now load the WASM module
+        const wasmResponse = await fetch('/mcp_browser_client_bg.wasm');
+        debugLog('WASM module fetched successfully');
+        const wasmBytes = await wasmResponse.arrayBuffer();
+        debugLog(`WASM bytes loaded: ${JSON.stringify({ size: wasmBytes.byteLength })}`);
+        
+        // Try both .default and .init as initialization functions
+        if (typeof self.wasm_bindgen.default === 'function') {
+            await self.wasm_bindgen.default(wasmBytes);
+            debugLog('WASM module instantiated successfully via wasm_bindgen.default');
+        } else if (typeof self.wasm_bindgen.init === 'function') {
+            await self.wasm_bindgen.init(wasmBytes);
+            debugLog('WASM module instantiated successfully via wasm_bindgen.init');
+        } else if (typeof self.wasm_bindgen === 'function') {
+            await self.wasm_bindgen(wasmBytes);
+            debugLog('WASM module instantiated successfully via wasm_bindgen (direct)');
+        } else {
+            throw new Error('No valid wasm_bindgen initialization function found');
         }
-        debugLog("WASM module fetched successfully");
         
-        const wasmBytes = await response.arrayBuffer();
-        debugLog("WASM bytes loaded", { size: wasmBytes.byteLength });
+        // All exported functions are now on self.wasm_bindgen
+        wasmInstance = self.wasm_bindgen;
+        wasmModule = null; // Not used in this pattern
         
-        wasmModule = await WebAssembly.compile(wasmBytes);
-        debugLog("WASM module compiled");
-        
-        wasmInstance = await WebAssembly.instantiate(wasmModule, {
-            env: {
-                log: (ptr, len) => {
-                    const message = new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
-                    try {
-                        const logData = JSON.parse(message);
-                        debugLog("WASM log received", logData);
-                        broadcastToClients({
-                            type: 'log',
-                            content: logData
-                        });
-                    } catch (e) {
-                        debugLog("Error parsing WASM log", { error: e.message, rawMessage: message });
-                        broadcastToClients({
-                            type: 'log',
-                            content: {
-                                level: 'ERROR',
-                                message: `Failed to parse log message: ${message}`,
-                                timestamp: new Date().toISOString()
-                            }
-                        });
-                    }
-                },
-                get_timestamp: () => BigInt(Date.now())
-            }
-        });
-        debugLog("WASM module instantiated", { 
-            exports: Object.keys(wasmInstance.exports),
-            memory: wasmInstance.exports.memory ? 'available' : 'unavailable'
-        });
-
-        // Start uptime counter after successful initialization
+        // Start uptime counter
         startUptimeCounter();
-
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: 'INFO',
-                message: 'WASM module initialized successfully',
-                timestamp: new Date().toISOString()
-            }
-        });
-        broadcastToClients({
-            type: 'wasm_status',
-            healthy: true
-        });
+        
+        // Add initial memory event
+        try {
+            await wasmInstance.add_memory_event('WASM module initialized');
+        } catch (e) {
+            console.error('Error adding memory event:', e);
+        }
+        
         return true;
     } catch (error) {
-        debugLog("WASM initialization failed", { 
-            error: error.message,
-            stack: error.stack
-        });
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: 'ERROR',
-                message: `Failed to initialize WASM module: ${error.message}`,
-                timestamp: new Date().toISOString()
-            }
-        });
-        broadcastToClients({
-            type: 'wasm_status',
-            healthy: false
-        });
+        debugLog(`WASM initialization failed: ${JSON.stringify({ error: error.message, stack: error.stack })}`);
         return false;
     }
 }
@@ -141,12 +115,21 @@ function startUptimeCounter() {
     debugLog("Starting uptime counter");
     stopUptimeCounter(); // Clear any existing interval
     
+    let lastLogTime = 0;
     uptimeInterval = setInterval(() => {
         if (wasmInstance) {
             try {
-                wasmInstance.exports.increment_uptime();
-                const uptime = wasmInstance.exports.get_uptime();
-                debugLog("Uptime updated", { uptime: uptime.toString() });
+                wasmInstance.increment_uptime();
+                const uptime = wasmInstance.get_uptime();
+                const currentTime = Date.now();
+                
+                // Only log to screen every 30 seconds
+                if (currentTime - lastLogTime >= 30000) {
+                    debugLog("Uptime updated", { uptime: uptime.toString() });
+                    lastLogTime = currentTime;
+                }
+                
+                // Always update the UI counter
                 broadcastToClients({
                     type: 'uptime',
                     uptime: Number(uptime)
@@ -185,28 +168,20 @@ function stopUptimeCounter() {
 // Reload WASM module
 async function reloadWasm() {
     debugLog("Reloading WASM module...");
-    unloadWasm();
-    await initializeWasm();
-}
-
-// Check WASM module status
-function checkWasm() {
-    debugLog("Checking WASM module status...");
-    if (wasmInstance) {
-        try {
-            const versionPtr = wasmInstance.exports.get_version();
-            const version = new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, versionPtr, 50));
-            const uptime = wasmInstance.exports.get_uptime();
-            
-            debugLog("WASM check successful", { 
-                version, 
-                uptime: uptime.toString() 
-            });
+    try {
+        // First unload the existing instance
+        unloadWasm();
+        debugLog("Previous WASM instance unloaded");
+        
+        // Initialize new instance
+        const success = await initializeWasm();
+        if (success) {
+            debugLog("WASM module reloaded successfully");
             broadcastToClients({
                 type: 'log',
                 content: {
                     level: 'INFO',
-                    message: `WASM module version: ${version}, uptime: ${uptime}s`,
+                    message: 'WASM module reloaded successfully',
                     timestamp: new Date().toISOString()
                 }
             });
@@ -214,16 +189,13 @@ function checkWasm() {
                 type: 'wasm_status',
                 healthy: true
             });
-        } catch (error) {
-            debugLog("WASM check failed", { 
-                error: error.message,
-                stack: error.stack
-            });
+        } else {
+            debugLog("Failed to reload WASM module");
             broadcastToClients({
                 type: 'log',
                 content: {
                     level: 'ERROR',
-                    message: `WASM module check failed: ${error.message}`,
+                    message: 'Failed to reload WASM module',
                     timestamp: new Date().toISOString()
                 }
             });
@@ -232,13 +204,13 @@ function checkWasm() {
                 healthy: false
             });
         }
-    } else {
-        debugLog("WASM module not loaded");
+    } catch (error) {
+        debugLog(`Error during WASM reload: ${JSON.stringify({ error: error.message, stack: error.stack })}`);
         broadcastToClients({
             type: 'log',
             content: {
                 level: 'ERROR',
-                message: 'WASM module not loaded',
+                message: `Error during WASM reload: ${error.message}`,
                 timestamp: new Date().toISOString()
             }
         });
@@ -246,6 +218,24 @@ function checkWasm() {
             type: 'wasm_status',
             healthy: false
         });
+    }
+}
+
+// Check WASM module status
+async function checkWasm() {
+    try {
+        debugLog('Checking WASM module status...');
+        if (!wasmInstance) {
+            throw new Error('WASM module not initialized');
+        }
+        // Call a WASM function to verify the module is healthy
+        const healthy = await wasmInstance.health_check();
+        debugLog('WASM check result:', { healthy });
+        return healthy;
+    } catch (error) {
+        debugLog('WASM check failed:', { error: error.message, stack: error.stack });
+        console.error('WASM module check failed:', error.message);
+        return false;
     }
 }
 
@@ -271,7 +261,7 @@ async function checkMcp() {
 
     try {
         debugLog("Executing WASM health check...");
-        const result = wasmInstance.exports.health_check();
+        const result = wasmInstance.health_check();
         debugLog("Health check result", { result });
         
         broadcastToClients({
@@ -321,8 +311,8 @@ function broadcastToClients(message) {
 self.addEventListener('message', async event => {
     if (!isRunning) return;
 
-    const { type } = event.data;
-    debugLog("Received message from client", { type });
+    const { type, data } = event.data;
+    debugLog("Received message from client", { type, data });
     
     switch (type) {
         case 'check_wasm':
@@ -342,6 +332,32 @@ self.addEventListener('message', async event => {
             isRunning = false;
             stopUptimeCounter();
             unloadWasm();
+            break;
+        case 'add_memory_event':
+            if (wasmInstance && data && data.text) {
+                try {
+                    await wasmInstance.add_memory_event(data.text);
+                    debugLog("Memory event added", { text: data.text });
+                } catch (error) {
+                    debugLog("Failed to add memory event", { 
+                        error: error.message,
+                        stack: error.stack
+                    });
+                }
+            }
+            break;
+        case 'clear_memory_events':
+            if (wasmInstance) {
+                try {
+                    await wasmInstance.clear_memory_events();
+                    debugLog("Memory events cleared");
+                } catch (error) {
+                    debugLog("Failed to clear memory events", { 
+                        error: error.message,
+                        stack: error.stack
+                    });
+                }
+            }
             break;
     }
 });

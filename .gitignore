@@ -1,14 +1,34 @@
-# Rust specific
+# Rust build artifacts
 /target/
 **/*.rs.bk
 Cargo.lock
 
-# WASM specific
-/public/mcp_client_bg.wasm
-/public/mcp_client.js
-/public/mcp_client.d.ts
-/public/mcp_client_bg.d.ts
-/public/mcp_client_bg.wasm.d.ts
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+/dist/
+/build/
+
+# Keep WASM files
+!public/*.wasm
+!public/*.js
+!public/*.d.ts
+
 
 # Python specific
 __pycache__/
@@ -18,7 +38,6 @@ __pycache__/
 .Python
 venv/
 env/
-build/
 develop-eggs/
 dist/
 downloads/
@@ -37,21 +56,6 @@ wheels/
 # Logs
 *.log
 mcp_server.log
-
-# IDE specific
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# Node specific
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
 
 # Environment files
 .env

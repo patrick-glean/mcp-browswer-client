@@ -162,24 +162,62 @@
         .control-group.sw-controls button.start:hover {
             background: #11bb11;
         }
+        .memory-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .memory-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #2D2D2D;
+            color: #fff;
+        }
+        .memory-events {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 10px;
+            background: #2D2D2D;
+        }
+        .memory-event {
+            padding: 8px;
+            border-bottom: 1px solid #444;
+            font-family: monospace;
+        }
+        .memory-event:last-child {
+            border-bottom: none;
+        }
+        .memory-event-time {
+            color: #888;
+            font-size: 0.9em;
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="status-bar">
             <div class="status-item">
-                <div class="status-indicator unknown" id="sw-status"></div>
-                <span>Service Worker</span>
-                <span class="uptime" id="sw-uptime"></span>
+                <span class="status-label">Service Worker:</span>
+                <span class="status-indicator" id="sw-status">●</span>
+                <span class="status-uptime" id="sw-uptime">0s</span>
             </div>
             <div class="status-item">
-                <div class="status-indicator unknown" id="wasm-status"></div>
-                <span>WASM Module</span>
-                <span class="uptime" id="wasm-uptime"></span>
+                <span class="status-label">WASM Module:</span>
+                <span class="status-indicator" id="wasm-status">●</span>
+                <span class="status-uptime" id="wasm-uptime">0s</span>
             </div>
             <div class="status-item">
-                <div class="status-indicator unknown" id="mcp-status"></div>
-                <span>MCP Server</span>
+                <span class="status-label">MCP Server:</span>
+                <span class="status-indicator" id="mcp-status">●</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Metadata Version:</span>
+                <span id="metadataVersion">-</span>
             </div>
         </div>
         
@@ -207,7 +245,23 @@
             </div>
         </div>
 
-        <div class="log-container" id="log-container"></div>
+        <div class="control-group">
+            <h3>Memory Events</h3>
+            <div class="memory-controls">
+                <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
+                <button id="addMemoryEvent" class="control-button">Add Event</button>
+                <button id="clearMemoryEvents" class="control-button">Clear Events</button>
+            </div>
+            <div id="memoryEvents" class="memory-events"></div>
+        </div>
+
+        <div class="control-group">
+            <h3>Logs</h3>
+            <label>
+                <input type="checkbox" id="debugModeToggle"> Debug Mode
+            </label>
+            <div class="log-container" id="log-container"></div>
+        </div>
     </div>
 
     <script>
@@ -223,6 +277,11 @@
                 this.startTime = Date.now();
                 this.uptimeInterval = null;
                 
+                // Initialize status indicators
+                this.updateSwStatus(false);
+                this.updateWasmStatus(false);
+                this.updateMcpStatus(false);
+                
                 this.setupServiceWorker();
                 this.setupEventListeners();
                 this.startUptimeCounter();
@@ -235,7 +294,9 @@
                 this.startTime = Date.now();
                 this.uptimeInterval = setInterval(() => {
                     const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-                    this.swUptime.textContent = `${uptime}s`;
+                    if (this.swUptime) {
+                        this.swUptime.textContent = `${uptime}s`;
+                    }
                 }, 1000);
             }
 
@@ -244,8 +305,12 @@
                     clearInterval(this.uptimeInterval);
                     this.uptimeInterval = null;
                 }
-                this.swUptime.textContent = '0s';
-                this.wasmUptime.textContent = '0s';
+                if (this.swUptime) {
+                    this.swUptime.textContent = '0s';
+                }
+                if (this.wasmUptime) {
+                    this.wasmUptime.textContent = '0s';
+                }
             }
 
             setupServiceWorker() {
@@ -361,6 +426,9 @@
                     this.log(data.content);
                 } else if (data.type === 'wasm_status') {
                     this.updateWasmStatus(data.healthy);
+                    if (data.metadata) {
+                        this.updateMetadataDisplay(data.metadata);
+                    }
                 } else if (data.type === 'mcp_status') {
                     this.updateMcpStatus(data.healthy);
                 } else if (data.type === 'uptime') {
@@ -369,18 +437,39 @@
             }
 
             updateSwStatus(healthy) {
-                this.swStatus.classList.remove('healthy', 'unhealthy', 'unknown');
-                this.swStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                if (this.swStatus) {
+                    this.swStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.swStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                }
             }
 
             updateWasmStatus(healthy) {
-                this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
-                this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                if (this.wasmStatus) {
+                    this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                }
             }
 
             updateMcpStatus(healthy) {
-                this.mcpStatus.classList.remove('healthy', 'unhealthy', 'unknown');
-                this.mcpStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                if (this.mcpStatus) {
+                    this.mcpStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.mcpStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                }
+            }
+
+            updateMetadataDisplay(metadata) {
+                document.getElementById('metadataVersion').textContent = metadata.version;
+                
+                const memoryEvents = document.getElementById('memoryEvents');
+                memoryEvents.innerHTML = '';
+                
+                metadata.memory_events.forEach(event => {
+                    const eventDiv = document.createElement('div');
+                    eventDiv.className = 'memory-event';
+                    const time = new Date(event.timestamp).toLocaleString();
+                    eventDiv.innerHTML = `<span class="memory-event-time">${time}</span>${event.text}`;
+                    memoryEvents.appendChild(eventDiv);
+                });
             }
 
             log(message) {
@@ -410,6 +499,30 @@
 
         // Initialize the chat shell
         new ChatShell();
+
+        // Add memory event
+        document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
+            const text = document.getElementById('memoryEventText')?.value.trim();
+            if (text) {
+                navigator.serviceWorker.controller?.postMessage({
+                    type: 'add_memory_event',
+                    data: { text }
+                });
+                document.getElementById('memoryEventText').value = '';
+            }
+        });
+
+        // Clear memory events
+        document.getElementById('clearMemoryEvents')?.addEventListener('click', () => {
+            navigator.serviceWorker.controller?.postMessage({
+                type: 'clear_memory_events'
+            });
+        });
+
+        document.getElementById('debugModeToggle').addEventListener('change', function() {
+            localStorage.setItem('debugMode', this.checked);
+            navigator.serviceWorker.controller.postMessage({ type: 'reload_wasm' });
+        });
     </script>
 </body>
 </html>
