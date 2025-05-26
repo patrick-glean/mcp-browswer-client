@@ -28,18 +28,24 @@ self.addEventListener("activate", (event) => {
 
 // Function to handle logging from WASM
 function logFromWasm(ptr, len) {
-  const memory = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
-  const text = new TextDecoder().decode(memory);
   try {
-    const logEntry = JSON.parse(text);
-    debugLog("WASM Log", logEntry);
-    self.clients.matchAll().then(clients => {
-      clients.forEach(client => {
-        client.postMessage(`WASM_LOG: ${text}`);
+    const memory = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
+    const text = new TextDecoder().decode(memory);
+    debugLog("Raw WASM log", { text });
+    
+    try {
+      const logEntry = JSON.parse(text);
+      debugLog("WASM Log", logEntry);
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage(`WASM_LOG: ${text}`);
+        });
       });
-    });
+    } catch (e) {
+      debugLog("Error parsing WASM log", { error: e.message, text });
+    }
   } catch (e) {
-    debugLog("Error parsing WASM log", { error: e.message, text });
+    debugLog("Error accessing WASM memory", { error: e.message });
   }
 }
 
@@ -111,16 +117,57 @@ self.addEventListener("message", async (event) => {
 
   try {
     const instance = await initializeWasm();
+    debugLog("WASM instance ready", { 
+      hasHealthCheck: typeof instance.exports.health_check === 'function',
+      hasHandleMessage: typeof instance.exports.handle_message === 'function'
+    });
 
     if (message === "HEALTH_CHECK") {
       debugLog("Executing WASM health check...");
-      const result = instance.exports.health_check();
-      debugLog("Health check result", { success: result === 0 });
-      
-      if (result === 0) {
-        client.postMessage("Health check completed successfully");
-      } else {
+      try {
+        const result = instance.exports.health_check();
+        debugLog("Health check result", { 
+          success: result === 0,
+          rawResult: result,
+          wasmInstance: !!instance,
+          exports: Object.keys(instance.exports)
+        });
+        
+        if (result === 0) {
+          client.postMessage("Health check completed successfully");
+        } else {
+          client.postMessage("Health check failed");
+        }
+      } catch (error) {
+        debugLog("Health check error", { 
+          error: error.message,
+          stack: error.stack
+        });
         client.postMessage("Health check failed");
+      }
+      return;
+    }
+
+    if (message === "CHECK_MCP") {
+      debugLog("Executing MCP check...");
+      try {
+        const result = instance.exports.health_check();
+        debugLog("MCP check result", { 
+          success: result === 0,
+          rawResult: result
+        });
+        
+        if (result === 0) {
+          client.postMessage("MCP check completed successfully");
+        } else {
+          client.postMessage("MCP check failed");
+        }
+      } catch (error) {
+        debugLog("MCP check error", { 
+          error: error.message,
+          stack: error.stack
+        });
+        client.postMessage("MCP check failed");
       }
       return;
     }

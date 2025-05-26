@@ -45,11 +45,15 @@
       border-radius: 4px;
       font-family: monospace;
       white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.4;
     }
     .log-entry {
-      margin: 5px 0;
-      padding: 5px;
+      margin: 2px 0;
+      padding: 2px 4px;
       border-radius: 2px;
+      display: flex;
+      align-items: baseline;
     }
     .log-entry.DEBUG {
       color: #9cdcfe;
@@ -62,14 +66,17 @@
     }
     .log-timestamp {
       color: #858585;
-      margin-right: 10px;
+      margin-right: 8px;
+      font-size: 12px;
     }
     .log-level {
       font-weight: bold;
-      margin-right: 10px;
+      margin-right: 8px;
+      min-width: 50px;
     }
     .log-message {
       color: #d4d4d4;
+      flex: 1;
     }
     button {
       background: #0e639c;
@@ -179,9 +186,9 @@
         const entry = document.createElement('div');
         entry.className = `log-entry ${level}`;
         
-        const time = new Date(timestamp).toISOString();
+        const time = new Date(timestamp).toISOString().replace('T', ' ').replace('Z', '');
         entry.innerHTML = `
-          <span class="log-timestamp">[${time}]</span>
+          <span class="log-timestamp">${time}</span>
           <span class="log-level">${level}</span>
           <span class="log-message">${message}</span>
         `;
