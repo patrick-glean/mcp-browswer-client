@@ -1,203 +1,359 @@
-let wasmInstance;
-let debugMode = true;
-let uptimeInterval;
+let wasmInstance = null;
+let wasmModule = null;
+let isRunning = true;
+let uptimeInterval = null;
 
+// Debug logging function
 function debugLog(message, data = null) {
-  if (!debugMode) return;
-  const timestamp = new Date().toISOString();
-  const logMessage = data 
-    ? `[${timestamp}] ${message}: ${JSON.stringify(data, null, 2)}`
-    : `[${timestamp}] ${message}`;
-  
-  self.clients.matchAll().then(clients => {
-    clients.forEach(client => {
-      client.postMessage(`DEBUG: ${logMessage}`);
-    });
-  });
-}
-
-self.addEventListener("install", (event) => {
-  debugLog("Service Worker installing...");
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  debugLog("Service Worker activating...");
-  event.waitUntil(self.clients.claim());
-});
-
-// Function to handle logging from WASM
-function logFromWasm(ptr, len) {
-  try {
-    const memory = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
-    const text = new TextDecoder().decode(memory);
-    debugLog("Raw WASM log", { text });
+    if (!isRunning) return;
+    const timestamp = new Date().toISOString();
     
-    try {
-      const logEntry = JSON.parse(text);
-      debugLog("WASM Log", logEntry);
-      self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-          client.postMessage(`WASM_LOG: ${text}`);
-        });
-      });
-    } catch (e) {
-      debugLog("Error parsing WASM log", { error: e.message, text });
-    }
-  } catch (e) {
-    debugLog("Error accessing WASM memory", { error: e.message });
-  }
+    // Convert BigInt values to strings in the data object
+    const safeData = data ? JSON.parse(JSON.stringify(data, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value
+    )) : null;
+    
+    const logMessage = safeData 
+        ? `[${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
+        : `[${timestamp}] ${message}`;
+    
+    broadcastToClients({
+        type: 'log',
+        content: {
+            level: 'DEBUG',
+            message: logMessage,
+            timestamp: timestamp
+        }
+    });
 }
 
-// Function to provide timestamp to WASM
-function getTimestamp() {
-  return BigInt(Date.now());
-}
-
-function startUptimeCounter() {
-  if (uptimeInterval) {
-    clearInterval(uptimeInterval);
-  }
-  
-  uptimeInterval = setInterval(() => {
-    if (wasmInstance) {
-      wasmInstance.exports.increment_uptime();
-      const uptime = wasmInstance.exports.get_uptime();
-      self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-          client.postMessage(`UPTIME: ${uptime}`);
-        });
-      });
-    }
-  }, 1000);
-}
-
+// Initialize WASM module
 async function initializeWasm() {
-  if (!wasmInstance) {
-    debugLog("Initializing WASM module...");
     try {
-      const response = await fetch("/mcp_client_bg.wasm");
-      const bytes = await response.arrayBuffer();
-      debugLog("WASM binary loaded", { size: bytes.byteLength });
-      
-      const { instance } = await WebAssembly.instantiate(bytes, {
-        env: {
-          log_js: logFromWasm,
-          get_timestamp_js: () => Number(Date.now())
+        debugLog("Initializing WASM module...");
+        const response = await fetch('/mcp_client_bg.wasm');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch WASM module: ${response.status} ${response.statusText}`);
         }
-      });
-      wasmInstance = instance;
-      debugLog("WASM module initialized successfully");
+        debugLog("WASM module fetched successfully");
+        
+        const wasmBytes = await response.arrayBuffer();
+        debugLog("WASM bytes loaded", { size: wasmBytes.byteLength });
+        
+        wasmModule = await WebAssembly.compile(wasmBytes);
+        debugLog("WASM module compiled");
+        
+        wasmInstance = await WebAssembly.instantiate(wasmModule, {
+            env: {
+                log: (ptr, len) => {
+                    const message = new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
+                    try {
+                        const logData = JSON.parse(message);
+                        debugLog("WASM log received", logData);
+                        broadcastToClients({
+                            type: 'log',
+                            content: logData
+                        });
+                    } catch (e) {
+                        debugLog("Error parsing WASM log", { error: e.message, rawMessage: message });
+                        broadcastToClients({
+                            type: 'log',
+                            content: {
+                                level: 'ERROR',
+                                message: `Failed to parse log message: ${message}`,
+                                timestamp: new Date().toISOString()
+                            }
+                        });
+                    }
+                },
+                get_timestamp: () => BigInt(Date.now())
+            }
+        });
+        debugLog("WASM module instantiated", { 
+            exports: Object.keys(wasmInstance.exports),
+            memory: wasmInstance.exports.memory ? 'available' : 'unavailable'
+        });
 
-      // Get version info
-      const versionPtr = instance.exports.get_version();
-      const versionMemory = new Uint8Array(instance.exports.memory.buffer, versionPtr);
-      const nullIndex = versionMemory.indexOf(0);
-      const versionText = new TextDecoder().decode(versionMemory.slice(0, nullIndex));
-      debugLog("WASM Module Version", { version: versionText });
+        // Start uptime counter after successful initialization
+        startUptimeCounter();
 
-      // Start the uptime counter
-      startUptimeCounter();
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'INFO',
+                message: 'WASM module initialized successfully',
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: true
+        });
+        return true;
     } catch (error) {
-      debugLog("WASM initialization failed", { error: error.message });
-      throw error;
+        debugLog("WASM initialization failed", { 
+            error: error.message,
+            stack: error.stack
+        });
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'ERROR',
+                message: `Failed to initialize WASM module: ${error.message}`,
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: false
+        });
+        return false;
     }
-  }
-  return wasmInstance;
 }
 
-self.addEventListener("message", async (event) => {
-  const client = event.source;
-  const message = event.data;
+// Unload WASM module
+function unloadWasm() {
+    if (wasmInstance) {
+        debugLog("Unloading WASM module...");
+        // Stop uptime counter
+        stopUptimeCounter();
 
-  debugLog("Received message", { 
-    type: message === "HEALTH_CHECK" ? "health_check" : "message",
-    content: message 
-  });
-
-  try {
-    const instance = await initializeWasm();
-    debugLog("WASM instance ready", { 
-      hasHealthCheck: typeof instance.exports.health_check === 'function',
-      hasHandleMessage: typeof instance.exports.handle_message === 'function'
-    });
-
-    if (message === "HEALTH_CHECK") {
-      debugLog("Executing WASM health check...");
-      try {
-        const result = instance.exports.health_check();
-        debugLog("Health check result", { 
-          success: result === 0,
-          rawResult: result,
-          wasmInstance: !!instance,
-          exports: Object.keys(instance.exports)
+        wasmInstance = null;
+        wasmModule = null;
+        debugLog("WASM module unloaded");
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'INFO',
+                message: 'WASM module unloaded',
+                timestamp: new Date().toISOString()
+            }
         });
-        
-        if (result === 0) {
-          client.postMessage("Health check completed successfully");
-        } else {
-          client.postMessage("Health check failed");
-        }
-      } catch (error) {
-        debugLog("Health check error", { 
-          error: error.message,
-          stack: error.stack
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: false
         });
-        client.postMessage("Health check failed");
-      }
-      return;
     }
+}
 
-    if (message === "CHECK_MCP") {
-      debugLog("Executing MCP check...");
-      try {
-        const result = instance.exports.health_check();
-        debugLog("MCP check result", { 
-          success: result === 0,
-          rawResult: result
-        });
-        
-        if (result === 0) {
-          client.postMessage("MCP check completed successfully");
-        } else {
-          client.postMessage("MCP check failed");
+// Start uptime counter
+function startUptimeCounter() {
+    debugLog("Starting uptime counter");
+    stopUptimeCounter(); // Clear any existing interval
+    
+    uptimeInterval = setInterval(() => {
+        if (wasmInstance) {
+            try {
+                wasmInstance.exports.increment_uptime();
+                const uptime = wasmInstance.exports.get_uptime();
+                debugLog("Uptime updated", { uptime: uptime.toString() });
+                broadcastToClients({
+                    type: 'uptime',
+                    uptime: Number(uptime)
+                });
+            } catch (error) {
+                debugLog("Failed to update uptime", { 
+                    error: error.message,
+                    stack: error.stack
+                });
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: `Failed to update uptime: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            }
         }
-      } catch (error) {
-        debugLog("MCP check error", { 
-          error: error.message,
-          stack: error.stack
-        });
-        client.postMessage("MCP check failed");
-      }
-      return;
+    }, 1000);
+}
+
+// Stop uptime counter
+function stopUptimeCounter() {
+    debugLog("Stopping uptime counter");
+    if (uptimeInterval) {
+        clearInterval(uptimeInterval);
+        uptimeInterval = null;
     }
-
-    debugLog("Processing message through WASM...");
-    const encoder = new TextEncoder();
-    const payload = encoder.encode(message);
-    const ptr = instance.exports.alloc(payload.length);
-    const memory = new Uint8Array(instance.exports.memory.buffer, ptr, payload.length);
-    memory.set(payload);
-
-    debugLog("Calling WASM handle_message", { 
-      messageLength: payload.length,
-      pointer: ptr 
+    broadcastToClients({
+        type: 'uptime',
+        uptime: 0
     });
+}
 
-    const result = instance.exports.handle_message(ptr, payload.length);
-    
-    debugLog("Message processing result", { success: result === 0 });
-    
-    if (result === 0) {
-      client.postMessage(`Message sent to MCP server: ${message}`);
+// Reload WASM module
+async function reloadWasm() {
+    debugLog("Reloading WASM module...");
+    unloadWasm();
+    await initializeWasm();
+}
+
+// Check WASM module status
+function checkWasm() {
+    debugLog("Checking WASM module status...");
+    if (wasmInstance) {
+        try {
+            const versionPtr = wasmInstance.exports.get_version();
+            const version = new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, versionPtr, 50));
+            const uptime = wasmInstance.exports.get_uptime();
+            
+            debugLog("WASM check successful", { 
+                version, 
+                uptime: uptime.toString() 
+            });
+            broadcastToClients({
+                type: 'log',
+                content: {
+                    level: 'INFO',
+                    message: `WASM module version: ${version}, uptime: ${uptime}s`,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            broadcastToClients({
+                type: 'wasm_status',
+                healthy: true
+            });
+        } catch (error) {
+            debugLog("WASM check failed", { 
+                error: error.message,
+                stack: error.stack
+            });
+            broadcastToClients({
+                type: 'log',
+                content: {
+                    level: 'ERROR',
+                    message: `WASM module check failed: ${error.message}`,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            broadcastToClients({
+                type: 'wasm_status',
+                healthy: false
+            });
+        }
     } else {
-      client.postMessage(`Error processing message: ${message}`);
+        debugLog("WASM module not loaded");
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'ERROR',
+                message: 'WASM module not loaded',
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: false
+        });
     }
-  } catch (error) {
-    debugLog("Error in message handling", { 
-      error: error.message,
-      stack: error.stack 
+}
+
+// Check MCP server health
+async function checkMcp() {
+    debugLog("Checking MCP server health...");
+    if (!wasmInstance) {
+        debugLog("Cannot check MCP: WASM module not loaded");
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'ERROR',
+                message: 'Cannot check MCP server: WASM module not loaded',
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'mcp_status',
+            healthy: false
+        });
+        return;
+    }
+
+    try {
+        debugLog("Executing WASM health check...");
+        const result = wasmInstance.exports.health_check();
+        debugLog("Health check result", { result });
+        
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'INFO',
+                message: `MCP server health check result: ${result === 0 ? 'healthy' : 'unhealthy'}`,
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'mcp_status',
+            healthy: result === 0
+        });
+    } catch (error) {
+        debugLog("Health check failed", { 
+            error: error.message,
+            stack: error.stack
+        });
+        broadcastToClients({
+            type: 'log',
+            content: {
+                level: 'ERROR',
+                message: `MCP server health check failed: ${error.message}`,
+                timestamp: new Date().toISOString()
+            }
+        });
+        broadcastToClients({
+            type: 'mcp_status',
+            healthy: false
+        });
+    }
+}
+
+// Broadcast message to all clients
+function broadcastToClients(message) {
+    if (!isRunning) return;
+    
+    self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+            client.postMessage(message);
+        });
     });
-    client.postMessage(`Error: ${error.message}`);
-  }
+}
+
+// Handle messages from clients
+self.addEventListener('message', async event => {
+    if (!isRunning) return;
+
+    const { type } = event.data;
+    debugLog("Received message from client", { type });
+    
+    switch (type) {
+        case 'check_wasm':
+            checkWasm();
+            break;
+        case 'health_check':
+            await checkMcp();
+            break;
+        case 'unload_wasm':
+            unloadWasm();
+            break;
+        case 'reload_wasm':
+            await reloadWasm();
+            break;
+        case 'stop':
+            debugLog("Stopping service worker...");
+            isRunning = false;
+            stopUptimeCounter();
+            unloadWasm();
+            break;
+    }
+});
+
+// Initialize on install
+self.addEventListener('install', event => {
+    debugLog("Service worker installing...");
+    event.waitUntil(initializeWasm());
+});
+
+// Handle activation
+self.addEventListener('activate', event => {
+    debugLog("Service worker activating...");
+    event.waitUntil(clients.claim());
 });

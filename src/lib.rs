@@ -118,21 +118,26 @@ pub extern "C" fn health_check() -> u32 {
     debug(&format!("WASM Module Version: {}", VERSION));
     
     // Try to connect to MCP server
+    info("Attempting to connect to MCP server at localhost:8081");
     match TcpStream::connect("localhost:8081") {
         Ok(mut stream) => {
-            info("Connected to MCP server");
+            info("Successfully connected to MCP server");
+            debug("Sending HEALTH_CHECK command");
             match stream.write_all(b"HEALTH_CHECK") {
                 Ok(_) => {
-                    debug("Health check request sent");
+                    info("Health check request sent successfully");
                     // Read response
                     let mut response = String::new();
                     match stream.read_to_string(&mut response) {
                         Ok(_) => {
-                            info(&format!("Health check response: {}", response));
-                            // For now, consider any response as success
-                            // This helps us debug the connection
-                            info("Health check successful - received response");
-                            0
+                            info(&format!("Received health check response: {}", response));
+                            if response.is_empty() {
+                                error("Received empty response from MCP server");
+                                1
+                            } else {
+                                info("Health check successful - received valid response");
+                                0
+                            }
                         }
                         Err(e) => {
                             error(&format!("Error reading health check response: {}", e));
@@ -141,17 +146,15 @@ pub extern "C" fn health_check() -> u32 {
                     }
                 }
                 Err(e) => {
-                    error(&format!("Error sending health check: {}", e));
+                    error(&format!("Error sending health check command: {}", e));
                     1
                 }
             }
         }
         Err(e) => {
-            error(&format!("Failed to connect to MCP server for health check: {}", e));
-            // For debugging, let's return success even if we can't connect
-            // This will help us verify the WASM module is working
-            info("Health check successful - WASM module is working");
-            0
+            error(&format!("Failed to connect to MCP server: {}", e));
+            error("Please ensure the MCP server is running on localhost:8081");
+            1
         }
     }
 }
