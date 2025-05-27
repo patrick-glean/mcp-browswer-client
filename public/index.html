@@ -92,7 +92,16 @@
                 this.wasmUptime = document.getElementById('wasm-uptime');
                 this.serviceWorker = null;
                 this.startTime = Date.now();
+                this.wasmStartTime = null;
                 this.uptimeInterval = null;
+                this.wasmUptimeInterval = null;
+                this.lastMcpCheck = null;
+                this.mcpCheckTimeout = null;
+                this.wasmCheckInterval = null;
+                this.checkCounter = 0;
+                
+                // Store the bound message handler
+                this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
                 
                 // Initialize status indicators
                 this.updateSwStatus(false);
@@ -130,21 +139,85 @@
                 }
             }
 
+            startWasmUptimeCounter() {
+                if (this.wasmUptimeInterval) {
+                    clearInterval(this.wasmUptimeInterval);
+                }
+                if (!this.wasmStartTime) {
+                    this.wasmStartTime = Date.now();
+                }
+                this.wasmUptimeInterval = setInterval(() => {
+                    if (this.wasmStartTime) {
+                        const uptime = Math.floor((Date.now() - this.wasmStartTime) / 1000);
+                        if (this.wasmUptime) {
+                            this.wasmUptime.textContent = `${uptime}s`;
+                        }
+                    }
+                }, 1000);
+            }
+
+            stopWasmUptimeCounter() {
+                if (this.wasmUptimeInterval) {
+                    clearInterval(this.wasmUptimeInterval);
+                    this.wasmUptimeInterval = null;
+                }
+                if (this.wasmUptime) {
+                    this.wasmUptime.textContent = '0s';
+                }
+                this.wasmStartTime = null;
+            }
+
             setupServiceWorker() {
                 if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.register('/sw.js')
-                        .then(registration => {
-                            console.log('ServiceWorker registration successful');
+                    console.log('Setting up service worker...');
+                    
+                    // First unregister any existing service workers
+                    navigator.serviceWorker.getRegistrations().then(registrations => {
+                        console.log('Unregistering existing service workers:', registrations.length);
+                        return Promise.all(registrations.map(registration => registration.unregister()));
+                    }).then(() => {
+                        console.log('Registering new service worker...');
+                        // Now register the new service worker
+                        return navigator.serviceWorker.register('/sw.js');
+                    }).then(registration => {
+                        console.log('ServiceWorker registration successful');
+                        
+                        // Wait for the service worker to be ready
+                        if (registration.active) {
+                            console.log('Service worker is active');
                             this.serviceWorker = registration.active;
                             this.updateSwStatus(true);
-                        })
-                        .catch(error => {
-                            console.error('ServiceWorker registration failed:', error);
-                            this.updateSwStatus(false);
-                        });
+                            this.setupPeriodicChecks();
+                        } else {
+                            console.log('Waiting for service worker to activate...');
+                            // Wait for the service worker to activate
+                            registration.addEventListener('activate', () => {
+                                console.log('Service worker activated');
+                                this.serviceWorker = registration.active;
+                                this.updateSwStatus(true);
+                                this.setupPeriodicChecks();
+                            });
+                        }
+                    }).catch(error => {
+                        console.error('ServiceWorker registration failed:', error);
+                        this.updateSwStatus(false);
+                    });
 
-                    navigator.serviceWorker.addEventListener('message', this.handleServiceWorkerMessage.bind(this));
+                    console.log('Removing existing message listener...');
+                    // Remove any existing message listeners
+                    navigator.serviceWorker.removeEventListener('message', this.boundMessageHandler);
+                    console.log('Adding new message listener...');
+                    // Add the message listener
+                    navigator.serviceWorker.addEventListener('message', this.boundMessageHandler);
                 }
+            }
+
+            setupPeriodicChecks() {
+                // Wait a short time for WASM to initialize
+                setTimeout(() => {
+                    // Set up periodic WASM uptime checks
+                    this.startPeriodicWasmChecks();
+                }, 1000); // Wait 1 second for WASM to initialize
             }
 
             setupEventListeners() {
@@ -178,10 +251,34 @@
                 });
             }
 
+            startPeriodicWasmChecks() {
+                // Clear any existing interval
+                if (this.wasmCheckInterval) {
+                    clearInterval(this.wasmCheckInterval);
+                }
+                
+                // Check immediately
+                this.checkWasm();
+                
+                // Then check every minute
+                this.wasmCheckInterval = setInterval(() => {
+                    this.checkWasm();
+                }, 60000); // 60 seconds
+            }
+
+            stopPeriodicWasmChecks() {
+                if (this.wasmCheckInterval) {
+                    clearInterval(this.wasmCheckInterval);
+                    this.wasmCheckInterval = null;
+                }
+            }
+
             async stopServiceWorker() {
                 if (this.serviceWorker) {
                     try {
                         console.log('Stopping service worker...');
+                        this.stopPeriodicWasmChecks();
+                        this.stopWasmUptimeCounter();
                         await this.serviceWorker.postMessage({ type: 'stop' });
                         await navigator.serviceWorker.getRegistrations().then(registrations => {
                             registrations.forEach(registration => registration.unregister());
@@ -204,6 +301,8 @@
                     this.serviceWorker = registration.active;
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
+                    this.startPeriodicWasmChecks();
+                    this.startWasmUptimeCounter();
                     this.log('Service worker started');
                 } catch (error) {
                     console.error('Error starting service worker:', error);
@@ -218,7 +317,7 @@
                     await this.serviceWorker.postMessage({ type: 'unload_wasm' });
                     this.wasmStatus.classList.remove('healthy', 'unhealthy');
                     this.wasmStatus.classList.add('unknown');
-                    this.wasmUptime.textContent = '0s';
+                    this.stopWasmUptimeCounter();
                     this.log('WASM module unloaded');
                 }
             }
@@ -226,21 +325,43 @@
             async reloadWasm() {
                 if (this.serviceWorker) {
                     console.log('Reloading WASM module...');
+                    this.stopWasmUptimeCounter();
                     await this.serviceWorker.postMessage({ type: 'reload_wasm' });
+                    this.startWasmUptimeCounter();
                     this.log('Reloading WASM module...');
                 }
             }
 
             async checkWasm() {
                 if (this.serviceWorker) {
-                    console.log('Checking WASM module...');
-                    await this.serviceWorker.postMessage({ type: 'check_wasm' });
+                    const checkId = ++this.checkCounter;
+                    console.log(`Checking WASM module (check #${checkId})...`);
+                    await this.serviceWorker.postMessage({ 
+                        type: 'check_wasm',
+                        checkId: checkId
+                    });
                 }
             }
 
             async checkMcp() {
                 if (this.serviceWorker) {
                     console.log('Checking MCP server...');
+                    // Set MCP status to healthy immediately
+                    this.updateMcpStatus(true);
+                    this.lastMcpCheck = Date.now();
+                    
+                    // Clear any existing timeout
+                    if (this.mcpCheckTimeout) {
+                        clearTimeout(this.mcpCheckTimeout);
+                    }
+                    
+                    // Set a timeout to mark MCP as unhealthy if no response within 5 seconds
+                    this.mcpCheckTimeout = setTimeout(() => {
+                        if (Date.now() - this.lastMcpCheck > 5000) {
+                            this.updateMcpStatus(false);
+                        }
+                    }, 5000);
+                    
                     await this.serviceWorker.postMessage({ type: 'health_check' });
                 }
             }
@@ -263,18 +384,32 @@
                         this.log(data.content);
                     }
                 } else if (data.type === 'wasm_status') {
+                    console.log('Received WASM status:', data);
                     this.updateWasmStatus(data.healthy);
+                    if (data.uptime) {
+                        // Set or adjust our counter based on reported uptime
+                        this.wasmStartTime = Date.now() - (data.uptime * 1000);
+                        // Ensure counter is running
+                        if (!this.wasmUptimeInterval) {
+                            this.startWasmUptimeCounter();
+                        }
+                    }
                     if (data.metadata) {
-                        this.updateMetadataDisplay(data.metadata);
+                        // Update version display
+                        const versionElement = document.getElementById('metadataVersion');
+                        if (versionElement && data.metadata.version) {
+                            versionElement.textContent = data.metadata.version;
+                        }
+                        // Log the check result
+                        this.log({
+                            level: 'INFO',
+                            message: `WASM check result: ${data.healthy ? 'healthy' : 'unhealthy'} (uptime: ${data.uptime}s)`,
+                            timestamp: data.metadata.timestamp
+                        });
                     }
                 } else if (data.type === 'mcp_status') {
                     this.updateMcpStatus(data.healthy);
-                } else if (data.type === 'uptime') {
-                    this.wasmUptime.textContent = `${data.uptime}s`;
-                    // Only log uptime to console if debug mode is enabled
-                    if (isDebugMode) {
-                        console.log(`WASM uptime: ${data.uptime} seconds`);
-                    }
+                    this.lastMcpCheck = Date.now();
                 }
             }
 
@@ -300,18 +435,24 @@
             }
 
             updateMetadataDisplay(metadata) {
-                document.getElementById('metadataVersion').textContent = metadata.version;
+                if (!metadata) return;
+                
+                const versionElement = document.getElementById('metadataVersion');
+                if (versionElement && metadata.version) {
+                    versionElement.textContent = metadata.version;
+                }
                 
                 const memoryEvents = document.getElementById('memoryEvents');
-                memoryEvents.innerHTML = '';
-                
-                metadata.memory_events.forEach(event => {
-                    const eventDiv = document.createElement('div');
-                    eventDiv.className = 'memory-event';
-                    const time = new Date(event.timestamp).toLocaleString();
-                    eventDiv.innerHTML = `<span class="memory-event-time">${time}</span>${event.text}`;
-                    memoryEvents.appendChild(eventDiv);
-                });
+                if (memoryEvents && Array.isArray(metadata.memory_events)) {
+                    memoryEvents.innerHTML = '';
+                    metadata.memory_events.forEach(event => {
+                        const eventDiv = document.createElement('div');
+                        eventDiv.className = 'memory-event';
+                        const time = new Date(event.timestamp).toLocaleString();
+                        eventDiv.innerHTML = `<span class="memory-event-time">${time}</span>${event.text}`;
+                        memoryEvents.appendChild(eventDiv);
+                    });
+                }
             }
 
             log(message) {

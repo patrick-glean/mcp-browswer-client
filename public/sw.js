@@ -268,19 +268,41 @@ async function reloadWasm() {
 }
 
 // Check WASM module status
-async function checkWasm() {
+async function checkWasm(checkId) {
     try {
-        debugLog('Checking WASM module status...');
         if (!wasmInstance) {
             throw new Error('WASM module not initialized');
         }
         // Call a WASM function to verify the module is healthy
         const healthy = await wasmInstance.health_check();
-        debugLog('WASM check result:', { healthy });
-        return healthy;
+        const uptime = await wasmInstance.get_uptime();
+        
+        // Single broadcast with all the information
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: healthy === 0, // 0 means healthy in our WASM module
+            uptime: Number(uptime),
+            checkId: checkId,
+            metadata: {
+                timestamp: new Date().toISOString(),
+                version: wasmInstance.get_version()
+            }
+        });
+        
+        return healthy === 0;
     } catch (error) {
-        debugLog('WASM check failed:', { error: error.message, stack: error.stack });
+        debugLog('WASM check failed:', { error: error.message, stack: error.stack, checkId });
         console.error('WASM module check failed:', error.message);
+        broadcastToClients({
+            type: 'wasm_status',
+            healthy: false,
+            uptime: 0,
+            checkId: checkId,
+            metadata: {
+                timestamp: new Date().toISOString(),
+                version: 'unknown'
+            }
+        });
         return false;
     }
 }
@@ -360,7 +382,7 @@ function broadcastToClients(message) {
 self.addEventListener('message', async event => {
     if (!isRunning) return;
 
-    const { type, data } = event.data;
+    const { type, data = {} } = event.data;  // Provide default empty object for data
     debugLog("Received message from client", { type, data });
     
     switch (type) {
@@ -369,7 +391,12 @@ self.addEventListener('message', async event => {
             debugLog("Debug mode updated", { enabled: isDebugMode });
             break;
         case 'check_wasm':
-            checkWasm();
+            // Only check if WASM is initialized
+            if (!wasmInstance) {
+                debugLog("WASM not initialized yet, initializing...", { checkId: data?.checkId });
+                await initializeWasm();
+            }
+            checkWasm(data?.checkId);  // Use optional chaining
             break;
         case 'health_check':
             await checkMcp();
