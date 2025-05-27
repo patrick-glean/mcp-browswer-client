@@ -89,9 +89,15 @@
                         </div>
                     </div>
                     
-                    <div class="tools-display">
-                        <h4>Available Tools</h4>
-                        <div id="toolsList"></div>
+                    <div class="server-tools-container">
+                        <div class="servers-display">
+                            <h4>Available Servers</h4>
+                            <div id="serversList"></div>
+                        </div>
+                        <div class="tools-display">
+                            <h4>Available Tools</h4>
+                            <div id="toolsList"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -130,6 +136,7 @@
                 this.mcpCheckTimeout = null;
                 this.wasmCheckInterval = null;
                 this.checkCounter = 0;
+                this.selectedServerUrl = null;
                 
                 // Store the bound message handler
                 this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
@@ -459,6 +466,14 @@
                     case 'uptime':
                         this.updateWasmUptime(message.uptime);
                         break;
+                    case 'server_info':
+                        this.updateServersList(message.info.servers);
+                        break;
+                    case 'mcp_server_initialized':
+                        this.log({ level: 'INFO', message: `Server initialized: ${message.server.name}`, timestamp: new Date().toISOString() });
+                        this.getServerInfo();
+                        this.updateToolsList(message.server.tools);
+                        break;
                     default:
                         console.warn('Unknown message type:', message.type);
                 }
@@ -539,6 +554,79 @@
                     uptimeElement.textContent = formatUptime(uptime);
                 }
             }
+
+            async initializeMcpServer() {
+                const url = document.getElementById('mcpServerUrl').value;
+                if (!url) {
+                    this.log({ level: 'ERROR', message: 'Please enter a server URL', timestamp: new Date().toISOString() });
+                    return;
+                }
+                this.log({ level: 'INFO', message: `Initializing MCP server at ${url}...`, timestamp: new Date().toISOString() });
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'initialize-mcp',
+                    url: url
+                });
+            }
+
+            async getServerInfo() {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'get-server-info'
+                });
+            }
+
+            updateServersList(servers) {
+                const serversList = document.getElementById('serversList');
+                serversList.innerHTML = '';
+                Object.entries(servers).forEach(([url, server]) => {
+                    const serverItem = document.createElement('div');
+                    serverItem.className = 'server-item';
+                    if (url === this.selectedServerUrl) {
+                        serverItem.classList.add('selected');
+                    }
+                    const hostname = new URL(server.url).host;
+                    serverItem.innerHTML = `
+                        <div class="server-name" title="${server.url}">${hostname}</div>
+                    `;
+                    serverItem.addEventListener('click', () => {
+                        if (this.selectedServerUrl === url) {
+                            this.selectedServerUrl = null;
+                            this.updateToolsList([]);
+                        } else {
+                            this.selectedServerUrl = url;
+                            this.updateToolsList(server.tools);
+                        }
+                        this.updateServersList(servers);
+                    });
+                    serversList.appendChild(serverItem);
+                });
+            }
+
+            updateToolsList(tools) {
+                const toolsList = document.getElementById('toolsList');
+                toolsList.innerHTML = '';
+                if (this.selectedServerUrl) {
+                    if (tools.length === 0) {
+                        const defaultTool = document.createElement('div');
+                        defaultTool.className = 'tool-item';
+                        defaultTool.innerHTML = `
+                            <strong>Check MCP</strong>
+                        `;
+                        defaultTool.title = 'Perform a health check on the MCP server.';
+                        defaultTool.addEventListener('click', () => this.checkMcp());
+                        toolsList.appendChild(defaultTool);
+                    } else {
+                        tools.forEach(tool => {
+                            const toolItem = document.createElement('div');
+                            toolItem.className = 'tool-item';
+                            toolItem.innerHTML = `
+                                <strong>${tool.name}</strong> (v${tool.version})
+                                <div>${tool.description}</div>
+                            `;
+                            toolsList.appendChild(toolItem);
+                        });
+                    }
+                }
+            }
         }
 
         // Initialize the chat shell
@@ -585,10 +673,122 @@
             const seconds = uptimeNum % 60;
             return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
+
+        document.getElementById('initProtocol').addEventListener('click', () => chatShell.initializeMcpServer());
     </script>
 
     <style>
         /* Remove all inline styles as they are now in styles.css */
+        
+        .server-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .server-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .server-controls input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        .server-controls button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .server-controls button:hover {
+            background: #0056b3;
+        }
+        
+        .server-info {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .server-card {
+            margin: 10px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .server-card h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        
+        .server-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        
+        .status-connected {
+            background: #28a745;
+            color: white;
+        }
+        
+        .status-failed {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .status-initializing {
+            background: #ffc107;
+            color: black;
+        }
+        
+        .tools-list {
+            margin-top: 10px;
+            padding-left: 20px;
+        }
+        
+        .tool-item {
+            margin: 5px 0;
+            padding: 5px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .server-tools-container {
+            display: flex;
+            gap: 20px;
+        }
+        .servers-display, .tools-display {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .server-item {
+            padding: 10px;
+            border: 1px solid #eee;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        .server-item:hover {
+            background: #f0f0f0;
+        }
+        .server-item.selected {
+            background: #e0e0e0;
+        }
     </style>
 </body>
 </html>

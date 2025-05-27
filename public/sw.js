@@ -373,6 +373,76 @@ self.addEventListener('message', async (event) => {
         case 'initialize-wasm':
             await initializeWasm();
             break;
+        case 'initialize-mcp':
+            if (!wasmInstance) {
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: 'Cannot initialize MCP server: WASM module not loaded',
+                        timestamp: new Date().toISOString()
+                    }
+                });
+                break;
+            }
+            try {
+                const result = await wasmInstance.initialize_mcp_server(message.url);
+                const parsedResult = JSON.parse(result);
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: parsedResult.status === 'success' ? 'INFO' : 'ERROR',
+                        message: parsedResult.message,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+                if (parsedResult.status === 'success') {
+                    broadcastToClients({
+                        type: 'mcp_server_initialized',
+                        server: parsedResult.server_info
+                    });
+                }
+            } catch (error) {
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: `Failed to initialize MCP server: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            }
+            break;
+        case 'get-server-info':
+            if (!wasmInstance) {
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: 'Cannot get server info: WASM module not loaded',
+                        timestamp: new Date().toISOString()
+                    }
+                });
+                break;
+            }
+            try {
+                const result = await wasmInstance.get_server_info();
+                const parsedResult = JSON.parse(result);
+                broadcastToClients({
+                    type: 'server_info',
+                    info: parsedResult
+                });
+            } catch (error) {
+                broadcastToClients({
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: `Failed to get server info: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            }
+            break;
         case 'set-debug-mode':
             isDebugMode = message.enabled;
             mcpHandler.setDebugMode(isDebugMode);

@@ -330,12 +330,34 @@ let wasm_bindgen;
         }
     };
 
+    /**
+     * @param {string} url
+     * @returns {Promise<any>}
+     */
+    __exports.initialize_mcp_server = function(url) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.initialize_mcp_server(ptr0, len0);
+        return ret;
+    };
+
+    /**
+     * @returns {any}
+     */
+    __exports.get_server_info = function() {
+        const ret = wasm.get_server_info();
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    };
+
     function __wbg_adapter_24(arg0, arg1, arg2) {
-        wasm.closure49_externref_shim(arg0, arg1, arg2);
+        wasm.closure58_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_63(arg0, arg1, arg2, arg3) {
-        wasm.closure71_externref_shim(arg0, arg1, arg2, arg3);
+    function __wbg_adapter_65(arg0, arg1, arg2, arg3) {
+        wasm.closure80_externref_shim(arg0, arg1, arg2, arg3);
     }
 
     async function __wbg_load(module, imports) {
@@ -408,7 +430,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_63(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_65(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -490,8 +512,8 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper187 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 50, __wbg_adapter_24);
+        imports.wbg.__wbindgen_closure_wrapper246 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 59, __wbg_adapter_24);
             return ret;
         };
         imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

@@ -9,14 +9,55 @@ use web_sys;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen::JsCast;
 use std::sync::LazyLock;
+use std::collections::HashMap;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
 const DEFAULT_SERVER_URL: &str = "http://localhost:8081";
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct McpTool {
+    name: String,
+    description: String,
+    version: String,
+    parameters: Vec<ToolParameter>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ToolParameter {
+    name: String,
+    description: String,
+    required: bool,
+    #[serde(rename = "type")]
+    param_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct McpServer {
+    url: String,
+    name: String,
+    version: String,
+    status: String,
+    tools: Vec<McpTool>,
+    last_health_check: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct McpServerRegistry {
+    servers: HashMap<String, McpServer>,
+    default_server: Option<String>,
+}
+
 static UPTIME: AtomicU64 = AtomicU64::new(0);
 static SERVER_URL: LazyLock<std::sync::atomic::AtomicPtr<String>> = LazyLock::new(|| {
     std::sync::atomic::AtomicPtr::new(Box::into_raw(Box::new(String::from(DEFAULT_SERVER_URL))))
+});
+
+static SERVER_REGISTRY: LazyLock<std::sync::Mutex<McpServerRegistry>> = LazyLock::new(|| {
+    std::sync::Mutex::new(McpServerRegistry {
+        servers: HashMap::new(),
+        default_server: None,
+    })
 });
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -364,4 +405,145 @@ pub fn clear_memory_events() -> Result<(), String> {
     
     setItem("mcp_module_metadata", &json);
     Ok(())
+}
+
+#[wasm_bindgen]
+pub async fn initialize_mcp_server(url: &str) -> Result<JsValue, JsValue> {
+    info(&format!("Initializing MCP server at {}", url));
+    
+    let mut registry = SERVER_REGISTRY.lock().unwrap();
+    
+    // Check if server already exists
+    if registry.servers.contains_key(url) {
+        info(&format!("Server {} already registered", url));
+        return Ok(JsValue::from_str(&json!({
+            "status": "already_registered",
+            "message": format!("Server {} is already registered", url)
+        }).to_string()));
+    }
+    
+    // Create new server entry
+    let server = McpServer {
+        url: url.to_string(),
+        name: format!("MCP Server at {}", url),
+        version: "unknown".to_string(),
+        status: "initializing".to_string(),
+        tools: Vec::new(),
+        last_health_check: get_timestamp(),
+    };
+    
+    // Add to registry
+    registry.servers.insert(url.to_string(), server);
+    
+    // If this is the first server, set it as default
+    if registry.default_server.is_none() {
+        registry.default_server = Some(url.to_string());
+        info(&format!("Set {} as default server", url));
+    }
+    
+    // Perform initial handshake
+    match perform_server_handshake(url).await {
+        Ok(server_info) => {
+            let server = registry.servers.get_mut(url).unwrap();
+            server.version = server_info.version.clone();
+            server.status = "connected".to_string();
+            server.tools = server_info.tools.clone();
+            
+            info(&format!("Successfully initialized MCP server at {}", url));
+            Ok(JsValue::from_str(&json!({
+                "status": "success",
+                "message": format!("Successfully initialized MCP server at {}", url),
+                "server_info": server_info
+            }).to_string()))
+        }
+        Err(e) => {
+            let server = registry.servers.get_mut(url).unwrap();
+            server.status = "failed".to_string();
+            
+            error(&format!("Failed to initialize MCP server at {}: {}", url, e));
+            Err(JsValue::from_str(&json!({
+                "status": "error",
+                "message": format!("Failed to initialize MCP server: {}", e)
+            }).to_string()))
+        }
+    }
+}
+
+async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
+    info(&format!("Performing handshake with MCP server at {}", url));
+    
+    let handshake_request = json!({
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+            "client_version": VERSION,
+            "capabilities": ["tools", "health_check"]
+        },
+        "id": js_sys::Date::now() as u64
+    });
+    
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &handshake_request.to_string().into()).unwrap();
+    
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    
+    let promise = fetch(url, &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            debug(&format!("Received handshake response: {}", json_str));
+                            
+                            // Parse the response and extract server info
+                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
+                                if let Some(result) = response.result {
+                                    let server_info = McpServer {
+                                        url: url.to_string(),
+                                        name: result.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
+                                        version: result.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+                                        status: "connected".to_string(),
+                                        tools: result.get("tools")
+                                            .and_then(|v| v.as_array())
+                                            .map(|tools| tools.iter()
+                                                .filter_map(|t| serde_json::from_value(t.clone()).ok())
+                                                .collect())
+                                            .unwrap_or_default(),
+                                        last_health_check: get_timestamp(),
+                                    };
+                                    
+                                    Ok(server_info)
+                                } else {
+                                    Err("No result in handshake response".to_string())
+                                }
+                            } else {
+                                Err("Failed to parse handshake response".to_string())
+                            }
+                        }
+                        Err(e) => Err(format!("Failed to parse response: {:?}", e))
+                    }
+                } else {
+                    Err("Server returned error response".to_string())
+                }
+            } else {
+                Err("Failed to get response".to_string())
+            }
+        }
+        Err(e) => Err(format!("Failed to connect to server: {:?}", e))
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_server_info() -> Result<JsValue, JsValue> {
+    let registry = SERVER_REGISTRY.lock().unwrap();
+    Ok(JsValue::from_str(&json!({
+        "servers": registry.servers,
+        "default_server": registry.default_server
+    }).to_string()))
 }

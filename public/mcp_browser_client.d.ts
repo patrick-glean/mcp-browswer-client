@@ -13,6 +13,8 @@ declare namespace wasm_bindgen {
 	export function get_metadata(): string;
 	export function add_memory_event(text: string): void;
 	export function clear_memory_events(): void;
+	export function initialize_mcp_server(url: string): Promise<any>;
+	export function get_server_info(): any;
 	
 }
 
@@ -32,6 +34,8 @@ declare interface InitOutput {
   readonly get_metadata: () => [number, number];
   readonly add_memory_event: (a: number, b: number) => void;
   readonly clear_memory_events: () => [number, number];
+  readonly initialize_mcp_server: (a: number, b: number) => any;
+  readonly get_server_info: () => [number, number, number];
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;
   readonly __wbindgen_export_2: WebAssembly.Table;
@@ -40,8 +44,8 @@ declare interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure49_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure71_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure58_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure80_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 
