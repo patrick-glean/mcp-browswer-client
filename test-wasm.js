@@ -154,13 +154,13 @@ async function testWasmLoading() {
             }
         });
         
-        // Wait for uptime to reach 5 seconds
-        console.log('Waiting for uptime to reach 5 seconds...');
+        // Wait for uptime to reach 2 seconds
+        console.log('Waiting for uptime to reach 2 seconds...');
         await page.evaluate(() => {
             return new Promise((resolve) => {
                 let uptime = 0;
                 const checkUptime = () => {
-                    if (uptime >= 5) {
+                    if (uptime >= 2) {
                         resolve();
                     } else {
                         uptime++;
@@ -174,7 +174,7 @@ async function testWasmLoading() {
         console.log('✅ Uptime test completed');
 
         // Close the browser and server, then exit
-        console.log('>>> About to exit after 5 seconds of uptime');
+        console.log('>>> About to exit after 2 seconds of uptime');
         await browser.close();
         server.close();
         process.kill(process.pid, 'SIGTERM');

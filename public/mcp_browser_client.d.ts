@@ -5,8 +5,8 @@ declare namespace wasm_bindgen {
 	export function get_uptime(): bigint;
 	export function increment_uptime(): void;
 	export function get_version(): string;
-	export function health_check(): number;
-	export function handle_message(message: string): number;
+	export function health_check(): Promise<number>;
+	export function handle_message(message: string): Promise<number>;
 	export function get_metadata(): string;
 	export function add_memory_event(text: string): void;
 	export function clear_memory_events(): void;
@@ -21,8 +21,8 @@ declare interface InitOutput {
   readonly get_uptime: () => bigint;
   readonly increment_uptime: () => void;
   readonly get_version: () => [number, number];
-  readonly health_check: () => number;
-  readonly handle_message: (a: number, b: number) => number;
+  readonly health_check: () => any;
+  readonly handle_message: (a: number, b: number) => any;
   readonly get_metadata: () => [number, number, number, number];
   readonly add_memory_event: (a: number, b: number) => [number, number];
   readonly clear_memory_events: () => [number, number];
@@ -31,8 +31,11 @@ declare interface InitOutput {
   readonly __wbindgen_export_2: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+  readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
+  readonly closure30_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure52_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

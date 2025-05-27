@@ -1,2 +1,4 @@
 # These are built-in Python modules, no need to specify versions
 # asyncio and logging are part of Python's standard library 
+aiohttp>=3.8.0
+aiohttp-cors>=0.8.0 

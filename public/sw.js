@@ -40,20 +40,22 @@ async function initializeWasm() {
         debugLog('Initializing WASM module...');
         
         // Fetch the wasm-bindgen JS file
-        const bindingsResponse = await fetch('/mcp_browser_client.js');
+        const bindingsResponse = await self.fetch('/mcp_browser_client.js');
         if (!bindingsResponse.ok) {
             throw new Error(`Failed to fetch WASM bindings: ${bindingsResponse.status} ${bindingsResponse.statusText}`);
         }
         debugLog('WASM bindings fetched successfully');
         const bindingsText = await bindingsResponse.text();
         
-        // Replace 'let wasm_bindgen;' with 'self.wasm_bindgen = undefined;' so the IIFE assigns to self.wasm_bindgen
-        const patchedBindingsText = bindingsText.replace(/^let wasm_bindgen;/, 'self.wasm_bindgen = undefined;');
+        // Replace window references with self
+        const patchedBindingsText = bindingsText
+            .replace(/^let wasm_bindgen;/, 'self.wasm_bindgen = undefined;')
+            .replace(/window\./g, 'self.');
         eval(patchedBindingsText);
         debugLog('WASM bindings loaded via eval');
         
         // Now load the WASM module
-        const wasmResponse = await fetch('/mcp_browser_client_bg.wasm');
+        const wasmResponse = await self.fetch('/mcp_browser_client_bg.wasm');
         if (!wasmResponse.ok) {
             throw new Error(`Failed to fetch WASM module: ${wasmResponse.status} ${wasmResponse.statusText}`);
         }

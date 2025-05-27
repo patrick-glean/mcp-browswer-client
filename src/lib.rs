@@ -1,6 +1,4 @@
 use core::str;
-use std::net::TcpStream;
-use std::io::{Write, Read};
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
@@ -8,6 +6,8 @@ use serde::{Deserialize};
 use serde_json;
 use js_sys::Date;
 use web_sys;
+use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsCast;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
@@ -64,6 +64,9 @@ extern "C" {
     
     #[wasm_bindgen(js_namespace = localStorage)]
     fn setItem(key: &str, value: &str);
+
+    #[wasm_bindgen(js_namespace = self)]
+    fn fetch(url: &str, options: &JsValue) -> js_sys::Promise;
 }
 
 #[wasm_bindgen]
@@ -110,46 +113,36 @@ pub fn get_version() -> String {
 }
 
 #[wasm_bindgen]
-pub fn health_check() -> u32 {
+pub async fn health_check() -> u32 {
     info("WASM health check initiated");
     debug(&format!("WASM Module Version: {}", VERSION));
     
-    // Try to connect to MCP server
+    // Try to connect to MCP server using fetch
     info("Attempting to connect to MCP server at localhost:8081");
-    match TcpStream::connect("localhost:8081") {
-        Ok(mut stream) => {
-            info("Successfully connected to MCP server");
-            debug("Sending HEALTH_CHECK command");
-            match stream.write_all(b"HEALTH_CHECK") {
-                Ok(_) => {
-                    info("Health check request sent successfully");
-                    // Read response
-                    let mut response = String::new();
-                    match stream.read_to_string(&mut response) {
-                        Ok(_) => {
-                            info(&format!("Received health check response: {}", response));
-                            if response.is_empty() {
-                                error("Received empty response from MCP server");
-                                1
-                            } else {
-                                info("Health check successful - received valid response");
-                                0
-                            }
-                        }
-                        Err(e) => {
-                            error(&format!("Error reading health check response: {}", e));
-                            1
-                        }
-                    }
-                }
-                Err(e) => {
-                    error(&format!("Error sending health check command: {}", e));
+    
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &"HEALTH_CHECK".into()).unwrap();
+    
+    let promise = fetch("http://localhost:8081", &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    info("Health check successful - received valid response");
+                    0
+                } else {
+                    error("Health check failed - received error response");
                     1
                 }
+            } else {
+                error("Failed to cast JsValue to web_sys::Response");
+                1
             }
         }
         Err(e) => {
-            error(&format!("Failed to connect to MCP server: {}", e));
+            error(&format!("Failed to connect to MCP server: {:?}", e));
             error("Please ensure the MCP server is running on localhost:8081");
             1
         }
@@ -157,36 +150,33 @@ pub fn health_check() -> u32 {
 }
 
 #[wasm_bindgen]
-pub fn handle_message(message: &str) -> u32 {
+pub async fn handle_message(message: &str) -> u32 {
     info("handle_message called");
     info(&format!("Processing message: {}", message));
-    // Send message to MCP server
-    match TcpStream::connect("localhost:8081") {
-        Ok(mut stream) => {
-            match stream.write_all(message.as_bytes()) {
-                Ok(_) => {
-                    debug("Message sent to MCP server");
-                    // Read response
-                    let mut response = String::new();
-                    match stream.read_to_string(&mut response) {
-                        Ok(_) => {
-                            info(&format!("Server response: {}", response));
-                            0
-                        }
-                        Err(e) => {
-                            error(&format!("Error reading response: {}", e));
-                            1
-                        }
-                    }
-                }
-                Err(e) => {
-                    error(&format!("Error sending message: {}", e));
+    
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &message.into()).unwrap();
+    
+    let promise = fetch("http://localhost:8081", &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    info("Message sent successfully");
+                    0
+                } else {
+                    error("Failed to send message");
                     1
                 }
+            } else {
+                error("Failed to cast JsValue to web_sys::Response");
+                1
             }
         }
         Err(e) => {
-            error(&format!("Failed to connect to MCP server: {}", e));
+            error(&format!("Failed to connect to MCP server: {:?}", e));
             1
         }
     }
