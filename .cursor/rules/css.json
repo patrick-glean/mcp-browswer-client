@@ -1,0 +1,71 @@
+{
+    "sections": [
+        {
+            "name": "Base Styles",
+            "start": "body {",
+            "end": "button.loading::after {",
+            "description": "Core layout and basic element styles"
+        },
+        {
+            "name": "Status Indicators",
+            "start": ".status-bar {",
+            "end": ".status-indicator.unknown {",
+            "description": "Status LED and indicator styles"
+        },
+        {
+            "name": "Controls",
+            "start": ".controls {",
+            "end": ".control-group.sw-controls button.start:hover {",
+            "description": "Button and control group styles"
+        },
+        {
+            "name": "Log Section",
+            "start": ".log-section .control-group {",
+            "end": ".log-message {",
+            "description": "Log display and formatting styles"
+        },
+        {
+            "name": "Memory Controls",
+            "start": ".memory-controls {",
+            "end": ".memory-event-time {",
+            "description": "Memory event display and controls"
+        },
+        {
+            "name": "Debug Toggle",
+            "start": ".debug-toggle input {",
+            "end": "input:checked + .slider:before {",
+            "description": "Debug mode toggle switch styles"
+        },
+        {
+            "name": "MCP Controls",
+            "start": "/* MCP Controls */",
+            "end": ".tool-result-entry.error {",
+            "description": "MCP initialization and tool controls"
+        }
+    ],
+    "colorScheme": {
+        "background": "#1e1e1e",
+        "surface": "#2d2d2d",
+        "surfaceVariant": "#3d3d3d",
+        "border": "#4d4d4d",
+        "text": "#d4d4d4",
+        "textSecondary": "#858585",
+        "accent": "#0e639c",
+        "success": "#4CAF50",
+        "error": "#f44336",
+        "warning": "#ffa726",
+        "info": "#9cdcfe"
+    },
+    "spacing": {
+        "base": "8px",
+        "small": "4px",
+        "medium": "10px",
+        "large": "20px"
+    },
+    "typography": {
+        "body": "14px",
+        "small": "12px",
+        "large": "16px",
+        "monospace": "'Courier New', monospace"
+    }
+} 

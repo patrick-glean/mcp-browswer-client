@@ -1,0 +1,68 @@
+{
+    "styling": {
+        "conventions": [
+            {
+                "name": "External Styles",
+                "description": "Use external styles.css file - NO inline styles",
+                "example": "❌ <div style='color: red'>Bad</div>\n✅ <div class='error-text'>Good</div>",
+                "severity": "error"
+            },
+            {
+                "name": "Dark Theme",
+                "description": "Always use dark theme colors from colorScheme",
+                "example": "❌ background: white;\n✅ background: var(--surface);",
+                "severity": "warning"
+            },
+            {
+                "name": "Status Indicators",
+                "description": "Use LED-style indicators (●) with appropriate colors",
+                "example": "❌ <span class='status'>Healthy</span>\n✅ <span class='status-indicator healthy'>●</span>",
+                "severity": "warning"
+            }
+        ],
+        "colorUsage": {
+            "background": "Use for main background (#1e1e1e)",
+            "surface": "Use for card/container backgrounds (#2d2d2d)",
+            "surfaceVariant": "Use for nested elements (#3d3d3d)",
+            "border": "Use for borders and dividers (#4d4d4d)",
+            "text": "Use for primary text (#d4d4d4)",
+            "textSecondary": "Use for secondary text (#858585)",
+            "accent": "Use for primary actions (#0e639c)",
+            "success": "Use for success states (#4CAF50)",
+            "error": "Use for error states (#f44336)",
+            "warning": "Use for warning states (#ffa726)",
+            "info": "Use for info states (#9cdcfe)"
+        },
+        "statusIndicators": {
+            "healthy": {
+                "color": "#4CAF50",
+                "style": "●",
+                "description": "Green LED with glow effect"
+            },
+            "unhealthy": {
+                "color": "#f44336",
+                "style": "●",
+                "description": "Red LED with glow effect"
+            },
+            "unknown": {
+                "color": "#666",
+                "style": "●",
+                "description": "Gray LED without glow"
+            }
+        },
+        "spacing": {
+            "description": "Use consistent spacing from spacing system",
+            "base": "8px - Default spacing",
+            "small": "4px - Tight spacing",
+            "medium": "10px - Medium spacing",
+            "large": "20px - Wide spacing"
+        },
+        "typography": {
+            "description": "Use consistent typography from typography system",
+            "body": "14px - Default text",
+            "small": "12px - Secondary text",
+            "large": "16px - Headers",
+            "monospace": "'Courier New' - Code and logs"
+        }
+    }
+} 

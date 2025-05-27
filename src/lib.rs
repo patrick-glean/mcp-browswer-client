@@ -8,11 +8,31 @@ use js_sys::Date;
 use web_sys;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen::JsCast;
+use std::sync::LazyLock;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
+const DEFAULT_SERVER_URL: &str = "http://localhost:8081";
 
 static UPTIME: AtomicU64 = AtomicU64::new(0);
+static SERVER_URL: LazyLock<std::sync::atomic::AtomicPtr<String>> = LazyLock::new(|| {
+    std::sync::atomic::AtomicPtr::new(Box::into_raw(Box::new(String::from(DEFAULT_SERVER_URL))))
+});
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonRpcResponse {
+    jsonrpc: String,
+    id: Option<u64>,
+    result: Option<serde_json::Value>,
+    error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonRpcError {
+    code: i32,
+    message: String,
+    data: Option<serde_json::Value>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -113,24 +133,56 @@ pub fn get_version() -> String {
 }
 
 #[wasm_bindgen]
+pub fn set_server_url(url: &str) {
+    let new_url = Box::new(String::from(url));
+    let new_url_ptr = Box::into_raw(new_url);
+    let old_url_ptr = SERVER_URL.swap(new_url_ptr, Ordering::SeqCst);
+    
+    // Convert the old pointer back to a String for logging
+    let old_url = unsafe { Box::from_raw(old_url_ptr) };
+    info(&format!("Updated server URL from {} to {}", old_url, url));
+    
+    // Don't drop the old_url since we're in a WASM context
+    std::mem::forget(old_url);
+}
+
+#[wasm_bindgen]
+pub fn get_server_url() -> String {
+    let url_ptr = SERVER_URL.load(Ordering::SeqCst);
+    let url = unsafe { &*url_ptr };
+    url.clone()
+}
+
+#[wasm_bindgen]
 pub async fn health_check() -> u32 {
     info("WASM health check initiated");
     debug(&format!("WASM Module Version: {}", VERSION));
     
-    // Try to connect to MCP server using fetch
-    info("Attempting to connect to MCP server at localhost:8081");
+    // Basic health check - just verify the module is loaded and functioning
+    // Return 0 for healthy (module is loaded and working)
+    info("WASM module health check passed");
+    0
+}
+
+// Add a separate MCP server health check
+#[wasm_bindgen]
+pub async fn check_mcp_server() -> u32 {
+    info("MCP server health check initiated");
+    debug(&format!("WASM Module Version: {}", VERSION));
+    
+    let server_url = get_server_url();
+    info(&format!("Attempting to connect to MCP server at {}", server_url));
     
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
     js_sys::Reflect::set(&options, &"body".into(), &"HEALTH_CHECK".into()).unwrap();
     
-    let promise = fetch("http://localhost:8081", &options);
+    let promise = fetch(&server_url, &options);
     match JsFuture::from(promise).await {
         Ok(response) => {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
-                    // Try to parse the response body
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
                             let json_obj = json.dyn_ref::<js_sys::Object>().unwrap();
@@ -138,20 +190,20 @@ pub async fn health_check() -> u32 {
                             let status_str = status.as_string().unwrap_or_default();
                             
                             if status_str == "healthy" {
-                                info("Health check successful - server is healthy");
+                                info("MCP server health check successful - server is healthy");
                                 0
                             } else {
-                                error("Health check failed - server reported unhealthy status");
+                                error("MCP server health check failed - server reported unhealthy status");
                                 1
                             }
                         }
                         Err(e) => {
-                            error(&format!("Failed to parse health check response: {:?}", e));
+                            error(&format!("Failed to parse MCP server health check response: {:?}", e));
                             1
                         }
                     }
                 } else {
-                    error("Health check failed - received error response");
+                    error("MCP server health check failed - received error response");
                     1
                 }
             } else {
@@ -161,98 +213,86 @@ pub async fn health_check() -> u32 {
         }
         Err(e) => {
             error(&format!("Failed to connect to MCP server: {:?}", e));
-            error("Please ensure the MCP server is running on localhost:8081");
+            error(&format!("Please ensure the MCP server is running at {}", server_url));
             1
         }
     }
 }
 
 #[wasm_bindgen]
-pub async fn handle_message(message: &str) -> u32 {
+pub async fn handle_message(message: &str) -> Result<String, String> {
     info("handle_message called");
     info(&format!("Processing message: {}", message));
     
+    let server_url = get_server_url();
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
     js_sys::Reflect::set(&options, &"body".into(), &message.into()).unwrap();
     
-    let promise = fetch("http://localhost:8081", &options);
+    let promise = fetch(&server_url, &options);
     match JsFuture::from(promise).await {
         Ok(response) => {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
-                    info("Message sent successfully");
-                    0
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            info(&format!("Received response: {}", json_str));
+                            Ok(json_str)
+                        }
+                        Err(e) => {
+                            let error_msg = format!("Failed to parse response: {:?}", e);
+                            error(&error_msg);
+                            Err(error_msg)
+                        }
+                    }
                 } else {
-                    error("Failed to send message");
-                    1
+                    let error_msg = "Failed to send message - received error response".to_string();
+                    error(&error_msg);
+                    Err(error_msg)
                 }
             } else {
-                error("Failed to cast JsValue to web_sys::Response");
-                1
+                let error_msg = "Failed to cast JsValue to web_sys::Response".to_string();
+                error(&error_msg);
+                Err(error_msg)
             }
         }
         Err(e) => {
-            error(&format!("Failed to connect to MCP server: {:?}", e));
-            1
+            let error_msg = format!("Failed to connect to MCP server: {:?}", e);
+            error(&error_msg);
+            Err(error_msg)
         }
     }
 }
 
 #[wasm_bindgen]
-pub fn get_metadata() -> Result<String, String> {
-    let metadata = match getItem("mcp_module_metadata") {
-        Some(json) => {
-            match serde_json::from_str::<ModuleMetadata>(&json) {
-                Ok(mut meta) => {
-                    // Update last health check time
-                    meta.last_health_check = get_timestamp();
-                    meta
-                },
-                Err(_) => ModuleMetadata {
-                    version: METADATA_VERSION.to_string(),
-                    memory_events: Vec::new(),
-                    last_health_check: get_timestamp(),
-                }
-            }
-        },
-        None => ModuleMetadata {
-            version: METADATA_VERSION.to_string(),
-            memory_events: Vec::new(),
-            last_health_check: get_timestamp(),
-        }
+pub fn get_metadata() -> String {
+    let metadata = ModuleMetadata {
+        version: METADATA_VERSION.to_string(),
+        memory_events: Vec::new(),
+        last_health_check: get_timestamp(),
     };
     
-    serde_json::to_string(&metadata).map_err(|e| e.to_string())
+    serde_json::to_string(&metadata).unwrap_or_default()
 }
 
 #[wasm_bindgen]
-pub fn add_memory_event(text: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window found"))?;
+pub fn add_memory_event(text: &str) {
+    let event = MemoryEvent {
+        timestamp: get_timestamp(),
+        text: text.to_string(),
+    };
     
-    // Try to get localStorage, but don't fail if it's not available
-    if let Ok(Some(local_storage)) = window.local_storage() {
-        let events = local_storage.get_item("memory_events")
-            .unwrap_or_else(|_| None)
-            .unwrap_or_else(|| "[]".to_string());
-        
-        let mut events: Vec<MemoryEvent> = serde_json::from_str(&events)
-            .unwrap_or_else(|_| Vec::new());
-        
-        events.push(MemoryEvent {
-            text: text.to_string(),
-            timestamp: js_sys::Date::now() as u64,
-        });
-        
-        let events_str = serde_json::to_string(&events)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize events: {}", e)))?;
-        
-        local_storage.set_item("memory_events", &events_str)
-            .map_err(|e| JsValue::from_str(&format!("Failed to save events: {:?}", e)))?;
-    }
+    let mut metadata: ModuleMetadata = serde_json::from_str(&get_metadata()).unwrap_or(ModuleMetadata {
+        version: METADATA_VERSION.to_string(),
+        memory_events: Vec::new(),
+        last_health_check: get_timestamp(),
+    });
     
-    Ok(())
+    metadata.memory_events.push(event);
+    let json = serde_json::to_string(&metadata).unwrap_or_default();
+    setItem("mcp_module_metadata", &json);
 }
 
 #[wasm_bindgen]

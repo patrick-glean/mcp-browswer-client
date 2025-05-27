@@ -64,6 +64,37 @@
                 </div>
                 <div id="memoryEvents" class="memory-events"></div>
             </div>
+
+            <div class="control-group">
+                <h3>MCP Initialization</h3>
+                <div class="mcp-controls">
+                    <div class="server-config">
+                        <label for="mcpServerUrl">MCP Server URL:</label>
+                        <input type="text" id="mcpServerUrl" value="http://localhost:8081">
+                        <button id="updateServerUrl">Update</button>
+                    </div>
+                    
+                    <div class="init-steps">
+                        <div class="step">
+                            <button id="initProtocol">1. Initialize Protocol</button>
+                            <span id="initStatus" class="status-indicator">●</span>
+                        </div>
+                        <div class="step">
+                            <button id="listTools">2. List Tools</button>
+                            <span id="toolsStatus" class="status-indicator">●</span>
+                        </div>
+                        <div class="step">
+                            <button id="registerTools">3. Register Tools</button>
+                            <span id="registerStatus" class="status-indicator">●</span>
+                        </div>
+                    </div>
+                    
+                    <div class="tools-display">
+                        <h4>Available Tools</h4>
+                        <div id="toolsList"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="log-section">
@@ -121,7 +152,10 @@
                 this.uptimeInterval = setInterval(() => {
                     const uptime = Math.floor((Date.now() - this.startTime) / 1000);
                     if (this.swUptime) {
-                        this.swUptime.textContent = `${uptime}s`;
+                        const hours = Math.floor(uptime / 3600);
+                        const minutes = Math.floor((uptime % 3600) / 60);
+                        const seconds = uptime % 60;
+                        this.swUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                     }
                 }, 1000);
             }
@@ -132,10 +166,10 @@
                     this.uptimeInterval = null;
                 }
                 if (this.swUptime) {
-                    this.swUptime.textContent = '0s';
+                    this.swUptime.textContent = '00:00:00';
                 }
                 if (this.wasmUptime) {
-                    this.wasmUptime.textContent = '0s';
+                    this.wasmUptime.textContent = '00:00:00';
                 }
             }
 
@@ -150,7 +184,10 @@
                     if (this.wasmStartTime) {
                         const uptime = Math.floor((Date.now() - this.wasmStartTime) / 1000);
                         if (this.wasmUptime) {
-                            this.wasmUptime.textContent = `${uptime}s`;
+                            const hours = Math.floor(uptime / 3600);
+                            const minutes = Math.floor((uptime % 3600) / 60);
+                            const seconds = uptime % 60;
+                            this.wasmUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                         }
                     }
                 }, 1000);
@@ -162,7 +199,7 @@
                     this.wasmUptimeInterval = null;
                 }
                 if (this.wasmUptime) {
-                    this.wasmUptime.textContent = '0s';
+                    this.wasmUptime.textContent = '00:00:00';
                 }
                 this.wasmStartTime = null;
             }
@@ -367,49 +404,63 @@
             }
 
             handleServiceWorkerMessage(event) {
-                const data = event.data;
+                const message = event.data;
                 const isDebugMode = localStorage.getItem('debugMode') === 'true';
                 
                 // Always log non-DEBUG messages to console
-                if (data.type !== 'log' || data.content.level !== 'DEBUG') {
-                    console.log('Received message from service worker:', data);
+                if (message.type !== 'log' || message.content.level !== 'DEBUG') {
+                    console.log('Received message from service worker:', message);
                 } else if (isDebugMode) {
                     // Only log DEBUG messages if debug mode is enabled
-                    console.log('Received message from service worker:', data);
+                    console.log('Received message from service worker:', message);
                 }
                 
-                // Always show non-DEBUG messages in the UI
-                if (data.type === 'log') {
-                    if (data.content.level !== 'DEBUG' || isDebugMode) {
-                        this.log(data.content);
-                    }
-                } else if (data.type === 'wasm_status') {
-                    console.log('Received WASM status:', data);
-                    this.updateWasmStatus(data.healthy);
-                    if (data.uptime) {
-                        // Set or adjust our counter based on reported uptime
-                        this.wasmStartTime = Date.now() - (data.uptime * 1000);
-                        // Ensure counter is running
-                        if (!this.wasmUptimeInterval) {
-                            this.startWasmUptimeCounter();
+                // Handle JSON-RPC messages
+                if (message.jsonrpc === '2.0') {
+                    if (message.method === 'wasm_status') {
+                        const { status, metadata } = message.params;
+                        this.updateWasmStatus(status.healthy);
+                        if (status.uptime) {
+                            this.updateWasmUptime(status.uptime);
                         }
-                    }
-                    if (data.metadata) {
-                        // Update version display
-                        const versionElement = document.getElementById('metadataVersion');
-                        if (versionElement && data.metadata.version) {
-                            versionElement.textContent = data.metadata.version;
+                        if (metadata) {
+                            this.updateMetadataDisplay(metadata);
                         }
-                        // Log the check result
+                        // Log the status update
                         this.log({
                             level: 'INFO',
-                            message: `WASM check result: ${data.healthy ? 'healthy' : 'unhealthy'} (uptime: ${data.uptime}s)`,
-                            timestamp: data.metadata.timestamp
+                            message: `WASM status: ${status.healthy ? 'healthy' : 'unhealthy'} (uptime: ${formatUptime(status.uptime)})`,
+                            timestamp: new Date().toISOString()
                         });
+                    } else if (message.result) {
+                        // Handle successful JSON-RPC response
+                        if (message.result.status) {
+                            this.updateMcpStatus(message.result.status === 'healthy');
+                        }
+                    } else if (message.error) {
+                        // Handle JSON-RPC error
+                        console.error('MCP error:', message.error);
+                        this.updateMcpStatus(false);
                     }
-                } else if (data.type === 'mcp_status') {
-                    this.updateMcpStatus(data.healthy);
-                    this.lastMcpCheck = Date.now();
+                    return;
+                }
+                
+                // Handle legacy messages
+                switch (message.type) {
+                    case 'log':
+                        this.log(message.content);
+                        break;
+                    case 'mcp_status':
+                        this.updateMcpStatus(message.healthy);
+                        break;
+                    case 'wasm_status':
+                        this.updateWasmStatus(message.healthy);
+                        break;
+                    case 'uptime':
+                        this.updateWasmUptime(message.uptime);
+                        break;
+                    default:
+                        console.warn('Unknown message type:', message.type);
                 }
             }
 
@@ -417,6 +468,7 @@
                 if (this.swStatus) {
                     this.swStatus.classList.remove('healthy', 'unhealthy', 'unknown');
                     this.swStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.swStatus.textContent = '●';
                 }
             }
 
@@ -424,6 +476,7 @@
                 if (this.wasmStatus) {
                     this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
                     this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.wasmStatus.textContent = '●';
                 }
             }
 
@@ -431,6 +484,7 @@
                 if (this.mcpStatus) {
                     this.mcpStatus.classList.remove('healthy', 'unhealthy', 'unknown');
                     this.mcpStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.mcpStatus.textContent = '●';
                 }
             }
 
@@ -478,10 +532,17 @@
                 this.logContainer.appendChild(entry);
                 this.logContainer.scrollTop = this.logContainer.scrollHeight;
             }
+
+            updateWasmUptime(uptime) {
+                const uptimeElement = document.getElementById('wasm-uptime');
+                if (uptimeElement) {
+                    uptimeElement.textContent = formatUptime(uptime);
+                }
+            }
         }
 
         // Initialize the chat shell
-        new ChatShell();
+        const chatShell = new ChatShell();
 
         // Add memory event
         document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
@@ -489,7 +550,7 @@
             if (text) {
                 navigator.serviceWorker.controller?.postMessage({
                     type: 'add_memory_event',
-                    data: { text }
+                    text: text
                 });
                 document.getElementById('memoryEventText').value = '';
             }
@@ -502,10 +563,32 @@
             });
         });
 
-        document.getElementById('debugModeToggle').addEventListener('change', function() {
-            localStorage.setItem('debugMode', this.checked);
-            navigator.serviceWorker.controller.postMessage({ type: 'reload_wasm' });
-        });
+        // Debug mode toggle
+        const debugModeToggle = document.getElementById('debugModeToggle');
+        if (debugModeToggle) {
+            debugModeToggle.addEventListener('change', function() {
+                localStorage.setItem('debugMode', this.checked);
+                navigator.serviceWorker.controller?.postMessage({ 
+                    type: 'set-debug-mode',
+                    enabled: this.checked
+                });
+            });
+        }
+
+        // Format uptime for display
+        function formatUptime(uptime) {
+            if (uptime === null || uptime === undefined) return '00:00:00';
+            // Convert BigInt to Number if needed
+            const uptimeNum = typeof uptime === 'bigint' ? Number(uptime) : uptime;
+            const hours = Math.floor(uptimeNum / 3600);
+            const minutes = Math.floor((uptimeNum % 3600) / 60);
+            const seconds = uptimeNum % 60;
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
     </script>
+
+    <style>
+        /* Remove all inline styles as they are now in styles.css */
+    </style>
 </body>
 </html>
