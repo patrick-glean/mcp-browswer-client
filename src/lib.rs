@@ -7,6 +7,7 @@ use wasm_bindgen::prelude::*;
 use serde::{Deserialize};
 use serde_json;
 use js_sys::Date;
+use web_sys;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
@@ -218,39 +219,30 @@ pub fn get_metadata() -> Result<String, String> {
 }
 
 #[wasm_bindgen]
-pub fn add_memory_event(text: &str) -> Result<(), String> {
-    let mut metadata = match getItem("mcp_module_metadata") {
-        Some(json) => serde_json::from_str::<ModuleMetadata>(&json)
-            .map_err(|e| e.to_string())?,
-        None => ModuleMetadata {
-            version: METADATA_VERSION.to_string(),
-            memory_events: Vec::new(),
-            last_health_check: get_timestamp(),
-        }
-    };
+pub fn add_memory_event(text: &str) -> Result<(), JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window found"))?;
     
-    let event = MemoryEvent {
-        timestamp: get_timestamp(),
-        text: text.to_string(),
-    };
-    
-    metadata.memory_events.push(event);
-    
-    // Keep only the last 1000 events
-    if metadata.memory_events.len() > 1000 {
-        metadata.memory_events = metadata.memory_events.into_iter()
-            .rev()
-            .take(1000)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+    // Try to get localStorage, but don't fail if it's not available
+    if let Ok(Some(local_storage)) = window.local_storage() {
+        let events = local_storage.get_item("memory_events")
+            .unwrap_or_else(|_| None)
+            .unwrap_or_else(|| "[]".to_string());
+        
+        let mut events: Vec<MemoryEvent> = serde_json::from_str(&events)
+            .unwrap_or_else(|_| Vec::new());
+        
+        events.push(MemoryEvent {
+            text: text.to_string(),
+            timestamp: js_sys::Date::now() as u64,
+        });
+        
+        let events_str = serde_json::to_string(&events)
+            .map_err(|e| JsValue::from_str(&format!("Failed to serialize events: {}", e)))?;
+        
+        local_storage.set_item("memory_events", &events_str)
+            .map_err(|e| JsValue::from_str(&format!("Failed to save events: {:?}", e)))?;
     }
     
-    let json = serde_json::to_string(&metadata)
-        .map_err(|e| e.to_string())?;
-    
-    setItem("mcp_module_metadata", &json);
     Ok(())
 }
 

@@ -14,12 +14,30 @@
             color: #d4d4d4;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: #2d2d2d;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        @media (min-width: 1200px) {
+            .container {
+                grid-template-columns: 1fr 1fr;
+            }
+            .status-bar {
+                grid-column: 1 / -1;
+            }
+            .log-section {
+                grid-column: 2;
+                grid-row: 2 / span 4;
+            }
+            .controls-section {
+                grid-column: 1;
+            }
         }
         .status-bar {
             display: flex;
@@ -28,6 +46,7 @@
             padding: 10px;
             background: #3d3d3d;
             border-radius: 4px;
+            flex-wrap: wrap;
         }
         .status-item {
             display: flex;
@@ -74,6 +93,7 @@
             transition: all 0.2s ease;
             position: relative;
             top: 0;
+            min-width: 100px;
         }
         button:hover {
             background: #1177bb;
@@ -87,9 +107,32 @@
             cursor: not-allowed;
             top: 0;
             box-shadow: none;
+            opacity: 0.7;
+        }
+        button.loading {
+            position: relative;
+            color: transparent;
+        }
+        button.loading::after {
+            content: "";
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin: -8px 0 0 -8px;
+            border: 2px solid #fff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: button-loading-spinner 0.6s linear infinite;
+        }
+        @keyframes button-loading-spinner {
+            from { transform: rotate(0turn); }
+            to { transform: rotate(1turn); }
         }
         .log-container {
-            height: 400px;
+            height: calc(100vh - 300px);
+            min-height: 400px;
             overflow-y: auto;
             background: #1e1e1e;
             color: #d4d4d4;
@@ -196,6 +239,46 @@
             font-size: 0.9em;
             margin-right: 10px;
         }
+        .debug-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        
+        .debug-toggle input {
+            display: none;
+        }
+        
+        .slider {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+            background-color: #ccc;
+            border-radius: 20px;
+            transition: .4s;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            border-radius: 50%;
+            transition: .4s;
+        }
+        
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
     </style>
 </head>
 <body>
@@ -221,46 +304,52 @@
             </div>
         </div>
         
-        <div class="control-group sw-controls">
-            <div>
-                <h3>Service Worker Controls</h3>
-                <button id="stop-sw">Stop Service Worker</button>
-                <button id="start-sw" class="start">Start Service Worker</button>
+        <div class="controls-section">
+            <div class="control-group sw-controls">
+                <div>
+                    <h3>Service Worker Controls</h3>
+                    <button id="stop-sw">Stop Service Worker</button>
+                    <button id="start-sw" class="start">Start Service Worker</button>
+                </div>
+            </div>
+
+            <div class="control-group wasm-controls">
+                <div>
+                    <h3>WASM Module Controls</h3>
+                    <button id="unload-wasm">Unload WASM</button>
+                    <button id="reload-wasm" class="reload">Reload WASM</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div>
+                    <h3>Health Checks</h3>
+                    <button id="check-wasm">Check WASM</button>
+                    <button id="check-mcp">Check MCP</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>Memory Events</h3>
+                <div class="memory-controls">
+                    <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
+                    <button id="addMemoryEvent" class="control-button">Add Event</button>
+                    <button id="clearMemoryEvents" class="control-button">Clear Events</button>
+                </div>
+                <div id="memoryEvents" class="memory-events"></div>
             </div>
         </div>
 
-        <div class="control-group wasm-controls">
-            <div>
-                <h3>WASM Module Controls</h3>
-                <button id="unload-wasm">Unload WASM</button>
-                <button id="reload-wasm" class="reload">Reload WASM</button>
+        <div class="log-section">
+            <div class="control-group">
+                <h3>Logs</h3>
+                <label class="debug-toggle">
+                    <input type="checkbox" id="debugModeToggle">
+                    <span class="slider"></span>
+                    Debug Mode
+                </label>
+                <div class="log-container" id="log-container"></div>
             </div>
-        </div>
-
-        <div class="control-group">
-            <div>
-                <h3>Health Checks</h3>
-                <button id="check-wasm">Check WASM</button>
-                <button id="check-mcp">Check MCP</button>
-            </div>
-        </div>
-
-        <div class="control-group">
-            <h3>Memory Events</h3>
-            <div class="memory-controls">
-                <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
-                <button id="addMemoryEvent" class="control-button">Add Event</button>
-                <button id="clearMemoryEvents" class="control-button">Clear Events</button>
-            </div>
-            <div id="memoryEvents" class="memory-events"></div>
-        </div>
-
-        <div class="control-group">
-            <h3>Logs</h3>
-            <label>
-                <input type="checkbox" id="debugModeToggle"> Debug Mode
-            </label>
-            <div class="log-container" id="log-container"></div>
         </div>
     </div>
 
@@ -343,9 +432,19 @@
                 Object.entries(buttons).forEach(([id, handler]) => {
                     const button = document.getElementById(id);
                     if (button) {
-                        button.addEventListener('click', () => {
+                        button.addEventListener('click', async () => {
+                            if (button.disabled) return;
+                            
                             console.log(`Button clicked: ${id}`);
-                            handler();
+                            button.disabled = true;
+                            button.classList.add('loading');
+                            
+                            try {
+                                await handler();
+                            } finally {
+                                button.disabled = false;
+                                button.classList.remove('loading');
+                            }
                         });
                     }
                 });
@@ -385,10 +484,10 @@
                 }
             }
 
-            unloadWasm() {
+            async unloadWasm() {
                 if (this.serviceWorker) {
                     console.log('Unloading WASM module...');
-                    this.serviceWorker.postMessage({ type: 'unload_wasm' });
+                    await this.serviceWorker.postMessage({ type: 'unload_wasm' });
                     this.wasmStatus.classList.remove('healthy', 'unhealthy');
                     this.wasmStatus.classList.add('unknown');
                     this.wasmUptime.textContent = '0s';
@@ -396,34 +495,45 @@
                 }
             }
 
-            reloadWasm() {
+            async reloadWasm() {
                 if (this.serviceWorker) {
                     console.log('Reloading WASM module...');
-                    this.serviceWorker.postMessage({ type: 'reload_wasm' });
+                    await this.serviceWorker.postMessage({ type: 'reload_wasm' });
                     this.log('Reloading WASM module...');
                 }
             }
 
-            checkWasm() {
+            async checkWasm() {
                 if (this.serviceWorker) {
                     console.log('Checking WASM module...');
-                    this.serviceWorker.postMessage({ type: 'check_wasm' });
+                    await this.serviceWorker.postMessage({ type: 'check_wasm' });
                 }
             }
 
-            checkMcp() {
+            async checkMcp() {
                 if (this.serviceWorker) {
                     console.log('Checking MCP server...');
-                    this.serviceWorker.postMessage({ type: 'health_check' });
+                    await this.serviceWorker.postMessage({ type: 'health_check' });
                 }
             }
 
             handleServiceWorkerMessage(event) {
                 const data = event.data;
-                console.log('Received message from service worker:', data);
+                const isDebugMode = localStorage.getItem('debugMode') === 'true';
                 
+                // Always log non-DEBUG messages to console
+                if (data.type !== 'log' || data.content.level !== 'DEBUG') {
+                    console.log('Received message from service worker:', data);
+                } else if (isDebugMode) {
+                    // Only log DEBUG messages if debug mode is enabled
+                    console.log('Received message from service worker:', data);
+                }
+                
+                // Always show non-DEBUG messages in the UI
                 if (data.type === 'log') {
-                    this.log(data.content);
+                    if (data.content.level !== 'DEBUG' || isDebugMode) {
+                        this.log(data.content);
+                    }
                 } else if (data.type === 'wasm_status') {
                     this.updateWasmStatus(data.healthy);
                     if (data.metadata) {
@@ -433,6 +543,10 @@
                     this.updateMcpStatus(data.healthy);
                 } else if (data.type === 'uptime') {
                     this.wasmUptime.textContent = `${data.uptime}s`;
+                    // Only log uptime to console if debug mode is enabled
+                    if (isDebugMode) {
+                        console.log(`WASM uptime: ${data.uptime} seconds`);
+                    }
                 }
             }
 

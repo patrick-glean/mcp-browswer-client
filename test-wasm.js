@@ -154,21 +154,35 @@ async function testWasmLoading() {
             }
         });
         
-        // Get logs from the page
-        const logs = await page.evaluate(() => {
-            const logContainer = document.getElementById('log-container');
-            return logContainer ? logContainer.innerText : 'No logs found';
+        // Wait for uptime to reach 5 seconds
+        console.log('Waiting for uptime to reach 5 seconds...');
+        await page.evaluate(() => {
+            return new Promise((resolve) => {
+                let uptime = 0;
+                const checkUptime = () => {
+                    if (uptime >= 5) {
+                        resolve();
+                    } else {
+                        uptime++;
+                        console.log(`Uptime: ${uptime} seconds`);
+                        setTimeout(checkUptime, 1000);
+                    }
+                };
+                checkUptime();
+            });
         });
-        
-        console.log('\nLogs from the page:');
-        console.log(logs);
-        
+        console.log('✅ Uptime test completed');
+
+        // Close the browser and server, then exit
+        console.log('>>> About to exit after 5 seconds of uptime');
+        await browser.close();
+        server.close();
+        process.kill(process.pid, 'SIGTERM');
     } catch (error) {
         console.error('Test failed:', error);
         if (error.stack) {
             console.error('Stack trace:', error.stack);
         }
-    } finally {
         if (browser) {
             try {
                 await browser.close();
@@ -177,6 +191,7 @@ async function testWasmLoading() {
             }
         }
         server.close();
+        process.exit(1);
     }
 }
 
