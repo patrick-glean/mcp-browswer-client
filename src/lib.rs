@@ -87,23 +87,23 @@ pub fn increment_uptime() {
     // info(&format!("WASM uptime: {} seconds", uptime));
 }
 
-fn log_with_level(level: LogLevel, message: &str) {
-    let entry = LogEntry::new(level, message.to_string());
+fn log_with_level(level: LogLevel, message: String) {
+    let entry = LogEntry::new(level, message);
     if let Ok(json) = serde_json::to_string(&entry) {
-        log(&json);
+        log(&format!("[WASM] {}", json));
     }
 }
 
 fn debug(message: &str) {
-    log_with_level(LogLevel::DEBUG, message);
+    log_with_level(LogLevel::DEBUG, format!("[DEBUG] {}", message));
 }
 
 fn info(message: &str) {
-    log_with_level(LogLevel::INFO, message);
+    log_with_level(LogLevel::INFO, format!("[INFO] {}", message));
 }
 
 fn error(message: &str) {
-    log_with_level(LogLevel::ERROR, message);
+    log_with_level(LogLevel::ERROR, format!("[ERROR] {}", message));
 }
 
 #[wasm_bindgen]
@@ -130,8 +130,26 @@ pub async fn health_check() -> u32 {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
-                    info("Health check successful - received valid response");
-                    0
+                    // Try to parse the response body
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_obj = json.dyn_ref::<js_sys::Object>().unwrap();
+                            let status = js_sys::Reflect::get(&json_obj, &"status".into()).unwrap();
+                            let status_str = status.as_string().unwrap_or_default();
+                            
+                            if status_str == "healthy" {
+                                info("Health check successful - server is healthy");
+                                0
+                            } else {
+                                error("Health check failed - server reported unhealthy status");
+                                1
+                            }
+                        }
+                        Err(e) => {
+                            error(&format!("Failed to parse health check response: {:?}", e));
+                            1
+                        }
+                    }
                 } else {
                     error("Health check failed - received error response");
                     1

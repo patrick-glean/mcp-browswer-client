@@ -16,8 +16,8 @@ function debugLog(message, data = null) {
     )) : null;
     
     const logMessage = safeData 
-        ? `[${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
-        : `[${timestamp}] ${message}`;
+        ? `[SW] [${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
+        : `[SW] [${timestamp}] ${message}`;
     
     // Always log errors and important messages
     const isImportant = message.includes('WASM') || message.includes('Error') || message.includes('Failed');
@@ -307,20 +307,23 @@ async function checkMcp() {
 
     try {
         debugLog("Executing WASM health check...");
-        const result = wasmInstance.health_check();
+        const result = await wasmInstance.health_check();
         debugLog("Health check result", { result });
+        
+        // Parse the result to determine health status
+        const isHealthy = result === 0; // 0 means healthy in our WASM module
         
         broadcastToClients({
             type: 'log',
             content: {
                 level: 'INFO',
-                message: `MCP server health check result: ${result === 0 ? 'healthy' : 'unhealthy'}`,
+                message: `MCP server health check result: ${isHealthy ? 'healthy' : 'unhealthy'}`,
                 timestamp: new Date().toISOString()
             }
         });
         broadcastToClients({
             type: 'mcp_status',
-            healthy: result === 0
+            healthy: isHealthy
         });
     } catch (error) {
         debugLog("Health check failed", { 
