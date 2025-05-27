@@ -61,10 +61,7 @@ async function initializeWasm() {
         const wasmBytes = await wasmResponse.arrayBuffer();
         
         // Initialize WASM module with new format
-        await self.wasm_bindgen({
-            wasm: wasmBytes,
-            init: true
-        });
+        await self.wasm_bindgen(wasmBytes);
         debugLog('WASM module instantiated successfully');
         
         // All exported functions are now on self.wasm_bindgen
@@ -172,11 +169,15 @@ function startUptimeCounter() {
                     lastLogTime = currentTime;
                 }
                 
-                // Always update the UI counter
-                broadcastToClients({
-                    type: 'uptime',
-                    uptime: Number(uptime)
-                });
+                // Update UI counter based on mode:
+                // - Debug mode: every second
+                // - Normal mode: every minute
+                if (isDebugMode || currentTime - lastLogTime >= 60000) {
+                    broadcastToClients({
+                        type: 'uptime',
+                        uptime: Number(uptime)
+                    });
+                }
             } catch (error) {
                 debugLog("Failed to update uptime", { 
                     error: error.message,

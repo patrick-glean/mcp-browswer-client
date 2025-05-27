@@ -79,8 +79,9 @@ pub fn get_uptime() -> u64 {
 #[wasm_bindgen]
 pub fn increment_uptime() {
     UPTIME.fetch_add(1, Ordering::Relaxed);
-    let uptime = UPTIME.load(Ordering::Relaxed);
-    info(&format!("WASM uptime: {} seconds", uptime));
+    // This was a per second uptime that should be enabled if in debug.
+    // let uptime = UPTIME.load(Ordering::Relaxed);
+    // info(&format!("WASM uptime: {} seconds", uptime));
 }
 
 fn log_with_level(level: LogLevel, message: &str) {
