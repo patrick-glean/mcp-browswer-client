@@ -283,7 +283,7 @@ let wasm_bindgen;
 
     /**
      * @param {string} message
-     * @returns {Promise<string>}
+     * @returns {Promise<any>}
      */
     __exports.handle_message = function(message) {
         const ptr0 = passStringToWasm0(message, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -331,11 +331,11 @@ let wasm_bindgen;
     };
 
     function __wbg_adapter_24(arg0, arg1, arg2) {
-        wasm.closure37_externref_shim(arg0, arg1, arg2);
+        wasm.closure49_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_65(arg0, arg1, arg2, arg3) {
-        wasm.closure59_externref_shim(arg0, arg1, arg2, arg3);
+    function __wbg_adapter_63(arg0, arg1, arg2, arg3) {
+        wasm.closure71_externref_shim(arg0, arg1, arg2, arg3);
     }
 
     async function __wbg_load(module, imports) {
@@ -384,20 +384,6 @@ let wasm_bindgen;
             const ret = self.fetch(getStringFromWasm0(arg0, arg1), arg2);
             return ret;
         };
-        imports.wbg.__wbg_get_67b2ba62fc30de12 = function() { return handleError(function (arg0, arg1) {
-            const ret = Reflect.get(arg0, arg1);
-            return ret;
-        }, arguments) };
-        imports.wbg.__wbg_instanceof_Object_7f2dcef8f78644a4 = function(arg0) {
-            let result;
-            try {
-                result = arg0 instanceof Object;
-            } catch (_) {
-                result = false;
-            }
-            const ret = result;
-            return ret;
-        };
         imports.wbg.__wbg_instanceof_Response_f2cc20d9f7dfd644 = function(arg0) {
             let result;
             try {
@@ -422,7 +408,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_65(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_63(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -504,8 +490,8 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper142 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 38, __wbg_adapter_24);
+        imports.wbg.__wbindgen_closure_wrapper187 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 50, __wbg_adapter_24);
             return ret;
         };
         imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize};
-use serde_json;
+use serde_json::{self, json};
 use js_sys::Date;
 use web_sys;
 use wasm_bindgen_futures::JsFuture;
@@ -18,6 +18,14 @@ static UPTIME: AtomicU64 = AtomicU64::new(0);
 static SERVER_URL: LazyLock<std::sync::atomic::AtomicPtr<String>> = LazyLock::new(|| {
     std::sync::atomic::AtomicPtr::new(Box::into_raw(Box::new(String::from(DEFAULT_SERVER_URL))))
 });
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonRpcRequest {
+    jsonrpc: String,
+    method: String,
+    params: Option<serde_json::Value>,
+    id: Option<u64>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcResponse {
@@ -173,9 +181,23 @@ pub async fn check_mcp_server() -> u32 {
     let server_url = get_server_url();
     info(&format!("Attempting to connect to MCP server at {}", server_url));
     
+    // Create proper JSON-RPC health check request
+    let health_check_request = json!({
+        "jsonrpc": "2.0",
+        "method": "health_check",
+        "params": {},
+        "id": js_sys::Date::now() as u64
+    });
+    
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-    js_sys::Reflect::set(&options, &"body".into(), &"HEALTH_CHECK".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &health_check_request.to_string().into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &js_sys::Object::new().into()).unwrap();
+    
+    // Set Content-Type header
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     
     let promise = fetch(&server_url, &options);
     match JsFuture::from(promise).await {
@@ -185,17 +207,32 @@ pub async fn check_mcp_server() -> u32 {
                 if resp.ok() {
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
-                            let json_obj = json.dyn_ref::<js_sys::Object>().unwrap();
-                            let status = js_sys::Reflect::get(&json_obj, &"status".into()).unwrap();
-                            let status_str = status.as_string().unwrap_or_default();
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            debug(&format!("Received raw response: {}", json_str));
                             
-                            if status_str == "healthy" {
-                                info("MCP server health check successful - server is healthy");
-                                0
-                            } else {
-                                error("MCP server health check failed - server reported unhealthy status");
-                                1
+                            // Parse the JSON-RPC response
+                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
+                                if let Some(result) = response.result {
+                                    if let Some(status) = result.get("status") {
+                                        let status_str = status.as_str().unwrap_or_default();
+                                        debug(&format!("Parsed status: {}", status_str));
+                                        
+                                        if status_str.to_lowercase() == "healthy" {
+                                            info("MCP server health check successful - server is healthy");
+                                            return 0;
+                                        } else {
+                                            error(&format!("MCP server health check failed - server reported status: {}", status_str));
+                                            return 1;
+                                        }
+                                    }
+                                }
+                                if let Some(err) = response.error {
+                                    error(&format!("MCP server returned error: {} (code: {})", err.message, err.code));
+                                    return 1;
+                                }
                             }
+                            error("Failed to parse MCP server response as JSON-RPC");
+                            1
                         }
                         Err(e) => {
                             error(&format!("Failed to parse MCP server health check response: {:?}", e));
@@ -220,50 +257,69 @@ pub async fn check_mcp_server() -> u32 {
 }
 
 #[wasm_bindgen]
-pub async fn handle_message(message: &str) -> Result<String, String> {
+pub async fn handle_message(message: &str) -> Result<JsValue, JsValue> {
     info("handle_message called");
-    info(&format!("Processing message: {}", message));
+    debug(&format!("Processing message: {}", message));
     
-    let server_url = get_server_url();
-    let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-    js_sys::Reflect::set(&options, &"body".into(), &message.into()).unwrap();
+    let mut logs = Vec::new();
+    let mut log_handler = |level: &str, message: &str| {
+        logs.push(json!({
+            "level": level,
+            "message": message,
+            "timestamp": js_sys::Date::now()
+        }));
+    };
     
-    let promise = fetch(&server_url, &options);
-    match JsFuture::from(promise).await {
-        Ok(response) => {
-            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
-            if let Some(resp) = resp {
-                if resp.ok() {
-                    match JsFuture::from(resp.json().unwrap()).await {
-                        Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
-                            info(&format!("Received response: {}", json_str));
-                            Ok(json_str)
-                        }
-                        Err(e) => {
-                            let error_msg = format!("Failed to parse response: {:?}", e);
-                            error(&error_msg);
-                            Err(error_msg)
-                        }
-                    }
-                } else {
-                    let error_msg = "Failed to send message - received error response".to_string();
-                    error(&error_msg);
-                    Err(error_msg)
+    let result = match serde_json::from_str::<JsonRpcRequest>(message) {
+        Ok(request) => {
+            match request.method.as_str() {
+                "health_check" => {
+                    log_handler("INFO", "Processing MCP server health check request");
+                    let response = check_mcp_server().await;
+                    let status_str = if response == 0 { "healthy" } else { "unhealthy" };
+                    log_handler("INFO", &format!("MCP server health check response: {}", status_str));
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": request.id,
+                        "result": {
+                            "status": status_str,
+                            "uptime": get_uptime(),
+                            "version": VERSION
+                        },
+                        "logs": logs
+                    })
                 }
-            } else {
-                let error_msg = "Failed to cast JsValue to web_sys::Response".to_string();
-                error(&error_msg);
-                Err(error_msg)
+                _ => {
+                    let error_msg = format!("Unknown method: {}", request.method);
+                    log_handler("ERROR", &error_msg);
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": request.id,
+                        "error": {
+                            "code": -32601,
+                            "message": error_msg
+                        },
+                        "logs": logs
+                    })
+                }
             }
         }
         Err(e) => {
-            let error_msg = format!("Failed to connect to MCP server: {:?}", e);
-            error(&error_msg);
-            Err(error_msg)
+            let error_msg = format!("Failed to parse request: {}", e);
+            log_handler("ERROR", &error_msg);
+            json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {
+                    "code": -32700,
+                    "message": error_msg
+                },
+                "logs": logs
+            })
         }
-    }
+    };
+    
+    Ok(JsValue::from_str(&result.to_string()))
 }
 
 #[wasm_bindgen]

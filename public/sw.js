@@ -312,6 +312,20 @@ class MCPMessageHandler {
             const response = await wasmInstance.handle_message(message);
             const parsedResponse = JSON.parse(response);
             
+            // Forward WASM logs to UI
+            if (parsedResponse.logs) {
+                parsedResponse.logs.forEach(log => {
+                    broadcastToClients({
+                        type: 'log',
+                        content: {
+                            level: log.level || 'INFO',
+                            message: log.message,
+                            timestamp: log.timestamp || new Date().toISOString()
+                        }
+                    });
+                });
+            }
+            
             // If this is a health check response, verify the status
             if (parsedResponse.result && parsedResponse.result.status) {
                 const isHealthy = parsedResponse.result.status === 'healthy';
@@ -489,14 +503,17 @@ async function checkMcp() {
         // Parse the result to determine health status
         const isHealthy = result === 0; // 0 means healthy in our WASM module
         
+        // Broadcast detailed log message
         broadcastToClients({
             type: 'log',
             content: {
                 level: 'INFO',
-                message: `MCP server health check result: ${isHealthy ? 'healthy' : 'unhealthy'}`,
+                message: `MCP server health check completed: ${isHealthy ? 'healthy' : 'unhealthy'}`,
                 timestamp: new Date().toISOString()
             }
         });
+        
+        // Broadcast status
         broadcastToClients({
             type: 'mcp_status',
             healthy: isHealthy

@@ -9,7 +9,7 @@ declare namespace wasm_bindgen {
 	export function get_server_url(): string;
 	export function health_check(): Promise<number>;
 	export function check_mcp_server(): Promise<number>;
-	export function handle_message(message: string): Promise<string>;
+	export function handle_message(message: string): Promise<any>;
 	export function get_metadata(): string;
 	export function add_memory_event(text: string): void;
 	export function clear_memory_events(): void;
@@ -40,8 +40,8 @@ declare interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure37_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure59_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure49_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure71_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 
