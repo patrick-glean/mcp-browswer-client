@@ -101,7 +101,22 @@ class MCPServer:
                 "tools": {
                     "listChanged": True
                 }
-            }
+            },
+            "tools": [
+                {
+                    "name": "echo",
+                    "description": "Echo test tool for MCP server.",
+                    "version": "1.0.0",
+                    "parameters": [
+                        {
+                            "name": "message",
+                            "description": "Message to echo back.",
+                            "required": True,
+                            "type": "string"
+                        }
+                    ]
+                }
+            ]
         })
 
     async def handle_tools_list(self, params, id):
