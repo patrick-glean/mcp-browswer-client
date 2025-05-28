@@ -72,9 +72,21 @@
                 <h3>MCP Initialization</h3>
                 <div class="mcp-controls">
                     <div class="server-config">
-                        <label for="mcpServerUrl">MCP Server URL:</label>
-                        <input type="text" id="mcpServerUrl" value="http://localhost:8081">
-                        <button id="updateServerUrl">Update</button>
+                        <label for="mcpServerUrl">URL</label>
+                        <div class="url-input-container">
+                            <input type="text" id="mcpServerUrl" value="http://localhost:8081">
+                            <div class="url-status-icon">
+                                <svg class="default-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <rect width="16" height="16" fill="none"/>
+                                </svg>
+                                <svg class="edit-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                                </svg>
+                                <svg class="success-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                </svg>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="init-steps">
@@ -163,6 +175,13 @@
                 const debugToggle = document.getElementById('debugModeToggle');
                 if (debugToggle) {
                     debugToggle.checked = debugMode;
+                }
+
+                // Initialize MCP Server URL from localStorage
+                const serverUrl = localStorage.getItem('mcpServerUrl') || 'http://localhost:8081';
+                const serverUrlInput = document.getElementById('mcpServerUrl');
+                if (serverUrlInput) {
+                    serverUrlInput.value = serverUrl;
                 }
             }
 
@@ -713,6 +732,14 @@
                     });
                 }
             }
+
+            setServerUrl(url) {
+                localStorage.setItem('mcpServerUrl', url);
+                const serverUrlInput = document.getElementById('mcpServerUrl');
+                if (serverUrlInput) {
+                    serverUrlInput.value = url;
+                }
+            }
         }
 
         // Initialize the chat shell
@@ -757,6 +784,70 @@
         }
 
         document.getElementById('initProtocol').addEventListener('click', () => chatShell.initializeMcpServer());
+
+        // Add after the initProtocol event listener:
+        const serverUrlInput = document.getElementById('mcpServerUrl');
+        let updateTimeout = null;
+
+        if (serverUrlInput) {
+            // Set initial state
+            serverUrlInput.closest('.url-input-container').classList.add('default');
+            
+            serverUrlInput.addEventListener('input', () => {
+                const container = serverUrlInput.closest('.url-input-container');
+                container.classList.remove('default', 'success');
+                container.classList.add('editing');
+                
+                // Clear any existing timeout
+                if (updateTimeout) {
+                    clearTimeout(updateTimeout);
+                }
+                
+                // Set new timeout to save after 2 seconds of no typing
+                updateTimeout = setTimeout(() => {
+                    const url = serverUrlInput.value.trim();
+                    if (url) {
+                        chatShell.setServerUrl(url);
+                        chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
+                        
+                        container.classList.remove('editing');
+                        container.classList.add('success');
+                        
+                        // Reset to default after 2 seconds
+                        setTimeout(() => {
+                            container.classList.remove('success');
+                            container.classList.add('default');
+                        }, 1000);
+                    }
+                }, 1000);
+            });
+            
+            // Keep the blur handler for when user clicks away
+            serverUrlInput.addEventListener('blur', () => {
+                const url = serverUrlInput.value.trim();
+                if (url) {
+                    chatShell.setServerUrl(url);
+                    chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
+                    
+                    const container = serverUrlInput.closest('.url-input-container');
+                    container.classList.remove('editing');
+                    container.classList.add('success');
+                    
+                    // Reset to default after 2 seconds
+                    setTimeout(() => {
+                        container.classList.remove('success');
+                        container.classList.add('default');
+                    }, 2000);
+                }
+            });
+
+            // Also update on Enter key
+            serverUrlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    serverUrlInput.blur();
+                }
+            });
+        }
     </script>
 
     <!-- Styles moved to styles.css -->
