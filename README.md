@@ -13,28 +13,45 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 
 ```
 .
-├── src/               # Rust source code
-├── public/           # Web assets and service worker
-│   ├── mcp_client_bg.wasm  # Compiled WASM module
-│   ├── sw.js         # Service worker
-│   └── index.html    # Web interface
-├── target/           # Build output
-├── venv/             # Python virtual environment
-├── node_modules/     # Node.js dependencies
-├── Cargo.toml        # Rust project configuration
-├── package.json      # Node.js configuration
-├── requirements.txt  # Python dependencies
-└── wasm-build.sh     # WASM build script
+├── src/                    # Rust source code
+│   ├── lib.rs             # Main Rust implementation and MCP protocol
+│   └── build_info.rs      # Generated build metadata
+├── public/                # Web assets and service worker
+│   ├── mcp_browser_client_bg.wasm  # Compiled WASM module
+│   ├── mcp_browser_client.js       # Generated JS bindings
+│   ├── sw.js              # Service worker
+│   ├── index.html         # Web interface
+│   └── styles.css         # UI styles
+├── venv/                  # Python virtual environment
+├── node_modules/          # Node.js dependencies
+├── .cursor/               # Cursor IDE configuration
+├── Cargo.toml             # Rust project configuration
+├── package.json           # Node.js configuration
+├── requirements.txt       # Python dependencies
+├── wasm-build.sh          # WASM build script
+├── generate-build-info.sh # Build metadata generator
+└── setup.sh              # Project setup script
 ```
 
-## File Naming Conventions
+## Build Workflow
 
-The project uses specific file naming conventions to ensure consistency:
+1. **Build Info Generation**
+   - `generate-build-info.sh` creates `src/build_info.rs`
+   - Tracks source file changes via SHA256 hashes
+   - Includes build timestamp and source hash
 
-- WASM Module: `mcp_client_bg.wasm`
-  - Built from: `target/wasm32-unknown-unknown/release/mcp_browser_client.wasm`
-  - Copied to: `public/mcp_client_bg.wasm`
-  - Referenced in: `public/sw.js` as `/mcp_client_bg.wasm`
+2. **WASM Build Process**
+   - `wasm-build.sh` orchestrates the build:
+     1. Generates build info
+     2. Ensures wasm-bindgen-cli is installed
+     3. Builds WASM module with `cargo build`
+     4. Generates JS bindings with `wasm-bindgen`
+     5. Outputs to `public/` directory
+
+3. **Service Worker Integration**
+   - WASM module loaded by service worker
+   - JS bindings provide Rust-WASM interface
+   - Multi-tab communication via service worker
 
 ## Quick Start
 
@@ -53,44 +70,6 @@ npm start
 npm run start:mock-mcp
 ```
 
-## Using Your Own MCP Server
-
-The browser client is designed to work with any MCP server implementation. By default, it connects to `localhost:8081`. To use your own MCP server:
-
-1. Ensure your MCP server is running on port 8081 (or modify the connection settings in `src/lib.rs`)
-2. Start the web server:
-```bash
-npm start
-```
-
-## Manual Setup
-
-If you prefer to set up manually:
-
-1. Install Rust:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-2. Set up Python environment (for mock MCP server):
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-3. Install Node.js dependencies:
-```bash
-npm install
-```
-
-4. Set up Rust/WASM:
-```bash
-rustup target add wasm32-unknown-unknown
-cargo install wasm-pack
-./wasm-build.sh
-```
-
 ## Development
 
 ### Available Scripts
@@ -100,7 +79,7 @@ cargo install wasm-pack
 - `npm run start:mock-mcp`: Start the mock MCP server for testing
 
 ### Modifying the Rust Code
-1. Edit `src/lib.rs`
+1. Edit `src/lib.rs` for MCP protocol implementation
 2. Rebuild WASM:
 ```bash
 ./wasm-build.sh
@@ -113,39 +92,55 @@ cargo install wasm-pack
 
 ## Testing
 
-The included mock MCP server provides a simple echo service that:
-- Listens on port 8081
-- Logs all received messages to `mcp_server.log`
-- Echoes messages back to the client
-- Displays messages in the terminal
+The included mock MCP server provides:
+- Echo service on port 8081
+- Message logging to `mcp_server.log`
+- Terminal output for debugging
 
-You can test the system by:
+Test the system by:
 1. Starting the mock MCP server: `npm run start:mock-mcp`
 2. Opening multiple browser tabs to `http://localhost:8080`
-3. Sending messages through the chat interface
-4. Observing the messages in:
-   - The browser's chat interface
-   - The MCP server terminal window
-   - The `mcp_server.log` file
+3. Using the web interface to:
+   - Check WASM status
+   - Initialize MCP connection
+   - List available tools
+   - Send test messages
 
 ## Troubleshooting
 
-1. If the service worker isn't loading:
+1. **Service Worker Issues**
    - Check browser console for errors
-   - Ensure `mcp_client_bg.wasm` is in the `public` directory
-   - Try clearing browser cache
+   - Verify WASM files in `public/` directory
+   - Clear browser cache if needed
 
-2. If messages aren't being received:
-   - Verify your MCP server is running
-   - Check the MCP server log file
+2. **MCP Connection Problems**
+   - Verify MCP server is running
+   - Check `mcp_server.log`
    - Ensure port 8081 is available
-   - Verify the connection settings in `src/lib.rs`
+   - Verify connection settings in `src/lib.rs`
 
-3. If WASM module fails to load:
-   - Verify `mcp_client_bg.wasm` exists in the `public` directory
-   - Check that the file name matches exactly (case-sensitive)
-   - Ensure the build script completed successfully
-   - Check browser console for specific error messages
+3. **WASM Loading Failures**
+   - Check `public/` for correct WASM files
+   - Verify build script completion
+   - Check browser console for errors
+
+## Architecture
+
+The project follows a layered architecture:
+1. **Rust/WASM Layer**
+   - Core MCP protocol implementation in `lib.rs`
+   - Message handling and state management
+   - Build metadata tracking
+
+2. **Service Worker Layer**
+   - WASM module loading
+   - Multi-tab communication
+   - Message routing
+
+3. **Web Interface Layer**
+   - User interaction
+   - Status monitoring
+   - Debug controls
 
 ## License
 
