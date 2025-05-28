@@ -27,6 +27,8 @@
             <div class="status-item">
                 <span class="status-label">Metadata Version:</span>
                 <span id="metadataVersion">-</span>
+            </div>
+            <div class="status-item">
                 <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
             </div>
         </div>
@@ -444,7 +446,15 @@
                             this.updateWasmUptime(status.uptime);
                         }
                         if (metadata) {
-                            this.updateMetadataDisplay(metadata);
+                            // Update version
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement && metadata.version) {
+                                versionElement.textContent = metadata.version;
+                            }
+                            // Update build info
+                            if (metadata.buildInfo) {
+                                this.updateBuildInfo(metadata.buildInfo);
+                            }
                         }
                         // Log the status update
                         this.log({
@@ -476,16 +486,15 @@
                     case 'wasm_status':
                         this.updateWasmStatus(message.healthy);
                         if (message.healthy && message.params && message.params.metadata) {
-                            const compiledInfo = document.getElementById('wasm-compiled');
-                            if (compiledInfo) {
-                                const buildInfo = message.params.metadata.buildInfo;
-                                if (buildInfo) {
-                                    compiledInfo.textContent = `Compiled: ${buildInfo}`;
-                                    this.log({ level: 'INFO', message: `WASM build info: ${buildInfo}`, timestamp: new Date().toISOString() });
-                                } else {
-                                    compiledInfo.textContent = 'Compiled: -';
-                                    this.log({ level: 'WARN', message: 'WASM build info not available', timestamp: new Date().toISOString() });
-                                }
+                            const metadata = message.params.metadata;
+                            // Update version
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement && metadata.version) {
+                                versionElement.textContent = metadata.version;
+                            }
+                            // Update build info
+                            if (metadata.buildInfo) {
+                                this.updateBuildInfo(metadata.buildInfo);
                             }
                         }
                         break;
@@ -502,9 +511,16 @@
                         this.updateToolsList(message.server.tools);
                         break;
                     case 'wasm_initialized':
-                        this.log({ level: 'INFO', message: `WASM module initialized (v${message.version}, built ${message.buildTime})`, timestamp: new Date().toISOString() });
-                        // The WASM module is already available through the service worker
-                        // We don't need to set window.mcp_browser_client as the service worker handles all WASM interactions
+                        const initMessage = `WASM module initialized (${message.size}) - ${message.buildInfo}`;
+                        this.log({ level: 'INFO', message: initMessage, timestamp: new Date().toISOString() });
+                        this.updateBuildInfo(message.buildInfo);
+                        // Update version if available
+                        if (message.version) {
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement) {
+                                versionElement.textContent = message.version;
+                            }
+                        }
                         break;
                     case 'tools_list':
                         this.log({ level: 'INFO', message: `Tools list received: ${JSON.stringify(message.tools)}`, timestamp: new Date().toISOString() });
@@ -665,6 +681,13 @@
                             toolsList.appendChild(toolItem);
                         });
                     }
+                }
+            }
+
+            updateBuildInfo(buildInfo) {
+                const compiledInfo = document.getElementById('wasm-compiled');
+                if (compiledInfo) {
+                    compiledInfo.textContent = `Compiled: ${buildInfo}`;
                 }
             }
         }

@@ -3,6 +3,7 @@ let wasmModule = null;
 let isRunning = true;
 let uptimeInterval = null;
 let isDebugMode = false;
+let isInitializing = false;
 
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
@@ -19,8 +20,8 @@ function debugLog(message, data = null) {
     )) : null;
     
     const logMessage = safeData 
-        ? `[SW v${VERSION}] [${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
-        : `[SW v${VERSION}] [${timestamp}] ${message}`;
+        ? `[SW v${VERSION}] ${message}: ${JSON.stringify(safeData, null, 2)}`
+        : `[SW v${VERSION}] ${message}`;
     
     // Always log errors and important messages
     const isImportant = message.includes('WASM') || message.includes('Error') || message.includes('Failed');
@@ -49,7 +50,7 @@ function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
             },
             metadata: metadata || {
                 timestamp: new Date().toISOString(),
-                version: wasmInstance ? wasmInstance.get_version() : 'unknown',
+                version: wasmInstance ? `${wasmInstance.get_version()}` : 'unknown',
                 buildInfo: wasmInstance ? wasmInstance.get_compiled_info() : null
             }
         }
@@ -59,6 +60,16 @@ function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
 
 // Initialize WASM module
 async function initializeWasm() {
+    if (isInitializing) {
+        debugLog('WASM initialization already in progress, skipping...');
+        return false;
+    }
+    if (wasmInstance) {
+        debugLog('WASM module already initialized, skipping...');
+        return true;
+    }
+    
+    isInitializing = true;
     try {
         debugLog('Initializing WASM module...');
         
@@ -98,11 +109,21 @@ async function initializeWasm() {
         wasmInstance = self.wasm_bindgen;
         wasmModule = null; // Not used in this pattern
         
-        // Notify clients that WASM is ready
+        // Get build info and version
+        const buildInfo = wasmInstance.get_compiled_info();
+        const version = wasmInstance.get_version();
+        
+        // Broadcast initialization
         broadcastToClients({
             type: 'wasm_initialized',
-            version: VERSION,
-            buildTime: BUILD_TIME
+            buildInfo: buildInfo
+        });
+        
+        // Broadcast status with metadata
+        broadcastWasmStatus(true, 0, {
+            timestamp: new Date().toISOString(),
+            version: version,
+            buildInfo: buildInfo
         });
         
         // Start uptime counter
@@ -147,6 +168,8 @@ async function initializeWasm() {
         broadcastWasmStatus(false);
         
         return false;
+    } finally {
+        isInitializing = false;
     }
 }
 

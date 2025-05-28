@@ -180,7 +180,7 @@ fn error(message: &str) {
 #[wasm_bindgen]
 pub fn get_version() -> String {
     info(&format!("Getting version info: {}", VERSION));
-    format!("MCP Client WASM v{}", VERSION)
+    format!("v{}", VERSION)
 }
 
 #[wasm_bindgen]
@@ -619,7 +619,7 @@ pub async fn query_tools() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn get_compiled_info() -> String {
-    format!("v{} built {} (hash: {})", 
+    format!("v{} built {} ({})", 
         VERSION,
         BUILD_DATETIME,
         &BUILD_HASH[..8]
