@@ -518,6 +518,24 @@ self.addEventListener('message', async (event) => {
                 }
             }
             break;
+        case 'list_tools':
+            if (!wasmInstance) {
+                throw new Error('WASM module not initialized');
+            }
+            try {
+                const result = await wasmInstance.query_tools();
+                broadcastToClients({
+                    type: 'tools_list',
+                    tools: result
+                });
+            } catch (error) {
+                debugLog('Failed to list tools', { error: error.message });
+                broadcastToClients({
+                    type: 'error',
+                    message: `Failed to list tools: ${error.message}`
+                });
+            }
+            break;
         default:
             console.warn('Unknown message type:', message.type);
     }

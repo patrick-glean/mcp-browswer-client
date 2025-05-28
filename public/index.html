@@ -275,15 +275,14 @@
                     'start-sw': () => this.startServiceWorker(),
                     'listTools': async () => {
                         this.log({ level: 'INFO', message: 'List Tools button clicked', timestamp: new Date().toISOString() });
-                        if (window.mcp_browser_client && typeof window.mcp_browser_client.query_tools === 'function') {
+                        if (this.serviceWorker) {
                             try {
-                                const result = await window.mcp_browser_client.query_tools();
-                                this.log({ level: 'INFO', message: `Tools query result: ${JSON.stringify(result)}`, timestamp: new Date().toISOString() });
+                                await this.serviceWorker.postMessage({ type: 'list_tools' });
                             } catch (err) {
                                 this.log({ level: 'ERROR', message: `Tools query failed: ${err}`, timestamp: new Date().toISOString() });
                             }
                         } else {
-                            this.log({ level: 'ERROR', message: 'query_tools not available on mcp_browser_client', timestamp: new Date().toISOString() });
+                            this.log({ level: 'ERROR', message: 'Service worker not available', timestamp: new Date().toISOString() });
                         }
                     }
                 };
@@ -506,6 +505,10 @@
                         this.log({ level: 'INFO', message: `WASM module initialized (v${message.version}, built ${message.buildTime})`, timestamp: new Date().toISOString() });
                         // The WASM module is already available through the service worker
                         // We don't need to set window.mcp_browser_client as the service worker handles all WASM interactions
+                        break;
+                    case 'tools_list':
+                        this.log({ level: 'INFO', message: `Tools list received: ${JSON.stringify(message.tools)}`, timestamp: new Date().toISOString() });
+                        this.updateToolsList(message.tools);
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
