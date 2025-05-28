@@ -685,9 +685,13 @@ pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
     // Create JSON-RPC request for tool list
     let tools_request = json!({
         "jsonrpc": "2.0",
+        "id": js_sys::Date::now() as u64,
         "method": "tools/list",
-        "params": {},
-        "id": js_sys::Date::now() as u64
+        "params": {
+            "_meta": {
+                "progressToken": js_sys::Date::now() as u64
+            }
+        }
     });
     
     let options = js_sys::Object::new();
@@ -696,7 +700,8 @@ pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
     
     let headers = js_sys::Object::new();
     js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     
     let promise = fetch(url, &options);
