@@ -11,7 +11,9 @@ use wasm_bindgen::JsCast;
 use std::sync::LazyLock;
 use std::collections::HashMap;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+include!("build_info.rs");
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
 const DEFAULT_SERVER_URL: &str = "http://localhost:8081";
 
@@ -193,13 +195,19 @@ pub fn set_server_url(url: &str) {
     
     // Don't drop the old_url since we're in a WASM context
     std::mem::forget(old_url);
+    
+    setItem("mcp_server_url", url);
 }
 
 #[wasm_bindgen]
 pub fn get_server_url() -> String {
-    let url_ptr = SERVER_URL.load(Ordering::SeqCst);
-    let url = unsafe { &*url_ptr };
-    url.clone()
+    if let Some(url) = getItem("mcp_server_url") {
+        url
+    } else {
+        let url_ptr = SERVER_URL.load(Ordering::SeqCst);
+        let url = unsafe { &*url_ptr };
+        url.clone()
+    }
 }
 
 #[wasm_bindgen]
@@ -238,6 +246,7 @@ pub async fn check_mcp_server() -> u32 {
     // Set Content-Type header
     let headers = js_sys::Object::new();
     js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     
     let promise = fetch(&server_url, &options);
@@ -477,7 +486,8 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
         "method": "initialize",
         "params": {
             "client_version": VERSION,
-            "capabilities": ["tools", "health_check"]
+            "protocolVersion": "2025-03-26",
+            "capabilities": ["tools"]
         },
         "id": js_sys::Date::now() as u64
     });
@@ -488,6 +498,7 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
     
     let headers = js_sys::Object::new();
     js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     
     let promise = fetch(url, &options);
@@ -546,4 +557,71 @@ pub fn get_server_info() -> Result<JsValue, JsValue> {
         "servers": registry.servers,
         "default_server": registry.default_server
     }).to_string()))
+}
+
+#[wasm_bindgen]
+pub async fn query_tools() -> Result<JsValue, JsValue> {
+    info("Querying tools from MCP server");
+    info("Tools button clicked, attempting to connect to server...");
+    let server_url = get_server_url();
+    let tools_request = json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": js_sys::Date::now() as u64
+    });
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &tools_request.to_string().into()).unwrap();
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    let promise = fetch(&server_url, &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            debug(&format!("Received tools response: {}", json_str));
+                            info(&format!("Raw response: {}", json_str));
+                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
+                                if let Some(result) = response.result {
+                                    if let Some(tools) = result.get("tools") {
+                                        let tools_list = tools.as_array().unwrap();
+                                        let tools_str = serde_json::to_string(&tools_list).unwrap();
+                                        Ok(JsValue::from_str(&tools_str))
+                                    } else {
+                                        Err(JsValue::from_str("No tools found in response"))
+                                    }
+                                } else {
+                                    Err(JsValue::from_str("No result in tools response"))
+                                }
+                            } else {
+                                Err(JsValue::from_str("Failed to parse tools response"))
+                            }
+                        }
+                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                    }
+                } else {
+                    Err(JsValue::from_str("Server returned error response"))
+                }
+            } else {
+                Err(JsValue::from_str("Failed to get response"))
+            }
+        }
+        Err(e) => Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_compiled_info() -> String {
+    format!("v{} built {} (hash: {})", 
+        VERSION,
+        BUILD_DATETIME,
+        &BUILD_HASH[..8]
+    )
 }

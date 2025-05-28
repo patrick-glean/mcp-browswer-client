@@ -27,6 +27,7 @@
             <div class="status-item">
                 <span class="status-label">Metadata Version:</span>
                 <span id="metadataVersion">-</span>
+                <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
             </div>
         </div>
         
@@ -271,7 +272,20 @@
                     'unload-wasm': () => this.unloadWasm(),
                     'reload-wasm': () => this.reloadWasm(),
                     'stop-sw': () => this.stopServiceWorker(),
-                    'start-sw': () => this.startServiceWorker()
+                    'start-sw': () => this.startServiceWorker(),
+                    'listTools': async () => {
+                        this.log({ level: 'INFO', message: 'List Tools button clicked', timestamp: new Date().toISOString() });
+                        if (window.mcp_browser_client && typeof window.mcp_browser_client.query_tools === 'function') {
+                            try {
+                                const result = await window.mcp_browser_client.query_tools();
+                                this.log({ level: 'INFO', message: `Tools query result: ${JSON.stringify(result)}`, timestamp: new Date().toISOString() });
+                            } catch (err) {
+                                this.log({ level: 'ERROR', message: `Tools query failed: ${err}`, timestamp: new Date().toISOString() });
+                            }
+                        } else {
+                            this.log({ level: 'ERROR', message: 'query_tools not available on mcp_browser_client', timestamp: new Date().toISOString() });
+                        }
+                    }
                 };
 
                 Object.entries(buttons).forEach(([id, handler]) => {
@@ -462,6 +476,19 @@
                         break;
                     case 'wasm_status':
                         this.updateWasmStatus(message.healthy);
+                        if (message.healthy && message.params && message.params.metadata) {
+                            const compiledInfo = document.getElementById('wasm-compiled');
+                            if (compiledInfo) {
+                                const buildInfo = message.params.metadata.buildInfo;
+                                if (buildInfo) {
+                                    compiledInfo.textContent = `Compiled: ${buildInfo}`;
+                                    this.log({ level: 'INFO', message: `WASM build info: ${buildInfo}`, timestamp: new Date().toISOString() });
+                                } else {
+                                    compiledInfo.textContent = 'Compiled: -';
+                                    this.log({ level: 'WARN', message: 'WASM build info not available', timestamp: new Date().toISOString() });
+                                }
+                            }
+                        }
                         break;
                     case 'uptime':
                         this.updateWasmUptime(message.uptime);
@@ -470,9 +497,15 @@
                         this.updateServersList(message.info.servers);
                         break;
                     case 'mcp_server_initialized':
-                        this.log({ level: 'INFO', message: `Server initialized: ${message.server.name}`, timestamp: new Date().toISOString() });
+                        const serverName = message.server.serverInfo?.name || 'Unknown';
+                        this.log({ level: 'INFO', message: `Server initialized: ${serverName}`, timestamp: new Date().toISOString() });
                         this.getServerInfo();
                         this.updateToolsList(message.server.tools);
+                        break;
+                    case 'wasm_initialized':
+                        this.log({ level: 'INFO', message: `WASM module initialized (v${message.version}, built ${message.buildTime})`, timestamp: new Date().toISOString() });
+                        // The WASM module is already available through the service worker
+                        // We don't need to set window.mcp_browser_client as the service worker handles all WASM interactions
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -492,6 +525,10 @@
                     this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
                     this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
                     this.wasmStatus.textContent = '●';
+                }
+                const compiledInfo = document.getElementById('wasm-compiled');
+                if (compiledInfo) {
+                    compiledInfo.textContent = 'Compiled: -';
                 }
             }
 

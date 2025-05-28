@@ -4,6 +4,9 @@ let isRunning = true;
 let uptimeInterval = null;
 let isDebugMode = false;
 
+const VERSION = '1.0.0';
+const BUILD_TIME = new Date().toISOString();
+
 // Debug logging function
 function debugLog(message, data = null) {
     if (!isRunning) return;
@@ -16,8 +19,8 @@ function debugLog(message, data = null) {
     )) : null;
     
     const logMessage = safeData 
-        ? `[SW] [${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
-        : `[SW] [${timestamp}] ${message}`;
+        ? `[SW v${VERSION}] [${timestamp}] ${message}: ${JSON.stringify(safeData, null, 2)}`
+        : `[SW v${VERSION}] [${timestamp}] ${message}`;
     
     // Always log errors and important messages
     const isImportant = message.includes('WASM') || message.includes('Error') || message.includes('Failed');
@@ -46,7 +49,8 @@ function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
             },
             metadata: metadata || {
                 timestamp: new Date().toISOString(),
-                version: wasmInstance ? wasmInstance.get_version() : 'unknown'
+                version: wasmInstance ? wasmInstance.get_version() : 'unknown',
+                buildInfo: wasmInstance ? wasmInstance.get_compiled_info() : null
             }
         }
     };
@@ -93,6 +97,13 @@ async function initializeWasm() {
         // All exported functions are now on self.wasm_bindgen
         wasmInstance = self.wasm_bindgen;
         wasmModule = null; // Not used in this pattern
+        
+        // Notify clients that WASM is ready
+        broadcastToClients({
+            type: 'wasm_initialized',
+            version: VERSION,
+            buildTime: BUILD_TIME
+        });
         
         // Start uptime counter
         startUptimeCounter();
@@ -618,3 +629,13 @@ function broadcastToClients(message) {
         });
     });
 }
+
+// self.addEventListener('fetch', event => {
+//     console.log(`Service Worker v${VERSION} handling fetch: ${event.request.url}`);
+//     event.respondWith(
+//         fetch(event.request)
+//             .catch(() => {
+//                 return new Response('Service Worker is offline');
+//             })
+//     );
+// });

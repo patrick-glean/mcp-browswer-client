@@ -1,0 +1,51 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# WASM Development Rules
+
+When working with WASM in this project, follow these rules:
+
+1. **File Structure**:
+   - Rust implementation goes in `src/lib.rs`
+   - Service worker code goes in `public/sw.js`
+   - Client-side code goes in `public/index.html`
+
+2. **Message Flow**:
+   - Client -> Service Worker -> WASM -> Service Worker -> Client
+   - Always use proper error handling at each step
+   - Always include debug logging in service worker
+
+3. **Testing Process**:
+   - Run `./wasm-build.sh` after changes
+   - Clear service worker and cache
+   - Hard refresh browser
+   - Verify status indicators
+   - Check console logs
+
+4. **Error Handling**:
+   - Use Result<T, JsValue> in Rust
+   - Try/catch in service worker
+   - Error case handling in client
+
+5. **Status Updates**:
+   - Always broadcast status changes
+   - Include version and build info
+   - Update UI indicators
+
+6. **Debug Mode**:
+   - Use debug logging in service worker
+   - Check console for [SW v1.0.0] messages
+   - Monitor network tab for message flow
+
+7. **Common Issues**:
+   - Check WASM initialization
+   - Verify message types match
+   - Ensure proper error handling
+   - Check service worker registration
+
+8. **Documentation**:
+   - Update WASM_DEVELOPMENT.md with new patterns
+   - Document any new message types
+   - Keep error handling patterns consistent

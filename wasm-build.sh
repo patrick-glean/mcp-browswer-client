@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Generate build info first
+./generate-build-info.sh
+
 # Ensure wasm-bindgen-cli is installed
 cargo install wasm-bindgen-cli
 
