@@ -491,13 +491,19 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
     
     let handshake_request = json!({
         "jsonrpc": "2.0",
+        "id": js_sys::Date::now() as u64,
         "method": "initialize",
         "params": {
-            "client_version": VERSION,
             "protocolVersion": "2025-03-26",
-            "capabilities": ["tools"]
-        },
-        "id": js_sys::Date::now() as u64
+            "capabilities": {
+                "sampling": {},
+                "roots": []
+            },
+            "clientInfo": {
+                "name": "mcp-browser-client",
+                "version": VERSION
+            }
+        }
     });
     
     let options = js_sys::Object::new();
@@ -506,7 +512,8 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
     
     let headers = js_sys::Object::new();
     js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     
     let promise = fetch(url, &options);
@@ -515,6 +522,9 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
+                    // Get session ID from response headers
+                    let session_id = resp.headers().get("mcp-session-id").ok().flatten();
+                    
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
                             let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
@@ -536,14 +546,49 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
                                             .unwrap_or("unknown")
                                             .to_string(),
                                         status: "connected".to_string(),
-                                        tools: result.get("tools")
-                                            .and_then(|v| v.as_array())
+                                        tools: result.get("capabilities")
+                                            .and_then(|v| v.get("tools"))
+                                            .and_then(|v| v.as_object())
                                             .map(|tools| tools.iter()
-                                                .filter_map(|t| serde_json::from_value(t.clone()).ok())
+                                                .filter_map(|(name, info)| {
+                                                    Some(McpTool {
+                                                        name: name.clone(),
+                                                        description: info.get("description")
+                                                            .and_then(|v| v.as_str())
+                                                            .unwrap_or("")
+                                                            .to_string(),
+                                                        version: info.get("version")
+                                                            .and_then(|v| v.as_str())
+                                                            .unwrap_or("unknown")
+                                                            .to_string(),
+                                                        parameters: Vec::new(),
+                                                    })
+                                                })
                                                 .collect())
                                             .unwrap_or_default(),
                                         last_health_check: get_timestamp(),
                                     };
+                                    
+                                    // Send initialized notification
+                                    if let Some(session_id) = session_id {
+                                        let initialized_request = json!({
+                                            "jsonrpc": "2.0",
+                                            "method": "notifications/initialized"
+                                        });
+                                        
+                                        let options = js_sys::Object::new();
+                                        js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+                                        js_sys::Reflect::set(&options, &"body".into(), &initialized_request.to_string().into()).unwrap();
+                                        
+                                        let headers = js_sys::Object::new();
+                                        js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+                                        js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
+                                        js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
+                                        js_sys::Reflect::set(&headers, &"mcp-session-id".into(), &session_id.into()).unwrap();
+                                        js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+                                        
+                                        let _ = JsFuture::from(fetch(url, &options)).await;
+                                    }
                                     
                                     Ok(server_info)
                                 } else {
