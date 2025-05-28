@@ -439,7 +439,14 @@ self.addEventListener('message', async (event) => {
             }
             try {
                 const result = await wasmInstance.initialize_mcp_server(message.url);
+                debugLog('Raw MCP initialization result', { result });
                 const parsedResult = JSON.parse(result);
+                debugLog('Parsed MCP initialization result', { 
+                    status: parsedResult.status,
+                    message: parsedResult.message,
+                    has_server_info: !!parsedResult.server_info,
+                    server_info: parsedResult.server_info
+                });
                 broadcastToClients({
                     type: 'log',
                     content: {

@@ -517,8 +517,16 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
                                 if let Some(result) = response.result {
                                     let server_info = McpServer {
                                         url: url.to_string(),
-                                        name: result.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-                                        version: result.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+                                        name: result.get("serverInfo")
+                                            .and_then(|v| v.get("name"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Unknown")
+                                            .to_string(),
+                                        version: result.get("serverInfo")
+                                            .and_then(|v| v.get("version"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown")
+                                            .to_string(),
                                         status: "connected".to_string(),
                                         tools: result.get("tools")
                                             .and_then(|v| v.as_array())

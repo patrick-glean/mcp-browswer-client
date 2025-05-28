@@ -517,7 +517,7 @@
                         this.updateServersList(message.info.servers);
                         break;
                     case 'mcp_server_initialized':
-                        const serverName = message.server.serverInfo?.name || 'Unknown';
+                        const serverName = message.server?.name || 'Unknown';
                         this.log({ level: 'INFO', message: `Server initialized: ${serverName}`, timestamp: new Date().toISOString() });
                         this.getServerInfo();
                         this.updateToolsList(message.server.tools);
