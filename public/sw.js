@@ -283,6 +283,11 @@ async function reloadWasm() {
         const success = await initializeWasm();
         if (success) {
             debugLog("WASM module reloaded successfully");
+            // Get fresh metadata
+            const buildInfo = wasmInstance.get_compiled_info();
+            const version = wasmInstance.get_version();
+            
+            // Broadcast success with metadata
             broadcastToClients({
                 type: 'log',
                 content: {
@@ -291,9 +296,22 @@ async function reloadWasm() {
                     timestamp: new Date().toISOString()
                 }
             });
+            
+            // Broadcast status with metadata in JSON-RPC format
             broadcastToClients({
-                type: 'wasm_status',
-                healthy: true
+                jsonrpc: '2.0',
+                method: 'wasm_status',
+                params: {
+                    status: {
+                        healthy: true,
+                        uptime: 0
+                    },
+                    metadata: {
+                        timestamp: new Date().toISOString(),
+                        version: version,
+                        buildInfo: buildInfo
+                    }
+                }
             });
         } else {
             debugLog("Failed to reload WASM module");
