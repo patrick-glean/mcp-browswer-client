@@ -307,10 +307,19 @@
                     'stop-sw': () => this.stopServiceWorker(),
                     'start-sw': () => this.startServiceWorker(),
                     'listTools': async () => {
-                        this.log({ level: 'INFO', message: 'List Tools button clicked', timestamp: new Date().toISOString() });
+                        const url = document.getElementById('mcpServerUrl').value.trim();
+                        if (!url) {
+                            this.log({ level: 'ERROR', message: 'Please enter a valid MCP Server URL', timestamp: new Date().toISOString() });
+                            return;
+                        }
+                        
+                        this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
                         if (this.serviceWorker) {
                             try {
-                                await this.serviceWorker.postMessage({ type: 'list_tools' });
+                                await this.serviceWorker.postMessage({ 
+                                    type: 'list_tools',
+                                    url: url
+                                });
                             } catch (err) {
                                 this.log({ level: 'ERROR', message: `Tools query failed: ${err}`, timestamp: new Date().toISOString() });
                             }

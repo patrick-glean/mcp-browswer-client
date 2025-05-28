@@ -572,16 +572,47 @@ self.addEventListener('message', async (event) => {
                 throw new Error('WASM module not initialized');
             }
             try {
-                const result = await wasmInstance.query_tools();
+                const url = message.url || get_server_url();
+                debugLog(`Listing tools from ${url}`);
+                
+                // Create JSON-RPC request for tool list
+                const toolListRequest = {
+                    jsonrpc: '2.0',
+                    method: 'tools/list',
+                    params: {},
+                    id: Date.now()
+                };
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(toolListRequest)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                if (result.error) {
+                    throw new Error(`JSON-RPC error: ${result.error.message}`);
+                }
+                
                 broadcastToClients({
                     type: 'tools_list',
-                    tools: result
+                    tools: result.result.tools
                 });
             } catch (error) {
-                debugLog('Failed to list tools', { error: error.message });
+                debugLog(`Error listing tools: ${error}`);
                 broadcastToClients({
-                    type: 'error',
-                    message: `Failed to list tools: ${error.message}`
+                    type: 'log',
+                    content: {
+                        level: 'ERROR',
+                        message: `Failed to list tools: ${error.message}`,
+                        timestamp: new Date().toISOString()
+                    }
                 });
             }
             break;
