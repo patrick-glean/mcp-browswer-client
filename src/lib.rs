@@ -130,11 +130,11 @@ extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
     
-    #[wasm_bindgen(js_namespace = localStorage)]
-    fn getItem(key: &str) -> Option<String>;
+    #[wasm_bindgen(js_namespace = localStorage, catch)]
+    fn getItem(key: &str) -> Result<Option<String>, JsValue>;
     
-    #[wasm_bindgen(js_namespace = localStorage)]
-    fn setItem(key: &str, value: &str);
+    #[wasm_bindgen(js_namespace = localStorage, catch)]
+    fn setItem(key: &str, value: &str) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = self)]
     fn fetch(url: &str, options: &JsValue) -> js_sys::Promise;
@@ -196,17 +196,21 @@ pub fn set_server_url(url: &str) {
     // Don't drop the old_url since we're in a WASM context
     std::mem::forget(old_url);
     
-    setItem("mcp_server_url", url);
+    // Try to set in localStorage, but don't fail if it's not available
+    if let Err(e) = setItem("mcp_server_url", url) {
+        debug(&format!("Failed to set server URL in localStorage: {:?}", e));
+    }
 }
 
 #[wasm_bindgen]
 pub fn get_server_url() -> String {
-    if let Some(url) = getItem("mcp_server_url") {
-        url
-    } else {
-        let url_ptr = SERVER_URL.load(Ordering::SeqCst);
-        let url = unsafe { &*url_ptr };
-        url.clone()
+    match getItem("mcp_server_url") {
+        Ok(Some(url)) => url,
+        _ => {
+            let url_ptr = SERVER_URL.load(Ordering::SeqCst);
+            let url = unsafe { &*url_ptr };
+            url.clone()
+        }
     }
 }
 
@@ -398,7 +402,9 @@ pub fn add_memory_event(text: &str) {
     
     metadata.memory_events.push(event);
     let json = serde_json::to_string(&metadata).unwrap_or_default();
-    setItem("mcp_module_metadata", &json);
+    if let Err(e) = setItem("mcp_module_metadata", &json) {
+        debug(&format!("Failed to set memory event in localStorage: {:?}", e));
+    }
 }
 
 #[wasm_bindgen]
@@ -412,7 +418,9 @@ pub fn clear_memory_events() -> Result<(), String> {
     let json = serde_json::to_string(&metadata)
         .map_err(|e| e.to_string())?;
     
-    setItem("mcp_module_metadata", &json);
+    if let Err(e) = setItem("mcp_module_metadata", &json) {
+        debug(&format!("Failed to clear memory events in localStorage: {:?}", e));
+    }
     Ok(())
 }
 

@@ -430,13 +430,13 @@ let wasm_bindgen;
             const ret = self.fetch(getStringFromWasm0(arg0, arg1), arg2);
             return ret;
         };
-        imports.wbg.__wbg_getItem_0eb49a651de19f13 = function(arg0, arg1, arg2) {
+        imports.wbg.__wbg_getItem_f6784eefd437c363 = function() { return handleError(function (arg0, arg1, arg2) {
             const ret = localStorage.getItem(getStringFromWasm0(arg1, arg2));
             var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             var len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-        };
+        }, arguments) };
         imports.wbg.__wbg_instanceof_Response_f2cc20d9f7dfd644 = function(arg0) {
             let result;
             try {
@@ -499,9 +499,9 @@ let wasm_bindgen;
             const ret = Promise.resolve(arg0);
             return ret;
         };
-        imports.wbg.__wbg_setItem_75a4eba162f6605f = function(arg0, arg1, arg2, arg3) {
+        imports.wbg.__wbg_setItem_1878abfedc3ed6af = function() { return handleError(function (arg0, arg1, arg2, arg3) {
             localStorage.setItem(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
-        };
+        }, arguments) };
         imports.wbg.__wbg_set_bb8cecf6a62b9f46 = function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);
             return ret;
@@ -543,7 +543,7 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper259 = function(arg0, arg1, arg2) {
+        imports.wbg.__wbindgen_closure_wrapper260 = function(arg0, arg1, arg2) {
             const ret = makeMutClosure(arg0, arg1, 63, __wbg_adapter_24);
             return ret;
         };
