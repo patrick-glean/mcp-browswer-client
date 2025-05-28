@@ -140,6 +140,8 @@
                 this.wasmCheckInterval = null;
                 this.checkCounter = 0;
                 this.selectedServerUrl = null;
+                this.isInitialized = false;
+                this.isDebugMode = false;
                 
                 // Store the bound message handler
                 this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
@@ -152,6 +154,16 @@
                 this.setupServiceWorker();
                 this.setupEventListeners();
                 this.startUptimeCounter();
+                
+                // Initialize debug mode from localStorage
+                const debugMode = localStorage.getItem('debugMode') === 'true';
+                this.setDebugMode(debugMode);
+                
+                // Update the toggle switch to match
+                const debugToggle = document.getElementById('debugModeToggle');
+                if (debugToggle) {
+                    debugToggle.checked = debugMode;
+                }
             }
 
             startUptimeCounter() {
@@ -690,6 +702,17 @@
                     compiledInfo.textContent = `Compiled: ${buildInfo}`;
                 }
             }
+
+            setDebugMode(enabled) {
+                this.isDebugMode = enabled;
+                localStorage.setItem('debugMode', enabled.toString());
+                if (this.serviceWorker) {
+                    this.serviceWorker.postMessage({ 
+                        type: 'set-debug-mode',
+                        enabled: enabled
+                    });
+                }
+            }
         }
 
         // Initialize the chat shell
@@ -718,11 +741,7 @@
         const debugModeToggle = document.getElementById('debugModeToggle');
         if (debugModeToggle) {
             debugModeToggle.addEventListener('change', function() {
-                localStorage.setItem('debugMode', this.checked);
-                navigator.serviceWorker.controller?.postMessage({ 
-                    type: 'set-debug-mode',
-                    enabled: this.checked
-                });
+                chatShell.setDebugMode(this.checked);
             });
         }
 
