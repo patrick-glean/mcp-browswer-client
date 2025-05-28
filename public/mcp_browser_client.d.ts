@@ -16,6 +16,7 @@ declare namespace wasm_bindgen {
 	export function initialize_mcp_server(url: string): Promise<any>;
 	export function get_server_info(): any;
 	export function query_tools(): Promise<any>;
+	export function list_tools(url: string): Promise<any>;
 	export function get_compiled_info(): string;
 	
 }
@@ -39,6 +40,7 @@ declare interface InitOutput {
   readonly initialize_mcp_server: (a: number, b: number) => any;
   readonly get_server_info: () => [number, number, number];
   readonly query_tools: () => any;
+  readonly list_tools: (a: number, b: number) => any;
   readonly get_compiled_info: () => [number, number];
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;
@@ -48,8 +50,8 @@ declare interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure62_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure84_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure66_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure88_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

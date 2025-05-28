@@ -575,34 +575,17 @@ self.addEventListener('message', async (event) => {
                 const url = message.url || get_server_url();
                 debugLog(`Listing tools from ${url}`);
                 
-                // Create JSON-RPC request for tool list
-                const toolListRequest = {
-                    jsonrpc: '2.0',
-                    method: 'tools/list',
-                    params: {},
-                    id: Date.now()
-                };
+                // Let the WASM module handle the MCP protocol
+                const result = await wasmInstance.list_tools(url);
+                const parsedResult = JSON.parse(result);
                 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(toolListRequest)
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                if (result.error) {
-                    throw new Error(`JSON-RPC error: ${result.error.message}`);
+                if (parsedResult.error) {
+                    throw new Error(`Failed to list tools: ${parsedResult.error.message}`);
                 }
                 
                 broadcastToClients({
                     type: 'tools_list',
-                    tools: result.result.tools
+                    tools: parsedResult.result.tools
                 });
             } catch (error) {
                 debugLog(`Error listing tools: ${error}`);

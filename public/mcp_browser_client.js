@@ -361,6 +361,17 @@ let wasm_bindgen;
     };
 
     /**
+     * @param {string} url
+     * @returns {Promise<any>}
+     */
+    __exports.list_tools = function(url) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.list_tools(ptr0, len0);
+        return ret;
+    };
+
+    /**
      * @returns {string}
      */
     __exports.get_compiled_info = function() {
@@ -377,11 +388,11 @@ let wasm_bindgen;
     };
 
     function __wbg_adapter_24(arg0, arg1, arg2) {
-        wasm.closure62_externref_shim(arg0, arg1, arg2);
+        wasm.closure66_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_69(arg0, arg1, arg2, arg3) {
-        wasm.closure84_externref_shim(arg0, arg1, arg2, arg3);
+    function __wbg_adapter_70(arg0, arg1, arg2, arg3) {
+        wasm.closure88_externref_shim(arg0, arg1, arg2, arg3);
     }
 
     async function __wbg_load(module, imports) {
@@ -461,7 +472,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_69(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_70(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -543,8 +554,8 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper260 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 63, __wbg_adapter_24);
+        imports.wbg.__wbindgen_closure_wrapper272 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 67, __wbg_adapter_24);
             return ret;
         };
         imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {

@@ -634,6 +634,67 @@ pub async fn query_tools() -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
+pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
+    info(&format!("Listing tools from {}", url));
+    
+    // Create JSON-RPC request for tool list
+    let tools_request = json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": js_sys::Date::now() as u64
+    });
+    
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &tools_request.to_string().into()).unwrap();
+    
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    
+    let promise = fetch(url, &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            debug(&format!("Received tools response: {}", json_str));
+                            
+                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
+                                if let Some(result) = response.result {
+                                    Ok(JsValue::from_str(&json!({
+                                        "result": result
+                                    }).to_string()))
+                                } else if let Some(error) = response.error {
+                                    Ok(JsValue::from_str(&json!({
+                                        "error": error
+                                    }).to_string()))
+                                } else {
+                                    Err(JsValue::from_str("No result or error in response"))
+                                }
+                            } else {
+                                Err(JsValue::from_str("Failed to parse tools response"))
+                            }
+                        }
+                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                    }
+                } else {
+                    Err(JsValue::from_str("Server returned error response"))
+                }
+            } else {
+                Err(JsValue::from_str("Failed to get response"))
+            }
+        }
+        Err(e) => Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
+    }
+}
+
+#[wasm_bindgen]
 pub fn get_compiled_info() -> String {
     format!("v{} built {} ({})", 
         VERSION,
