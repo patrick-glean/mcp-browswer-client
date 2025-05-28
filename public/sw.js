@@ -116,6 +116,7 @@ async function initializeWasm() {
         // Broadcast initialization
         broadcastToClients({
             type: 'wasm_initialized',
+            size: wasmSizeKB,
             buildInfo: buildInfo
         });
         

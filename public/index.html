@@ -523,7 +523,7 @@
                         this.updateToolsList(message.server.tools);
                         break;
                     case 'wasm_initialized':
-                        const initMessage = `WASM module initialized (${message.size}) - ${message.buildInfo}`;
+                        const initMessage = `WASM module initialized (${message.size} KB) - ${message.buildInfo}`;
                         this.log({ level: 'INFO', message: initMessage, timestamp: new Date().toISOString() });
                         this.updateBuildInfo(message.buildInfo);
                         // Update version if available
