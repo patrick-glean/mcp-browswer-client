@@ -45,18 +45,12 @@
             <div class="control-group wasm-controls">
                 <div>
                     <h3>WASM Module Controls</h3>
+                    <button id="check-wasm">Check WASM</button>
                     <button id="unload-wasm">Unload WASM</button>
                     <button id="reload-wasm" class="reload">Reload WASM</button>
                 </div>
             </div>
 
-            <div class="control-group">
-                <div>
-                    <h3>Health Checks</h3>
-                    <button id="check-wasm">Check WASM</button>
-                    <button id="check-mcp">Check MCP</button>
-                </div>
-            </div>
 
             <div class="control-group">
                 <h3>Memory Events</h3>
@@ -90,18 +84,10 @@
                     </div>
                     
                     <div class="init-steps">
-                        <div class="step">
-                            <button id="initProtocol">1. Initialize Protocol</button>
-                            <span id="initStatus" class="status-indicator">●</span>
-                        </div>
-                        <div class="step">
-                            <button id="listTools">2. List Tools</button>
-                            <span id="toolsStatus" class="status-indicator">●</span>
-                        </div>
-                        <div class="step">
-                            <button id="registerTools">3. Register Tools</button>
-                            <span id="registerStatus" class="status-indicator">●</span>
-                        </div>
+                        <button id="check-mcp">Check MCP</button>
+                        <button id="initProtocol">Initialize Protocol</button>
+                        <button id="listTools">List Tools</button>
+                        <button id="registerTools">Register Tools</button>
                     </div>
                     
                     <div class="server-tools-container">
