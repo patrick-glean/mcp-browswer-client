@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Client Test</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-label">Service Worker:</span>
+                <span class="status-indicator" id="sw-status">●</span>
+                <span class="status-uptime" id="sw-uptime">0s</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">WASM Module:</span>
+                <span class="status-indicator" id="wasm-status">●</span>
+                <span class="status-uptime" id="wasm-uptime">0s</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">MCP Server:</span>
+                <span class="status-indicator" id="mcp-status">●</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Metadata Version:</span>
+                <span id="metadataVersion">-</span>
+            </div>
+            <div class="status-item">
+                <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
+            </div>
+        </div>
+        
+        <div class="controls-section">
+            <div class="control-group sw-controls">
+                <div>
+                    <h3>Service Worker Controls</h3>
+                    <button id="stop-sw">Stop Service Worker</button>
+                    <button id="start-sw" class="start">Start Service Worker</button>
+                </div>
+            </div>
+
+            <div class="control-group wasm-controls">
+                <div>
+                    <h3>WASM Module Controls</h3>
+                    <button id="check-wasm">Check WASM</button>
+                    <button id="unload-wasm">Unload WASM</button>
+                    <button id="reload-wasm" class="reload">Reload WASM</button>
+                </div>
+            </div>
+
+
+            <div class="control-group">
+                <h3>Memory Events</h3>
+                <div class="memory-controls">
+                    <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
+                    <button id="addMemoryEvent" class="control-button">Add Event</button>
+                    <button id="clearMemoryEvents" class="control-button">Clear Events</button>
+                </div>
+                <div id="memoryEvents" class="memory-events"></div>
+            </div>
+
+            <div class="control-group">
+                <h3>MCP Initialization</h3>
+                <div class="mcp-controls">
+                    <div class="server-config">
+                        <label for="mcpServerUrl">URL</label>
+                        <div class="url-input-container">
+                            <input type="text" id="mcpServerUrl" value="http://localhost:8081">
+                            <div class="url-status-icon">
+                                <svg class="default-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <rect width="16" height="16" fill="none"/>
+                                </svg>
+                                <svg class="edit-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                                </svg>
+                                <svg class="success-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="init-steps">
+                        <button id="check-mcp">Check MCP</button>
+                        <button id="initProtocol">Initialize Protocol</button>
+                        <button id="listTools">List Tools</button>
+                        <button id="registerTools">Register Tools</button>
+                    </div>
+                    
+                    <div class="server-tools-container">
+                        <div class="servers-display">
+                            <h4>Available Servers</h4>
+                            <div id="serversList"></div>
+                        </div>
+                        <div class="tools-display">
+                            <h4>Available Tools</h4>
+                            <div id="toolsList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <div class="control-group">
+                <div class="log-header">
+                    <h3>Logs</h3>
+                    <label class="debug-toggle">
+                        <input type="checkbox" id="debugModeToggle">
+                        <span class="slider"></span>
+                        Debug Mode
+                    </label>
+                </div>
+                <div class="log-container" id="log-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class ChatShell {
+            constructor() {
+                this.logContainer = document.getElementById('log-container');
+                this.swStatus = document.getElementById('sw-status');
+                this.wasmStatus = document.getElementById('wasm-status');
+                this.mcpStatus = document.getElementById('mcp-status');
+                this.swUptime = document.getElementById('sw-uptime');
+                this.wasmUptime = document.getElementById('wasm-uptime');
+                this.serviceWorker = null;
+                this.startTime = Date.now();
+                this.wasmStartTime = null;
+                this.uptimeInterval = null;
+                this.wasmUptimeInterval = null;
+                this.lastMcpCheck = null;
+                this.mcpCheckTimeout = null;
+                this.wasmCheckInterval = null;
+                this.checkCounter = 0;
+                this.selectedServerUrl = null;
+                this.isInitialized = false;
+                this.isDebugMode = false;
+                
+                // Store the bound message handler
+                this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
+                
+                // Initialize status indicators
+                this.updateSwStatus(false);
+                this.updateWasmStatus(false);
+                this.updateMcpStatus(false);
+                
+                this.setupServiceWorker();
+                this.setupEventListeners();
+                this.startUptimeCounter();
+                
+                // Initialize debug mode from localStorage
+                const debugMode = localStorage.getItem('debugMode') === 'true';
+                this.setDebugMode(debugMode);
+                
+                // Update the toggle switch to match
+                const debugToggle = document.getElementById('debugModeToggle');
+                if (debugToggle) {
+                    debugToggle.checked = debugMode;
+                }
+
+                // Initialize MCP Server URL from localStorage
+                const serverUrl = localStorage.getItem('mcpServerUrl') || 'http://localhost:8081';
+                const serverUrlInput = document.getElementById('mcpServerUrl');
+                if (serverUrlInput) {
+                    serverUrlInput.value = serverUrl;
+                }
+            }
+
+            startUptimeCounter() {
+                if (this.uptimeInterval) {
+                    clearInterval(this.uptimeInterval);
+                }
+                this.startTime = Date.now();
+                this.uptimeInterval = setInterval(() => {
+                    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+                    if (this.swUptime) {
+                        const hours = Math.floor(uptime / 3600);
+                        const minutes = Math.floor((uptime % 3600) / 60);
+                        const seconds = uptime % 60;
+                        this.swUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    }
+                }, 1000);
+            }
+
+            stopUptimeCounter() {
+                if (this.uptimeInterval) {
+                    clearInterval(this.uptimeInterval);
+                    this.uptimeInterval = null;
+                }
+                if (this.swUptime) {
+                    this.swUptime.textContent = '00:00:00';
+                }
+                if (this.wasmUptime) {
+                    this.wasmUptime.textContent = '00:00:00';
+                }
+            }
+
+            startWasmUptimeCounter() {
+                if (this.wasmUptimeInterval) {
+                    clearInterval(this.wasmUptimeInterval);
+                }
+                if (!this.wasmStartTime) {
+                    this.wasmStartTime = Date.now();
+                }
+                this.wasmUptimeInterval = setInterval(() => {
+                    if (this.wasmStartTime) {
+                        const uptime = Math.floor((Date.now() - this.wasmStartTime) / 1000);
+                        if (this.wasmUptime) {
+                            const hours = Math.floor(uptime / 3600);
+                            const minutes = Math.floor((uptime % 3600) / 60);
+                            const seconds = uptime % 60;
+                            this.wasmUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                        }
+                    }
+                }, 1000);
+            }
+
+            stopWasmUptimeCounter() {
+                if (this.wasmUptimeInterval) {
+                    clearInterval(this.wasmUptimeInterval);
+                    this.wasmUptimeInterval = null;
+                }
+                if (this.wasmUptime) {
+                    this.wasmUptime.textContent = '00:00:00';
+                }
+                this.wasmStartTime = null;
+            }
+
+            setupServiceWorker() {
+                if ('serviceWorker' in navigator) {
+                    console.log('Setting up service worker...');
+                    
+                    // First unregister any existing service workers
+                    navigator.serviceWorker.getRegistrations().then(registrations => {
+                        console.log('Unregistering existing service workers:', registrations.length);
+                        return Promise.all(registrations.map(registration => registration.unregister()));
+                    }).then(() => {
+                        console.log('Registering new service worker...');
+                        // Now register the new service worker
+                        return navigator.serviceWorker.register('sw.js');
+                    }).then(registration => {
+                        console.log('ServiceWorker registration successful');
+                        
+                        // Wait for the service worker to be ready
+                        if (registration.active) {
+                            console.log('Service worker is active');
+                            this.serviceWorker = registration.active;
+                            this.updateSwStatus(true);
+                            this.setupPeriodicChecks();
+                        } else {
+                            console.log('Waiting for service worker to activate...');
+                            // Wait for the service worker to activate
+                            registration.addEventListener('activate', () => {
+                                console.log('Service worker activated');
+                                this.serviceWorker = registration.active;
+                                this.updateSwStatus(true);
+                                this.setupPeriodicChecks();
+                            });
+                        }
+                    }).catch(error => {
+                        console.error('ServiceWorker registration failed:', error);
+                        this.updateSwStatus(false);
+                    });
+
+                    console.log('Removing existing message listener...');
+                    // Remove any existing message listeners
+                    navigator.serviceWorker.removeEventListener('message', this.boundMessageHandler);
+                    console.log('Adding new message listener...');
+                    // Add the message listener
+                    navigator.serviceWorker.addEventListener('message', this.boundMessageHandler);
+                }
+            }
+
+            setupPeriodicChecks() {
+                // Wait a short time for WASM to initialize
+                setTimeout(() => {
+                    // Set up periodic WASM uptime checks
+                    this.startPeriodicWasmChecks();
+                }, 1000); // Wait 1 second for WASM to initialize
+            }
+
+            setupEventListeners() {
+                const buttons = {
+                    'check-wasm': () => this.checkWasm(),
+                    'check-mcp': () => this.checkMcp(),
+                    'unload-wasm': () => this.unloadWasm(),
+                    'reload-wasm': () => this.reloadWasm(),
+                    'stop-sw': () => this.stopServiceWorker(),
+                    'start-sw': () => this.startServiceWorker(),
+                    'listTools': async () => {
+                        const url = document.getElementById('mcpServerUrl').value.trim();
+                        if (!url) {
+                            this.log({ level: 'ERROR', message: 'Please enter a valid MCP Server URL', timestamp: new Date().toISOString() });
+                            return;
+                        }
+                        
+                        this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
+                        if (this.serviceWorker) {
+                            try {
+                                await this.serviceWorker.postMessage({ 
+                                    type: 'list_tools',
+                                    url: url
+                                });
+                            } catch (err) {
+                                this.log({ level: 'ERROR', message: `Tools query failed: ${err}`, timestamp: new Date().toISOString() });
+                            }
+                        } else {
+                            this.log({ level: 'ERROR', message: 'Service worker not available', timestamp: new Date().toISOString() });
+                        }
+                    }
+                };
+
+                Object.entries(buttons).forEach(([id, handler]) => {
+                    const button = document.getElementById(id);
+                    if (button) {
+                        button.addEventListener('click', async () => {
+                            if (button.disabled) return;
+                            
+                            console.log(`Button clicked: ${id}`);
+                            button.disabled = true;
+                            button.classList.add('loading');
+                            
+                            try {
+                                await handler();
+                            } finally {
+                                button.disabled = false;
+                                button.classList.remove('loading');
+                            }
+                        });
+                    }
+                });
+            }
+
+            startPeriodicWasmChecks() {
+                // Clear any existing interval
+                if (this.wasmCheckInterval) {
+                    clearInterval(this.wasmCheckInterval);
+                }
+                
+                // Check immediately
+                this.checkWasm();
+                
+                // Then check every minute
+                this.wasmCheckInterval = setInterval(() => {
+                    this.checkWasm();
+                }, 60000); // 60 seconds
+            }
+
+            stopPeriodicWasmChecks() {
+                if (this.wasmCheckInterval) {
+                    clearInterval(this.wasmCheckInterval);
+                    this.wasmCheckInterval = null;
+                }
+            }
+
+            async stopServiceWorker() {
+                if (this.serviceWorker) {
+                    try {
+                        console.log('Stopping service worker...');
+                        this.stopPeriodicWasmChecks();
+                        this.stopWasmUptimeCounter();
+                        await this.serviceWorker.postMessage({ type: 'stop' });
+                        await navigator.serviceWorker.getRegistrations().then(registrations => {
+                            registrations.forEach(registration => registration.unregister());
+                        });
+                        this.serviceWorker = null;
+                        this.updateSwStatus(false);
+                        this.stopUptimeCounter();
+                        this.log('Service worker stopped');
+                    } catch (error) {
+                        console.error('Error stopping service worker:', error);
+                        this.log(`Error stopping service worker: ${error.message}`);
+                    }
+                }
+            }
+
+            async startServiceWorker() {
+                try {
+                    console.log('Starting service worker...');
+                    const registration = await navigator.serviceWorker.register('sw.js');
+                    this.serviceWorker = registration.active;
+                    this.updateSwStatus(true);
+                    this.startUptimeCounter();
+                    this.startPeriodicWasmChecks();
+                    this.startWasmUptimeCounter();
+                    this.log('Service worker started');
+                } catch (error) {
+                    console.error('Error starting service worker:', error);
+                    this.log(`Error starting service worker: ${error.message}`);
+                    this.updateSwStatus(false);
+                }
+            }
+
+            async unloadWasm() {
+                if (this.serviceWorker) {
+                    console.log('Unloading WASM module...');
+                    await this.serviceWorker.postMessage({ type: 'unload_wasm' });
+                    this.wasmStatus.classList.remove('healthy', 'unhealthy');
+                    this.wasmStatus.classList.add('unknown');
+                    this.stopWasmUptimeCounter();
+                    this.log('WASM module unloaded');
+                }
+            }
+
+            async reloadWasm() {
+                if (this.serviceWorker) {
+                    console.log('Reloading WASM module...');
+                    this.stopWasmUptimeCounter();
+                    await this.serviceWorker.postMessage({ type: 'reload_wasm' });
+                    this.startWasmUptimeCounter();
+                    this.log('Reloading WASM module...');
+                }
+            }
+
+            async checkWasm() {
+                if (this.serviceWorker) {
+                    const checkId = ++this.checkCounter;
+                    console.log(`Checking WASM module (check #${checkId})...`);
+                    await this.serviceWorker.postMessage({ 
+                        type: 'check_wasm',
+                        checkId: checkId
+                    });
+                }
+            }
+
+            async checkMcp() {
+                if (this.serviceWorker) {
+                    console.log('Checking MCP server...');
+                    // Set MCP status to healthy immediately
+                    this.updateMcpStatus(true);
+                    this.lastMcpCheck = Date.now();
+                    
+                    // Clear any existing timeout
+                    if (this.mcpCheckTimeout) {
+                        clearTimeout(this.mcpCheckTimeout);
+                    }
+                    
+                    // Set a timeout to mark MCP as unhealthy if no response within 5 seconds
+                    this.mcpCheckTimeout = setTimeout(() => {
+                        if (Date.now() - this.lastMcpCheck > 5000) {
+                            this.updateMcpStatus(false);
+                        }
+                    }, 5000);
+                    
+                    await this.serviceWorker.postMessage({ type: 'health_check' });
+                }
+            }
+
+            handleServiceWorkerMessage(event) {
+                const message = event.data;
+                const isDebugMode = localStorage.getItem('debugMode') === 'true';
+                
+                // Always log non-DEBUG messages to console
+                if (message.type !== 'log' || message.content.level !== 'DEBUG') {
+                    console.log('Received message from service worker:', message);
+                } else if (isDebugMode) {
+                    // Only log DEBUG messages if debug mode is enabled
+                    console.log('Received message from service worker:', message);
+                }
+                
+                // Handle JSON-RPC messages
+                if (message.jsonrpc === '2.0') {
+                    if (message.method === 'wasm_status') {
+                        const { status, metadata } = message.params;
+                        this.updateWasmStatus(status.healthy);
+                        if (status.uptime) {
+                            this.updateWasmUptime(status.uptime);
+                        }
+                        if (metadata) {
+                            // Update version
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement && metadata.version) {
+                                versionElement.textContent = metadata.version;
+                            }
+                            // Update build info
+                            if (metadata.buildInfo) {
+                                this.updateBuildInfo(metadata.buildInfo);
+                            }
+                        }
+                        // Log the status update
+                        this.log({
+                            level: 'INFO',
+                            message: `WASM status: ${status.healthy ? 'healthy' : 'unhealthy'} (uptime: ${formatUptime(status.uptime)})`,
+                            timestamp: new Date().toISOString()
+                        });
+                    } else if (message.result) {
+                        // Handle successful JSON-RPC response
+                        if (message.result.status) {
+                            this.updateMcpStatus(message.result.status === 'healthy');
+                        }
+                    } else if (message.error) {
+                        // Handle JSON-RPC error
+                        console.error('MCP error:', message.error);
+                        this.updateMcpStatus(false);
+                    }
+                    return;
+                }
+                
+                // Handle legacy messages
+                switch (message.type) {
+                    case 'log':
+                        this.log(message.content);
+                        break;
+                    case 'mcp_status':
+                        this.updateMcpStatus(message.healthy);
+                        break;
+                    case 'wasm_status':
+                        this.updateWasmStatus(message.healthy);
+                        if (message.healthy && message.params && message.params.metadata) {
+                            const metadata = message.params.metadata;
+                            // Update version
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement && metadata.version) {
+                                versionElement.textContent = metadata.version;
+                            }
+                            // Update build info
+                            if (metadata.buildInfo) {
+                                this.updateBuildInfo(metadata.buildInfo);
+                            }
+                        }
+                        break;
+                    case 'uptime':
+                        this.updateWasmUptime(message.uptime);
+                        break;
+                    case 'server_info':
+                        this.updateServersList(message.info.servers);
+                        break;
+                    case 'mcp_server_initialized':
+                        const serverName = message.server?.name || 'Unknown';
+                        this.log({ level: 'INFO', message: `Server initialized: ${serverName}`, timestamp: new Date().toISOString() });
+                        this.getServerInfo();
+                        this.updateToolsList(message.server.tools);
+                        break;
+                    case 'wasm_initialized':
+                        const initMessage = `WASM module initialized (${message.size} KB) - ${message.buildInfo}`;
+                        this.log({ level: 'INFO', message: initMessage, timestamp: new Date().toISOString() });
+                        this.updateBuildInfo(message.buildInfo);
+                        // Update version if available
+                        if (message.version) {
+                            const versionElement = document.getElementById('metadataVersion');
+                            if (versionElement) {
+                                versionElement.textContent = message.version;
+                            }
+                        }
+                        break;
+                    case 'tools_list':
+                        this.log({ level: 'INFO', message: `Tools list received: ${JSON.stringify(message.tools)}`, timestamp: new Date().toISOString() });
+                        this.updateToolsList(message.tools);
+                        break;
+                    default:
+                        console.warn('Unknown message type:', message.type);
+                }
+            }
+
+            updateSwStatus(healthy) {
+                if (this.swStatus) {
+                    this.swStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.swStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.swStatus.textContent = '●';
+                }
+            }
+
+            updateWasmStatus(healthy) {
+                if (this.wasmStatus) {
+                    this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.wasmStatus.textContent = '●';
+                }
+                const compiledInfo = document.getElementById('wasm-compiled');
+                if (compiledInfo) {
+                    compiledInfo.textContent = 'Compiled: -';
+                }
+            }
+
+            updateMcpStatus(healthy) {
+                if (this.mcpStatus) {
+                    this.mcpStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.mcpStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.mcpStatus.textContent = '●';
+                }
+            }
+
+            updateMetadataDisplay(metadata) {
+                if (!metadata) return;
+                
+                const versionElement = document.getElementById('metadataVersion');
+                if (versionElement && metadata.version) {
+                    versionElement.textContent = metadata.version;
+                }
+                
+                const memoryEvents = document.getElementById('memoryEvents');
+                if (memoryEvents && Array.isArray(metadata.memory_events)) {
+                    memoryEvents.innerHTML = '';
+                    metadata.memory_events.forEach(event => {
+                        const eventDiv = document.createElement('div');
+                        eventDiv.className = 'memory-event';
+                        const time = new Date(event.timestamp).toLocaleString();
+                        eventDiv.innerHTML = `<span class="memory-event-time">${time}</span>${event.text}`;
+                        memoryEvents.appendChild(eventDiv);
+                    });
+                }
+            }
+
+            log(message) {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                
+                if (typeof message === 'object') {
+                    if (message.level) {
+                        entry.classList.add(message.level);
+                        const timestamp = new Date(message.timestamp).toLocaleTimeString();
+                        entry.innerHTML = `
+                            <span class="log-timestamp">${timestamp}</span>
+                            <span class="log-level">${message.level}</span>
+                            <span class="log-message">${message.message}</span>
+                        `;
+                    } else {
+                        entry.textContent = JSON.stringify(message);
+                    }
+                } else {
+                    entry.textContent = message;
+                }
+                
+                this.logContainer.appendChild(entry);
+                this.logContainer.scrollTop = this.logContainer.scrollHeight;
+            }
+
+            updateWasmUptime(uptime) {
+                const uptimeElement = document.getElementById('wasm-uptime');
+                if (uptimeElement) {
+                    uptimeElement.textContent = formatUptime(uptime);
+                }
+            }
+
+            async initializeMcpServer() {
+                const url = document.getElementById('mcpServerUrl').value;
+                if (!url) {
+                    this.log({ level: 'ERROR', message: 'Please enter a server URL', timestamp: new Date().toISOString() });
+                    return;
+                }
+                this.log({ level: 'INFO', message: `Initializing MCP server at ${url}...`, timestamp: new Date().toISOString() });
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'initialize-mcp',
+                    url: url
+                });
+            }
+
+            async getServerInfo() {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'get-server-info'
+                });
+            }
+
+            updateServersList(servers) {
+                const serversList = document.getElementById('serversList');
+                serversList.innerHTML = '';
+                Object.entries(servers).forEach(([url, server]) => {
+                    const serverItem = document.createElement('div');
+                    serverItem.className = 'server-item';
+                    if (url === this.selectedServerUrl) {
+                        serverItem.classList.add('selected');
+                    }
+                    const hostname = new URL(server.url).host;
+                    serverItem.innerHTML = `
+                        <div class="server-name" title="${server.url}">${hostname}</div>
+                    `;
+                    serverItem.addEventListener('click', () => {
+                        if (this.selectedServerUrl === url) {
+                            this.selectedServerUrl = null;
+                            this.updateToolsList([]);
+                        } else {
+                            this.selectedServerUrl = url;
+                            this.updateToolsList(server.tools);
+                        }
+                        this.updateServersList(servers);
+                    });
+                    serversList.appendChild(serverItem);
+                });
+            }
+
+            updateToolsList(tools) {
+                const toolsList = document.getElementById('toolsList');
+                toolsList.innerHTML = '';
+                if (this.selectedServerUrl) {
+                    if (tools.length === 0) {
+                        const defaultTool = document.createElement('div');
+                        defaultTool.className = 'tool-item';
+                        defaultTool.innerHTML = `
+                            <strong>Check MCP</strong>
+                        `;
+                        defaultTool.title = 'Perform a health check on the MCP server.';
+                        defaultTool.addEventListener('click', () => this.checkMcp());
+                        toolsList.appendChild(defaultTool);
+                    } else {
+                        tools.forEach(tool => {
+                            const toolItem = document.createElement('div');
+                            toolItem.className = 'tool-item';
+                            toolItem.innerHTML = `
+                                <strong>${tool.name}</strong> (v${tool.version})
+                                <div>${tool.description}</div>
+                            `;
+                            toolsList.appendChild(toolItem);
+                        });
+                    }
+                }
+            }
+
+            updateBuildInfo(buildInfo) {
+                const compiledInfo = document.getElementById('wasm-compiled');
+                if (compiledInfo) {
+                    compiledInfo.textContent = `Compiled: ${buildInfo}`;
+                }
+            }
+
+            setDebugMode(enabled) {
+                this.isDebugMode = enabled;
+                localStorage.setItem('debugMode', enabled.toString());
+                if (this.serviceWorker) {
+                    this.serviceWorker.postMessage({ 
+                        type: 'set-debug-mode',
+                        enabled: enabled
+                    });
+                }
+            }
+
+            setServerUrl(url) {
+                localStorage.setItem('mcpServerUrl', url);
+                const serverUrlInput = document.getElementById('mcpServerUrl');
+                if (serverUrlInput) {
+                    serverUrlInput.value = url;
+                }
+            }
+        }
+
+        // Initialize the chat shell
+        const chatShell = new ChatShell();
+
+        // Add memory event
+        document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
+            const text = document.getElementById('memoryEventText')?.value.trim();
+            if (text) {
+                navigator.serviceWorker.controller?.postMessage({
+                    type: 'add_memory_event',
+                    text: text
+                });
+                document.getElementById('memoryEventText').value = '';
+            }
+        });
+
+        // Clear memory events
+        document.getElementById('clearMemoryEvents')?.addEventListener('click', () => {
+            navigator.serviceWorker.controller?.postMessage({
+                type: 'clear_memory_events'
+            });
+        });
+
+        // Debug mode toggle
+        const debugModeToggle = document.getElementById('debugModeToggle');
+        if (debugModeToggle) {
+            debugModeToggle.addEventListener('change', function() {
+                chatShell.setDebugMode(this.checked);
+            });
+        }
+
+        // Format uptime for display
+        function formatUptime(uptime) {
+            if (uptime === null || uptime === undefined) return '00:00:00';
+            // Convert BigInt to Number if needed
+            const uptimeNum = typeof uptime === 'bigint' ? Number(uptime) : uptime;
+            const hours = Math.floor(uptimeNum / 3600);
+            const minutes = Math.floor((uptimeNum % 3600) / 60);
+            const seconds = uptimeNum % 60;
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        document.getElementById('initProtocol').addEventListener('click', () => chatShell.initializeMcpServer());
+
+        // Add after the initProtocol event listener:
+        const serverUrlInput = document.getElementById('mcpServerUrl');
+        let updateTimeout = null;
+
+        if (serverUrlInput) {
+            // Set initial state
+            serverUrlInput.closest('.url-input-container').classList.add('default');
+            
+            serverUrlInput.addEventListener('input', () => {
+                const container = serverUrlInput.closest('.url-input-container');
+                container.classList.remove('default', 'success');
+                container.classList.add('editing');
+                
+                // Clear any existing timeout
+                if (updateTimeout) {
+                    clearTimeout(updateTimeout);
+                }
+                
+                // Set new timeout to save after 2 seconds of no typing
+                updateTimeout = setTimeout(() => {
+                    const url = serverUrlInput.value.trim();
+                    if (url) {
+                        chatShell.setServerUrl(url);
+                        chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
+                        
+                        container.classList.remove('editing');
+                        container.classList.add('success');
+                        
+                        // Reset to default after 2 seconds
+                        setTimeout(() => {
+                            container.classList.remove('success');
+                            container.classList.add('default');
+                        }, 1000);
+                    }
+                }, 1000);
+            });
+            
+            // Keep the blur handler for when user clicks away
+            serverUrlInput.addEventListener('blur', () => {
+                const url = serverUrlInput.value.trim();
+                if (url) {
+                    chatShell.setServerUrl(url);
+                    chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
+                    
+                    const container = serverUrlInput.closest('.url-input-container');
+                    container.classList.remove('editing');
+                    container.classList.add('success');
+                    
+                    // Reset to default after 2 seconds
+                    setTimeout(() => {
+                        container.classList.remove('success');
+                        container.classList.add('default');
+                    }, 2000);
+                }
+            });
+
+            // Also update on Enter key
+            serverUrlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    serverUrlInput.blur();
+                }
+            });
+        }
+    </script>
+
+    <!-- Styles moved to styles.css -->
+</body>
+</html>
