@@ -73,8 +73,10 @@ async function initializeWasm() {
     try {
         debugLog('Initializing WASM module...');
         
+        // Determine base path for relative fetches
+        const basePath = self.location.pathname.replace(/\/[^\/]*$/, '/');
         // Fetch the wasm-bindgen JS file
-        const bindingsResponse = await self.fetch('/mcp_browser_client.js');
+        const bindingsResponse = await self.fetch(`${basePath}mcp_browser_client.js`);
         if (!bindingsResponse.ok) {
             throw new Error(`Failed to fetch WASM bindings: ${bindingsResponse.status} ${bindingsResponse.statusText}`);
         }
@@ -89,7 +91,7 @@ async function initializeWasm() {
         debugLog('WASM bindings loaded via eval');
         
         // Now load the WASM module
-        const wasmResponse = await self.fetch('/mcp_browser_client_bg.wasm');
+        const wasmResponse = await self.fetch(`${basePath}mcp_browser_client_bg.wasm`);
         if (!wasmResponse.ok) {
             throw new Error(`Failed to fetch WASM module: ${wasmResponse.status} ${wasmResponse.statusText}`);
         }
