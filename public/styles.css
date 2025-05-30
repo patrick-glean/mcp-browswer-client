@@ -558,13 +558,15 @@ input:checked + .slider:before {
 .server-card {
     margin: 10px 0;
     padding: 15px;
-    border: 1px solid #ddd;
+    border: 1px solid #444;
     border-radius: 4px;
+    background: #232323;
+    color: #d4d4d4;
 }
 
 .server-card h4 {
     margin: 0 0 10px 0;
-    color: #333;
+    color: #d4d4d4;
 }
 
 .server-status {
@@ -598,8 +600,10 @@ input:checked + .slider:before {
 .tool-item {
     margin: 5px 0;
     padding: 5px;
-    background: #f8f9fa;
+    background: #232323;
     border-radius: 4px;
+    color: #d4d4d4;
+    border: 1px solid #444;
 }
 
 .server-tools-container {
@@ -610,23 +614,31 @@ input:checked + .slider:before {
 .servers-display, .tools-display {
     flex: 1;
     padding: 10px;
-    border: 1px solid #ddd;
+    border: 1px solid #444;
     border-radius: 4px;
+    background: #232323;
+    color: #d4d4d4;
 }
 
 .server-item {
     padding: 10px;
-    border: 1px solid #eee;
+    border: 1px solid #444;
     margin-bottom: 5px;
     cursor: pointer;
+    background: #232323;
+    color: #d4d4d4;
+    transition: background 0.2s, color 0.2s;
 }
 
 .server-item:hover {
-    background: #f0f0f0;
+    background: #333;
+    color: #fff;
 }
 
 .server-item.selected {
-    background: #e0e0e0;
+    background: #0e639c;
+    color: #fff;
+    border-color: #1177bb;
 }
 
 /* Add after the server-config styles: */
@@ -678,4 +690,42 @@ input:checked + .slider:before {
 .url-input-container input:focus {
     outline: none;
     border-color: #666;
+}
+
+input, textarea, select {
+    background: #232323;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #1177bb;
+    background: #282c34;
+}
+
+.autosave-input-wrap {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+}
+
+.autosave-input-wrap input {
+    padding-right: 28px !important;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.autosave-checkmark {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    pointer-events: none;
+    z-index: 2;
 } 
