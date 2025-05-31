@@ -793,8 +793,38 @@
                     toolItem.onclick = () => this.renderToolCard(tool);
                     toolsList.appendChild(toolItem);
                 });
-                // Hide tool card if no tool is selected
                 document.getElementById('toolCard').style.display = 'none';
+            }
+
+            // Recursive input field renderer for tool schemas
+            renderInputField(key, prop, isRequired) {
+                const inputCard = document.createElement('div');
+                inputCard.className = 'tool-input-card';
+                let label = `<label><strong>${key}</strong> (${prop.type || 'string'})`;
+                if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                label += '</label><br>';
+
+                if (prop.type === 'string') {
+                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                } else if (prop.type === 'integer' || prop.type === 'number') {
+                    inputCard.innerHTML = `${label}<input type="number" name="${key}" />`;
+                } else if (prop.type === 'array' && prop.items) {
+                    inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item">Add</button>`;
+                    const arrayInputs = inputCard.querySelector('.array-inputs');
+                    inputCard.querySelector('.add-array-item').onclick = () => {
+                        arrayInputs.appendChild(this.renderInputField(key + '[]', prop.items, false));
+                    };
+                } else if (prop.type === 'object' && prop.properties) {
+                    inputCard.innerHTML = `${label}<div class="object-inputs"></div>`;
+                    const objectInputs = inputCard.querySelector('.object-inputs');
+                    Object.entries(prop.properties).forEach(([subKey, subProp]) => {
+                        objectInputs.appendChild(this.renderInputField(subKey, subProp, (prop.required || []).includes(subKey)));
+                    });
+                } else {
+                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                }
+                return inputCard;
             }
 
             renderToolCard(tool) {
@@ -814,17 +844,13 @@
                 `;
                 toolCard.appendChild(card);
                 // Render input schema if present
-                if (tool.input_schema && tool.input_schema.properties) {
+                const schema = tool.inputSchema || tool.input_schema;
+                if (schema && schema.properties) {
                     const schemaDiv = card.querySelector('.tool-input-schema');
                     schemaDiv.innerHTML = '<h4>Inputs</h4>';
-                    Object.entries(tool.input_schema.properties).forEach(([key, prop]) => {
-                        const inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        inputCard.innerHTML = `
-                            <label><strong>${key}</strong> (${prop.type})</label><br>
-                            <input type="${prop.type === 'string' ? 'text' : prop.type}" name="${key}" />
-                        `;
-                        schemaDiv.appendChild(inputCard);
+                    Object.entries(schema.properties).forEach(([key, prop]) => {
+                        const isRequired = (schema.required || []).includes(key);
+                        schemaDiv.appendChild(this.renderInputField(key, prop, isRequired));
                     });
                 }
             }

@@ -120,8 +120,22 @@ class MCPServer:
         })
 
     async def handle_tools_list(self, params, id):
+        # Return tools in MCP spec-compliant format
         return self.create_response(id, {
-            "tools": list(self.tools.values())
+            "tools": [
+                {
+                    "name": "echo",
+                    "description": "Echoes back the input text",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "description": "Text to echo back."}
+                        },
+                        "required": ["text"],
+                        "additionalProperties": False
+                    }
+                }
+            ]
         })
 
     async def handle_echo_tool(self, params, id):
