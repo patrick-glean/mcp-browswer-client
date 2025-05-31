@@ -10,6 +10,7 @@ use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen::JsCast;
 use std::sync::LazyLock;
 use std::collections::HashMap;
+use serde_wasm_bindgen;
 
 include!("build_info.rs");
 
@@ -751,4 +752,50 @@ pub fn get_compiled_info() -> String {
         BUILD_DATETIME,
         &BUILD_HASH[..8]
     )
+}
+
+#[wasm_bindgen]
+pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsValue, JsValue> {
+    info(&format!("Calling tool '{}' on {}", tool_name, url));
+    let args_value: serde_json::Value = serde_wasm_bindgen::from_value(args).map_err(|e| JsValue::from_str(&format!("Invalid args: {}", e)))?;
+    let call_request = json!({
+        "jsonrpc": "2.0",
+        "id": js_sys::Date::now() as u64,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": args_value
+        }
+    });
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &call_request.to_string().into()).unwrap();
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
+    js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
+    js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    let promise = fetch(url, &options);
+    match JsFuture::from(promise).await {
+        Ok(response) => {
+            let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
+            if let Some(resp) = resp {
+                if resp.ok() {
+                    match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(json) => {
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            debug(&format!("Received tool call response: {}", json_str));
+                            Ok(JsValue::from_str(&json_str))
+                        }
+                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                    }
+                } else {
+                    Err(JsValue::from_str("Server returned error response"))
+                }
+            } else {
+                Err(JsValue::from_str("Failed to get response"))
+            }
+        }
+        Err(e) => Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
+    }
 }

@@ -98,7 +98,10 @@
                                 <h4>Available Tools</h4>
                                 <div id="toolsList"></div>
                             </div>
-                            <div id="toolCard" class="tool-card" style="flex: 2; display: none;"></div>
+                        </div>
+                        <div class="tool-cards-row" style="display: flex; gap: 20px; margin-top: 1.5rem;">
+                            <div id="toolCard" class="tool-card" style="display: none;"></div>
+                            <div id="toolResultCard" class="tool-result-card" style="display: none;"></div>
                         </div>
                         <div class="mcp-controls">
                             <div class="init-steps">
@@ -591,6 +594,16 @@
                             }
                         }
                         break;
+                    case 'tool_result':
+                        // Show result in tool result card
+                        const toolResultCard = document.getElementById('toolResultCard');
+                        toolResultCard.style.display = 'block';
+                        if (message.error) {
+                            toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span style='color:#f44336;'>${message.error}</span></div>`;
+                        } else {
+                            toolResultCard.innerHTML = `<div class='tool-result-card-inner'><h3>Tool Output</h3><pre>${JSON.stringify(message.result, null, 2)}</pre></div>`;
+                        }
+                        return;
                     default:
                         console.warn('Unknown message type:', message.type);
                 }
@@ -835,12 +848,17 @@
                     return;
                 }
                 toolCard.style.display = 'block';
-                const card = document.createElement('div');
+                const card = document.createElement('form');
                 card.className = 'tool-card-inner';
+                card.onsubmit = (e) => {
+                    e.preventDefault();
+                    this.handleCallTool(tool, card);
+                };
                 card.innerHTML = `
                     <h3>${tool.name}</h3>
                     <div class="tool-description">${tool.description || ''}</div>
                     <div class="tool-input-schema"></div>
+                    <button type="submit" class="call-tool-btn">Call Tool</button>
                 `;
                 toolCard.appendChild(card);
                 // Render input schema if present
@@ -979,6 +997,58 @@
                     };
                     input.addEventListener('input', input._autosaveHandler);
                 });
+            }
+
+            handleCallTool(tool, form) {
+                const url = this.selectedServerUrl;
+                if (!url) {
+                    this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
+                    return;
+                }
+                // Serialize form data
+                const schema = tool.inputSchema || tool.input_schema;
+                const args = this.serializeToolForm(form, schema);
+                // Send to service worker
+                if (this.serviceWorker) {
+                    this.serviceWorker.postMessage({
+                        type: 'call_tool',
+                        url,
+                        toolName: tool.name,
+                        args
+                    });
+                    // Optionally, show loading state
+                    const resultArea = form.querySelector('.tool-result-area');
+                    if (resultArea) {
+                        resultArea.innerHTML = '<span style="color:#aaa;">Calling tool...</span>';
+                    }
+                }
+            }
+
+            serializeToolForm(form, schema) {
+                // Recursively serialize form fields to match schema
+                const result = {};
+                if (!schema || !schema.properties) return result;
+                Object.entries(schema.properties).forEach(([key, prop]) => {
+                    if (prop.type === 'array') {
+                        // Collect all inputs with name key[]
+                        const values = Array.from(form.querySelectorAll(`[name='${key}[]']`)).map(input => input.value);
+                        result[key] = values;
+                    } else if (prop.type === 'object' && prop.properties) {
+                        // Recursively serialize object
+                        const subSchema = { properties: prop.properties, required: prop.required };
+                        result[key] = this.serializeToolForm(form, subSchema);
+                    } else {
+                        const input = form.querySelector(`[name='${key}']`);
+                        if (input) {
+                            if (prop.type === 'integer' || prop.type === 'number') {
+                                result[key] = input.value ? Number(input.value) : undefined;
+                            } else {
+                                result[key] = input.value;
+                            }
+                        }
+                    }
+                });
+                return result;
             }
         }
 

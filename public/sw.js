@@ -601,6 +601,27 @@ self.addEventListener('message', async (event) => {
                 });
             }
             break;
+        case 'call_tool':
+            if (!wasmInstance) {
+                broadcastToClients({
+                    type: 'tool_result',
+                    error: 'WASM module not loaded'
+                });
+                break;
+            }
+            try {
+                const result = await wasmInstance.call_tool(message.url, message.toolName, JSON.stringify(message.args));
+                broadcastToClients({
+                    type: 'tool_result',
+                    result: JSON.parse(result)
+                });
+            } catch (error) {
+                broadcastToClients({
+                    type: 'tool_result',
+                    error: error.message || String(error)
+                });
+            }
+            break;
         default:
             console.warn('Unknown message type:', message.type);
     }
