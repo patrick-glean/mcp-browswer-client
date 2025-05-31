@@ -153,10 +153,33 @@ class MCPServer:
             "version": "1.0.0"
         })
 
+    async def handle_tools_call(self, params, id):
+        # For the echo tool, just echo back the text argument
+        tool_name = params.get("name")
+        arguments = params.get("arguments", {})
+        if tool_name == "echo":
+            text = arguments.get("text", "")
+            return self.create_response(id, {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Echo: {text}"
+                    }
+                ]
+            })
+        else:
+            return self.create_error_response(id, METHOD_NOT_FOUND, f"Tool '{tool_name}' not found")
+
     async def handle_mcp_message(self, request):
         try:
+            # Log request headers and body
+            headers = dict(request.headers)
             body = await request.text()
-            
+            logging.info(f"Incoming request headers: {json.dumps(headers, indent=2)}")
+            logging.info(f"Incoming request body: {body}")
+            print("\n--- Incoming Request ---")
+            print("Headers:", json.dumps(headers, indent=2))
+            print("Body:", body)
             # Handle JSON-RPC messages
             try:
                 message = json.loads(body)
@@ -164,40 +187,39 @@ class MCPServer:
                 return web.json_response(
                     self.create_error_response(None, PARSE_ERROR, "Invalid JSON")
                 )
-            
             if not isinstance(message, dict):
                 return web.json_response(
                     self.create_error_response(None, INVALID_REQUEST, "Invalid message format")
                 )
-
             if message.get("jsonrpc") != JSONRPC_VERSION:
                 return web.json_response(
                     self.create_error_response(message.get("id"), INVALID_REQUEST, "Invalid JSON-RPC version")
                 )
-
             method = message.get("method")
             params = message.get("params", {})
             id = message.get("id")
-
             if not method:
                 return web.json_response(
                     self.create_error_response(id, INVALID_REQUEST, "Method is required")
                 )
-
             # Route the message to the appropriate handler
             if method == "initialize":
                 response = await self.handle_initialize(params, id)
             elif method == "tools/list":
                 response = await self.handle_tools_list(params, id)
+            elif method == "tools/call":
+                response = await self.handle_tools_call(params, id)
             elif method == "tool/echo":
                 response = await self.handle_echo_tool(params, id)
             elif method == "health_check":
                 response = await self.handle_health_check(params, id)
             else:
                 response = self.create_error_response(id, METHOD_NOT_FOUND, f"Method '{method}' not found")
-
+            # Log outgoing response
+            logging.info(f"Outgoing response: {json.dumps(response, indent=2)}")
+            print("--- Outgoing Response ---")
+            print(json.dumps(response, indent=2))
             return web.json_response(response)
-
         except Exception as e:
             logging.error(f"Error handling request: {str(e)}", exc_info=True)
             return web.json_response(

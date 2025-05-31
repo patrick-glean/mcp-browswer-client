@@ -411,6 +411,7 @@ mcpHandler.setDebugMode(isDebugMode);
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
     const message = event.data;
+    console.log('[SW] Received message:', message);
     
     // Handle MCP messages
     if (message.jsonrpc === '2.0') {
@@ -610,7 +611,7 @@ self.addEventListener('message', async (event) => {
                 break;
             }
             try {
-                const result = await wasmInstance.call_tool(message.url, message.toolName, JSON.stringify(message.args));
+                const result = await wasmInstance.call_tool(message.url, message.toolName, message.args);
                 broadcastToClients({
                     type: 'tool_result',
                     result: JSON.parse(result)
