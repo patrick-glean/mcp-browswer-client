@@ -28,93 +28,103 @@
                 <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
             </div>
         </div>
-        
-        <div class="controls-section">
-            <div class="control-group sw-controls">
-                <div>
-                    <h3>Service Worker Controls</h3>
-                    <button id="start-sw" class="start">Start Service Worker</button>
-                    <button id="stop-sw">Stop Service Worker</button>
-                </div>
+        <div class="main-content-tabs">
+            <div class="tab-bar">
+                <button id="mainTabBtn" class="tab-btn active">Main</button>
+                <button id="logsTabBtn" class="tab-btn">Logs</button>
+                <button id="popoutLogsBtn" class="tab-btn" title="Pop out logs">↗</button>
             </div>
-
-            <div class="control-group wasm-controls">
-                <div>
-                    <h3>WASM Module Controls</h3>
-                    <button id="check-wasm">Check WASM</button>
-                    <button id="unload-wasm">Unload WASM</button>
-                    <button id="reload-wasm" class="reload">Reload WASM</button>
-                </div>
-            </div>
-
-
-            <div class="control-group">
-                <h3>Memory Events</h3>
-                <div class="memory-controls">
-                    <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
-                    <button id="addMemoryEvent" class="control-button">Add Event</button>
-                    <button id="clearMemoryEvents" class="control-button">Clear Events</button>
-                </div>
-                <div id="memoryEvents" class="memory-events"></div>
-            </div>
-
-            <div class="control-group">
-                <h3>MCP Servers</h3>
-                <div class="mcp-servers-section" style="display: flex; gap: 2rem; align-items: flex-start;">
-                    <div class="servers-list-panel" style="flex: 1; min-width: 220px;">
-                        <div class="add-server-controls" style="margin-bottom: 1rem;">
-                            <input type="text" id="serverUrl" placeholder="Server URL">
-                            <input type="text" id="serverAlias" placeholder="Alias (optional)">
-                            <button id="addServerBtn">Add</button>
-                        </div>
-                        <div id="serversList"></div>
-                    </div>
-                    <div class="server-card-panel" style="flex: 2;">
-                        <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
-                            <h4>Server Details</h4>
-                            <div class="server-card-fields autosave-group">
-                                <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
-                                <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
-                                <label>Name: <input type="text" id="cardServerName" disabled></label><br>
-                                <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
-                                <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
-                                <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
-                            </div>
-                            <div style="margin-top: 1rem;">
-                                <!--<button id="saveServerBtn">Save</button>-->
-                                <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
-                            </div>
+            <div id="mainTab" class="tab-content active">
+                <div class="controls-section">
+                    <div class="control-group sw-controls">
+                        <div>
+                            <h3>Service Worker Controls</h3>
+                            <button id="start-sw" class="start">Start Service Worker</button>
+                            <button id="stop-sw">Stop Service Worker</button>
                         </div>
                     </div>
-                </div>
-                <div class="server-tools-container">
-                    <div class="tools-display">
-                        <h4>Available Tools</h4>
-                        <div id="toolsList"></div>
+
+                    <div class="control-group wasm-controls">
+                        <div>
+                            <h3>WASM Module Controls</h3>
+                            <button id="check-wasm">Check WASM</button>
+                            <button id="unload-wasm">Unload WASM</button>
+                            <button id="reload-wasm" class="reload">Reload WASM</button>
+                        </div>
                     </div>
-                </div>
-                <div class="mcp-controls">
-                    <div class="init-steps">
-                        <button id="check-mcp">Check MCP</button>
-                        <button id="initProtocol">Initialize</button>
-                        <button id="listTools">List Tools</button>
-                        <button id="registerTools">Register Tools</button>
+
+
+                    <div class="control-group">
+                        <h3>Memory Events</h3>
+                        <div class="memory-controls">
+                            <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
+                            <button id="addMemoryEvent" class="control-button">Add Event</button>
+                            <button id="clearMemoryEvents" class="control-button">Clear Events</button>
+                        </div>
+                        <div id="memoryEvents" class="memory-events"></div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>MCP Servers</h3>
+                        <div class="mcp-servers-section" style="display: flex; gap: 2rem; align-items: flex-start;">
+                            <div class="servers-list-panel" style="flex: 1; min-width: 220px;">
+                                <div class="add-server-controls" style="margin-bottom: 1rem;">
+                                    <input type="text" id="serverUrl" placeholder="Server URL">
+                                    <input type="text" id="serverAlias" placeholder="Alias (optional)">
+                                    <button id="addServerBtn">Add</button>
+                                </div>
+                                <div id="serversList"></div>
+                            </div>
+                            <div class="server-card-panel" style="flex: 2;">
+                                <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
+                                    <h4>Server Details</h4>
+                                    <div class="server-card-fields autosave-group">
+                                        <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
+                                        <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
+                                        <label>Name: <input type="text" id="cardServerName" disabled></label><br>
+                                        <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
+                                        <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
+                                        <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
+                                    </div>
+                                    <div style="margin-top: 1rem;">
+                                        <!--<button id="saveServerBtn">Save</button>-->
+                                        <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="server-tools-container" style="display: flex; gap: 20px;">
+                            <div class="tools-display" style="flex: 1;">
+                                <h4>Available Tools</h4>
+                                <div id="toolsList"></div>
+                            </div>
+                            <div id="toolCard" class="tool-card" style="flex: 2; display: none;"></div>
+                        </div>
+                        <div class="mcp-controls">
+                            <div class="init-steps">
+                                <button id="check-mcp">Check MCP</button>
+                                <button id="initProtocol">Initialize</button>
+                                <button id="listTools">List Tools</button>
+                                <button id="registerTools">Register Tools</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="log-section">
-            <div class="control-group">
-                <div class="log-header">
-                    <h3>Logs</h3>
-                    <label class="debug-toggle">
-                        <input type="checkbox" id="debugModeToggle">
-                        <span class="slider"></span>
-                        Debug Mode
-                    </label>
+            <div id="logsTab" class="tab-content" style="display:none;">
+                <div class="log-section">
+                    <div class="control-group">
+                        <div class="log-header">
+                            <h3>Logs</h3>
+                            <label class="debug-toggle">
+                                <input type="checkbox" id="debugModeToggle">
+                                <span class="slider"></span>
+                                Debug Mode
+                            </label>
+                        </div>
+                        <div class="log-container" id="log-container"></div>
+                    </div>
                 </div>
-                <div class="log-container" id="log-container"></div>
             </div>
         </div>
     </div>
@@ -770,27 +780,52 @@
             updateToolsList(tools) {
                 const toolsList = document.getElementById('toolsList');
                 toolsList.innerHTML = '';
-                if (this.selectedServerUrl) {
-                    if (tools.length === 0) {
-                        const defaultTool = document.createElement('div');
-                        defaultTool.className = 'tool-item';
-                        defaultTool.innerHTML = `
-                            <strong>...</strong>
+                if (!tools || tools.length === 0) {
+                    toolsList.innerHTML = '<div style="color:#888;">No tools available.</div>';
+                    document.getElementById('toolCard').style.display = 'none';
+                    return;
+                }
+                tools.forEach((tool, idx) => {
+                    const toolItem = document.createElement('div');
+                    toolItem.className = 'tool-item';
+                    toolItem.textContent = tool.name;
+                    toolItem.style.cursor = 'pointer';
+                    toolItem.onclick = () => this.renderToolCard(tool);
+                    toolsList.appendChild(toolItem);
+                });
+                // Hide tool card if no tool is selected
+                document.getElementById('toolCard').style.display = 'none';
+            }
+
+            renderToolCard(tool) {
+                const toolCard = document.getElementById('toolCard');
+                toolCard.innerHTML = '';
+                if (!tool) {
+                    toolCard.style.display = 'none';
+                    return;
+                }
+                toolCard.style.display = 'block';
+                const card = document.createElement('div');
+                card.className = 'tool-card-inner';
+                card.innerHTML = `
+                    <h3>${tool.name}</h3>
+                    <div class="tool-description">${tool.description || ''}</div>
+                    <div class="tool-input-schema"></div>
+                `;
+                toolCard.appendChild(card);
+                // Render input schema if present
+                if (tool.input_schema && tool.input_schema.properties) {
+                    const schemaDiv = card.querySelector('.tool-input-schema');
+                    schemaDiv.innerHTML = '<h4>Inputs</h4>';
+                    Object.entries(tool.input_schema.properties).forEach(([key, prop]) => {
+                        const inputCard = document.createElement('div');
+                        inputCard.className = 'tool-input-card';
+                        inputCard.innerHTML = `
+                            <label><strong>${key}</strong> (${prop.type})</label><br>
+                            <input type="${prop.type === 'string' ? 'text' : prop.type}" name="${key}" />
                         `;
-                        defaultTool.title = 'Perform a health check on the MCP server.';
-                        defaultTool.addEventListener('click', () => this.checkMcp());
-                        toolsList.appendChild(defaultTool);
-                    } else {
-                        tools.forEach(tool => {
-                            const toolItem = document.createElement('div');
-                            toolItem.className = 'tool-item';
-                            toolItem.innerHTML = `
-                                <strong>${tool.name}</strong> (v${tool.version})
-                                <div>${tool.description}</div>
-                            `;
-                            toolsList.appendChild(toolItem);
-                        });
-                    }
+                        schemaDiv.appendChild(inputCard);
+                    });
                 }
             }
 
@@ -1026,6 +1061,31 @@
                     serverUrlInput.blur();
                 }
             });
+        }
+
+        document.getElementById('mainTabBtn').onclick = function() {
+            document.getElementById('mainTab').classList.add('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('logsTabBtn').classList.remove('active');
+            document.getElementById('mainTab').style.display = 'block';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('logsTabBtn').onclick = function() {
+            document.getElementById('mainTab').classList.remove('active');
+            document.getElementById('logsTab').classList.add('active');
+            this.classList.add('active');
+            document.getElementById('mainTabBtn').classList.remove('active');
+            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'block';
+        };
+        document.getElementById('popoutLogsBtn').onclick = function() {
+            window.open(window.location.pathname + '?logs=1', '_blank', 'width=600,height=800');
+        };
+        if (window.location.search.includes('logs=1')) {
+            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'block';
+            document.querySelector('.tab-bar').style.display = 'none';
         }
     </script>
 
