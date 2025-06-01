@@ -31,6 +31,7 @@
         <div class="main-content-tabs">
             <div class="tab-bar">
                 <button id="mainTabBtn" class="tab-btn active">Main</button>
+                <button id="memoryTabBtn" class="tab-btn">Memory</button>
                 <button id="logsTabBtn" class="tab-btn">Logs</button>
                 <button id="popoutLogsBtn" class="tab-btn" title="Pop out logs">↗</button>
             </div>
@@ -53,7 +54,57 @@
                         </div>
                     </div>
 
-
+                    <div class="control-group">
+                        <h3>MCP Servers</h3>
+                        <div class="mcp-servers-group">
+                            <div class="mcp-controls-header">
+                                <div class="add-server-controls">
+                                    <input type="text" id="serverUrl" placeholder="Server URL">
+                                    <input type="text" id="serverAlias" placeholder="Alias (optional)">
+                                    <button id="addServerBtn">Add</button>
+                                </div>
+                                <div class="mcp-controls-bar">
+                                    <button id="check-mcp">Check MCP</button>
+                                    <button id="initProtocol">Initialize</button>
+                                    <button id="listTools">List Tools</button>
+                                </div>
+                            </div>
+                            <div class="mcp-servers-section">
+                                <div class="servers-list-panel">
+                                    <div id="serversList"></div>
+                                </div>
+                                <div class="server-card-panel">
+                                    <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
+                                        <h4>Server Details</h4>
+                                        <div class="server-card-fields autosave-group">
+                                            <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
+                                            <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
+                                            <label>Name: <input type="text" id="cardServerName" disabled></label><br>
+                                            <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
+                                            <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
+                                            <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
+                                        </div>
+                                        <div style="margin-top: 1rem;">
+                                            <!--<button id="saveServerBtn">Save</button>-->
+                                            <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tools-display">
+                                    <h4>Available Tools</h4>
+                                    <div id="toolsList"></div>
+                                </div>
+                            </div>
+                            <div class="tool-cards-row">
+                                <div id="toolCard" class="tool-card"></div>
+                                <div id="toolResultCard" class="tool-result-card"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="memoryTab" class="tab-content" style="display:none;">
+                <div class="memory-section">
                     <div class="control-group">
                         <h3>Memory Events</h3>
                         <div class="memory-controls">
@@ -62,55 +113,6 @@
                             <button id="clearMemoryEvents" class="control-button">Clear Events</button>
                         </div>
                         <div id="memoryEvents" class="memory-events"></div>
-                    </div>
-
-                    <div class="control-group">
-                        <h3>MCP Servers</h3>
-                        <div class="mcp-servers-section" style="display: flex; gap: 2rem; align-items: flex-start;">
-                            <div class="servers-list-panel" style="flex: 1; min-width: 220px;">
-                                <div class="add-server-controls" style="margin-bottom: 1rem;">
-                                    <input type="text" id="serverUrl" placeholder="Server URL">
-                                    <input type="text" id="serverAlias" placeholder="Alias (optional)">
-                                    <button id="addServerBtn">Add</button>
-                                </div>
-                                <div id="serversList"></div>
-                            </div>
-                            <div class="server-card-panel" style="flex: 2;">
-                                <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
-                                    <h4>Server Details</h4>
-                                    <div class="server-card-fields autosave-group">
-                                        <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
-                                        <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
-                                        <label>Name: <input type="text" id="cardServerName" disabled></label><br>
-                                        <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
-                                        <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
-                                        <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
-                                    </div>
-                                    <div style="margin-top: 1rem;">
-                                        <!--<button id="saveServerBtn">Save</button>-->
-                                        <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="server-tools-container" style="display: flex; gap: 20px;">
-                            <div class="tools-display" style="flex: 1;">
-                                <h4>Available Tools</h4>
-                                <div id="toolsList"></div>
-                            </div>
-                        </div>
-                        <div class="tool-cards-row" style="display: flex; gap: 20px; margin-top: 1.5rem;">
-                            <div id="toolCard" class="tool-card" style="display: none;"></div>
-                            <div id="toolResultCard" class="tool-result-card" style="display: none;"></div>
-                        </div>
-                        <div class="mcp-controls">
-                            <div class="init-steps">
-                                <button id="check-mcp">Check MCP</button>
-                                <button id="initProtocol">Initialize</button>
-                                <button id="listTools">List Tools</button>
-                                <button id="registerTools">Register Tools</button>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -326,15 +328,6 @@
                             this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
                             await this.serviceWorker.postMessage({ type: 'list_tools', url });
                         }
-                    },
-                    'registerTools': async () => {
-                        const url = this.selectedServerUrl;
-                        if (!url) {
-                            this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
-                            return;
-                        }
-                        // Implement register tools logic here, using url
-                        this.log({ level: 'INFO', message: `Registering tools for ${url} (not yet implemented)`, timestamp: new Date().toISOString() });
                     },
                     'addServerBtn': () => this.handleAddServer(),
                     'saveServerBtn': () => this.handleSaveServer(),
@@ -595,14 +588,7 @@
                         }
                         break;
                     case 'tool_result':
-                        // Show result in tool result card
-                        const toolResultCard = document.getElementById('toolResultCard');
-                        toolResultCard.style.display = 'block';
-                        if (message.error) {
-                            toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span style='color:#f44336;'>${message.error}</span></div>`;
-                        } else {
-                            toolResultCard.innerHTML = `<div class='tool-result-card-inner'><h3>Tool Output</h3><pre>${JSON.stringify(message.result, null, 2)}</pre></div>`;
-                        }
+                        this.renderToolResultCard(message);
                         return;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -795,7 +781,8 @@
                 toolsList.innerHTML = '';
                 if (!tools || tools.length === 0) {
                     toolsList.innerHTML = '<div style="color:#888;">No tools available.</div>';
-                    document.getElementById('toolCard').style.display = 'none';
+                    this.renderToolCard(null);
+                    this.renderToolResultCard(null);
                     return;
                 }
                 tools.forEach((tool, idx) => {
@@ -803,10 +790,14 @@
                     toolItem.className = 'tool-item';
                     toolItem.textContent = tool.name;
                     toolItem.style.cursor = 'pointer';
-                    toolItem.onclick = () => this.renderToolCard(tool);
+                    toolItem.onclick = () => {
+                        this.renderToolCard(tool);
+                        this.renderToolResultCard(null);
+                    };
                     toolsList.appendChild(toolItem);
                 });
-                document.getElementById('toolCard').style.display = 'none';
+                this.renderToolCard(null);
+                this.renderToolResultCard(null);
             }
 
             // Recursive input field renderer for tool schemas
@@ -818,7 +809,9 @@
                 label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
                 label += '</label><br>';
 
-                if (prop.type === 'string') {
+                if (prop.type === 'object' && !prop.properties) {
+                    inputCard.innerHTML = `${label}<textarea name="${key}" placeholder="{}" rows="3" style="font-family:monospace;"></textarea>`;
+                } else if (prop.type === 'string') {
                     inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
                 } else if (prop.type === 'integer' || prop.type === 'number') {
                     inputCard.innerHTML = `${label}<input type="number" name="${key}" />`;
@@ -844,7 +837,7 @@
                 const toolCard = document.getElementById('toolCard');
                 toolCard.innerHTML = '';
                 if (!tool) {
-                    toolCard.style.display = 'none';
+                    toolCard.innerHTML = '<div class="tool-card-inner"><span style="color:#888;">Select a tool to view details and call it.</span></div>';
                     return;
                 }
                 toolCard.style.display = 'block';
@@ -871,6 +864,48 @@
                         schemaDiv.appendChild(this.renderInputField(key, prop, isRequired));
                     });
                 }
+            }
+
+            renderToolResultCard(result) {
+                const toolResultCard = document.getElementById('toolResultCard');
+                if (!result) {
+                    toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span style="color:#888;">Tool output will appear here.</span></div>';
+                    return;
+                }
+                if (result.error) {
+                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span style='color:#f44336;'>${result.error}</span></div>`;
+                    return;
+                }
+                // Collapsible raw JSON (collapsed by default)
+                let rawJson = `<details class='tool-raw-json'><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(result.result || result, null, 2))}</pre></details>`;
+                // Always render content card
+                let contentHtml = '';
+                let contentArr = [];
+                if (result.result && result.result.result && Array.isArray(result.result.result.content)) {
+                    contentArr = result.result.result.content;
+                    console.log('Tool content (result.result.result.content):', contentArr);
+                } else if (result.result && Array.isArray(result.result.content)) {
+                    contentArr = result.result.content;
+                    console.log('Tool content (result.result.content):', contentArr);
+                } else if (Array.isArray(result.content)) {
+                    contentArr = result.content;
+                    console.log('Tool content (result.content):', contentArr);
+                } else {
+                    console.log('Tool content: [] (no content found)');
+                }
+                if (contentArr.length > 0) {
+                    contentHtml = contentArr.map((item, idx) => {
+                        if (item && item.type === 'text' && typeof item.text === 'string') {
+                            const safeText = escapeHtml(item.text).replace(/\n/g, '<br>');
+                            return `<div class='tool-content-text'>${safeText}</div>`;
+                        }
+                        return `<div class='tool-content-unknown'>[Unknown content type: ${escapeHtml(JSON.stringify(item))}]</div>`;
+                    }).join('<hr style="border:none;border-top:1px solid #444;margin:1em 0;">');
+                } else {
+                    contentHtml = `<div class='tool-content-empty'><span style='color:#888;'>No content to display.</span></div>`;
+                }
+                contentHtml = `<div class='tool-content-section'><h3>Content</h3>${contentHtml}</div>`;
+                toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${rawJson}${contentHtml}</div>`;
             }
 
             updateBuildInfo(buildInfo) {
@@ -1025,18 +1060,30 @@
             }
 
             serializeToolForm(form, schema) {
-                // Recursively serialize form fields to match schema
                 const result = {};
                 if (!schema || !schema.properties) return result;
                 Object.entries(schema.properties).forEach(([key, prop]) => {
                     if (prop.type === 'array') {
-                        // Collect all inputs with name key[]
                         const values = Array.from(form.querySelectorAll(`[name='${key}[]']`)).map(input => input.value);
                         result[key] = values;
                     } else if (prop.type === 'object' && prop.properties) {
                         // Recursively serialize object
                         const subSchema = { properties: prop.properties, required: prop.required };
                         result[key] = this.serializeToolForm(form, subSchema);
+                    } else if (prop.type === 'object' && !prop.properties) {
+                        // Try to parse textarea as JSON
+                        const input = form.querySelector(`[name='${key}']`);
+                        if (input) {
+                            try {
+                                result[key] = input.value ? JSON.parse(input.value) : {};
+                                input.style.borderColor = '';
+                                input.title = '';
+                            } catch (e) {
+                                input.style.borderColor = '#f44336';
+                                input.title = 'Invalid JSON';
+                                throw new Error(`Invalid JSON for ${key}`);
+                            }
+                        }
                     } else {
                         const input = form.querySelector(`[name='${key}']`);
                         if (input) {
@@ -1161,18 +1208,35 @@
 
         document.getElementById('mainTabBtn').onclick = function() {
             document.getElementById('mainTab').classList.add('active');
+            document.getElementById('memoryTab').classList.remove('active');
             document.getElementById('logsTab').classList.remove('active');
             this.classList.add('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
             document.getElementById('logsTabBtn').classList.remove('active');
             document.getElementById('mainTab').style.display = 'block';
+            document.getElementById('memoryTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('memoryTabBtn').onclick = function() {
+            document.getElementById('mainTab').classList.remove('active');
+            document.getElementById('memoryTab').classList.add('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('mainTabBtn').classList.remove('active');
+            document.getElementById('logsTabBtn').classList.remove('active');
+            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'block';
             document.getElementById('logsTab').style.display = 'none';
         };
         document.getElementById('logsTabBtn').onclick = function() {
             document.getElementById('mainTab').classList.remove('active');
+            document.getElementById('memoryTab').classList.remove('active');
             document.getElementById('logsTab').classList.add('active');
             this.classList.add('active');
             document.getElementById('mainTabBtn').classList.remove('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
             document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'none';
             document.getElementById('logsTab').style.display = 'block';
         };
         document.getElementById('popoutLogsBtn').onclick = function() {
@@ -1182,6 +1246,16 @@
             document.getElementById('mainTab').style.display = 'none';
             document.getElementById('logsTab').style.display = 'block';
             document.querySelector('.tab-bar').style.display = 'none';
+        }
+
+        // Add a helper for HTML escaping
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
     </script>
 

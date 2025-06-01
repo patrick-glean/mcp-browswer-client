@@ -217,21 +217,15 @@ pub fn get_server_url() -> String {
 
 #[wasm_bindgen]
 pub async fn health_check() -> u32 {
-    info("WASM health check initiated");
-    debug(&format!("WASM Module Version: {}", VERSION));
-    
     // Basic health check - just verify the module is loaded and functioning
     // Return 0 for healthy (module is loaded and working)
-    info("WASM module health check passed");
+    info(&format!("WASM Module Version: {}", VERSION));
     0
 }
 
 // Add a separate MCP server health check
 #[wasm_bindgen]
 pub async fn check_mcp_server() -> u32 {
-    info("MCP server health check initiated");
-    debug(&format!("WASM Module Version: {}", VERSION));
-    
     let server_url = get_server_url();
     info(&format!("Attempting to connect to MCP server at {}", server_url));
     
