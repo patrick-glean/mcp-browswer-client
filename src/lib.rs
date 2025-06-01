@@ -256,40 +256,39 @@ pub async fn check_mcp_server() -> u32 {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
-                    match JsFuture::from(resp.json().unwrap()).await {
-                        Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
-                            debug(&format!("Received raw response: {}", json_str));
-                            
-                            // Parse the JSON-RPC response
-                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
-                                if let Some(result) = response.result {
-                                    if let Some(status) = result.get("status") {
-                                        let status_str = status.as_str().unwrap_or_default();
-                                        debug(&format!("Parsed status: {}", status_str));
-                                        
-                                        if status_str.to_lowercase() == "healthy" {
-                                            info("MCP server health check successful - server is healthy");
-                                            return 0;
-                                        } else {
-                                            error(&format!("MCP server health check failed - server reported status: {}", status_str));
-                                            return 1;
-                                        }
-                                    }
-                                }
-                                if let Some(err) = response.error {
-                                    error(&format!("MCP server returned error: {} (code: {})", err.message, err.code));
+                    let json = match JsFuture::from(resp.json().unwrap()).await {
+                        Ok(val) => val,
+                        Err(e) => {
+                            error(&format!("Failed to parse JSON: {:?}", e));
+                            return 1;
+                        }
+                    };
+                    let text = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
+                    debug(&format!("Received raw response: {}", text));
+                    
+                    // Parse the JSON-RPC response
+                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&text) {
+                        if let Some(result) = response.result {
+                            if let Some(status) = result.get("status") {
+                                let status_str = status.as_str().unwrap_or_default();
+                                debug(&format!("Parsed status: {}", status_str));
+                                
+                                if status_str.to_lowercase() == "healthy" {
+                                    info("MCP server health check successful - server is healthy");
+                                    return 0;
+                                } else {
+                                    error(&format!("MCP server health check failed - server reported status: {}", status_str));
                                     return 1;
                                 }
                             }
-                            error("Failed to parse MCP server response as JSON-RPC");
-                            1
                         }
-                        Err(e) => {
-                            error(&format!("Failed to parse MCP server health check response: {:?}", e));
-                            1
+                        if let Some(err) = response.error {
+                            error(&format!("MCP server returned error: {} (code: {})", err.message, err.code));
+                            return 1;
                         }
                     }
+                    error("Failed to parse MCP server response as JSON-RPC");
+                    1
                 } else {
                     error("MCP server health check failed - received error response");
                     1
@@ -513,87 +512,96 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
         Ok(response) => {
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
+                let status = resp.status();
+                let json = match JsFuture::from(resp.json().unwrap()).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        error(&format!("Failed to parse JSON: {:?}", e));
+                        return Err(format!("Server returned error response (status {}): {:?}", status, e));
+                    }
+                };
+                let text = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
+                if DEBUG_MODE.load(Ordering::Relaxed) {
+                    debug(&format!("Received response (status {}): {}", status, text));
+                }
                 if resp.ok() {
                     // Get session ID from response headers
                     let session_id = resp.headers().get("mcp-session-id").ok().flatten();
                     
-                    match JsFuture::from(resp.json().unwrap()).await {
-                        Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
-                            debug(&format!("Received handshake response: {}", json_str));
+                    match serde_json::from_str::<JsonRpcResponse>(&text) {
+                        Ok(response) => {
+                            let name = response.result.as_ref()
+                                .and_then(|v| v.get("serverInfo"))
+                                .and_then(|v| v.get("name"))
+                                .and_then(|v| v.as_str())
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            let version = response.result.as_ref()
+                                .and_then(|v| v.get("serverInfo"))
+                                .and_then(|v| v.get("version"))
+                                .and_then(|v| v.as_str())
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+
+                            let tools = response.result.as_ref()
+                                .and_then(|v| v.get("capabilities"))
+                                .and_then(|v| v.get("tools"))
+                                .and_then(|v| v.as_object())
+                                .map(|tools| tools.iter()
+                                    .filter_map(|(name, info)| {
+                                        Some(McpTool {
+                                            name: name.clone(),
+                                            description: info.get("description")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            version: info.get("version")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown")
+                                                .to_string(),
+                                            parameters: Vec::new(),
+                                        })
+                                    })
+                                    .collect::<Vec<_>>())
+                                .unwrap_or_default();
+
+                            let server_info = McpServer {
+                                url: url.to_string(),
+                                name,
+                                version,
+                                status: "connected".to_string(),
+                                tools,
+                                last_health_check: get_timestamp(),
+                            };
                             
-                            // Parse the response and extract server info
-                            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
-                                if let Some(result) = response.result {
-                                    let server_info = McpServer {
-                                        url: url.to_string(),
-                                        name: result.get("serverInfo")
-                                            .and_then(|v| v.get("name"))
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("Unknown")
-                                            .to_string(),
-                                        version: result.get("serverInfo")
-                                            .and_then(|v| v.get("version"))
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("unknown")
-                                            .to_string(),
-                                        status: "connected".to_string(),
-                                        tools: result.get("capabilities")
-                                            .and_then(|v| v.get("tools"))
-                                            .and_then(|v| v.as_object())
-                                            .map(|tools| tools.iter()
-                                                .filter_map(|(name, info)| {
-                                                    Some(McpTool {
-                                                        name: name.clone(),
-                                                        description: info.get("description")
-                                                            .and_then(|v| v.as_str())
-                                                            .unwrap_or("")
-                                                            .to_string(),
-                                                        version: info.get("version")
-                                                            .and_then(|v| v.as_str())
-                                                            .unwrap_or("unknown")
-                                                            .to_string(),
-                                                        parameters: Vec::new(),
-                                                    })
-                                                })
-                                                .collect())
-                                            .unwrap_or_default(),
-                                        last_health_check: get_timestamp(),
-                                    };
-                                    
-                                    // Send initialized notification
-                                    if let Some(session_id) = session_id {
-                                        let initialized_request = json!({
-                                            "jsonrpc": "2.0",
-                                            "method": "notifications/initialized"
-                                        });
-                                        
-                                        let options = js_sys::Object::new();
-                                        js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-                                        js_sys::Reflect::set(&options, &"body".into(), &initialized_request.to_string().into()).unwrap();
-                                        
-                                        let headers = js_sys::Object::new();
-                                        js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-                                        js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
-                                        js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
-                                        js_sys::Reflect::set(&headers, &"mcp-session-id".into(), &session_id.into()).unwrap();
-                                        js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
-                                        
-                                        let _ = JsFuture::from(fetch(url, &options)).await;
-                                    }
-                                    
-                                    Ok(server_info)
-                                } else {
-                                    Err("No result in handshake response".to_string())
-                                }
-                            } else {
-                                Err("Failed to parse handshake response".to_string())
+                            // Send initialized notification
+                            if let Some(session_id) = session_id {
+                                let initialized_request = json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "notifications/initialized"
+                                });
+                                
+                                let options = js_sys::Object::new();
+                                js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+                                js_sys::Reflect::set(&options, &"body".into(), &initialized_request.to_string().into()).unwrap();
+                                
+                                let headers = js_sys::Object::new();
+                                js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
+                                js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
+                                js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
+                                js_sys::Reflect::set(&headers, &"mcp-session-id".into(), &session_id.into()).unwrap();
+                                js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+                                
+                                let _ = JsFuture::from(fetch(url, &options)).await;
                             }
+                            
+                            Ok(server_info)
                         }
-                        Err(e) => Err(format!("Failed to parse response: {:?}", e))
+                        Err(e) => Err(format!("Failed to parse handshake response: {}", e))
                     }
                 } else {
-                    Err("Server returned error response".to_string())
+                    Err(format!("Server returned error response (status {}): {}", status, text))
                 }
             } else {
                 Err("Failed to get response".to_string())
@@ -638,7 +646,7 @@ pub async fn query_tools() -> Result<JsValue, JsValue> {
                 if resp.ok() {
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
                             debug(&format!("Received tools response: {}", json_str));
                             info(&format!("Raw response: {}", json_str));
                             if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
@@ -708,7 +716,7 @@ pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
                 if resp.ok() {
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
                             debug(&format!("Received tools response: {}", json_str));
                             
                             if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
@@ -776,13 +784,19 @@ pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsVa
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
-                    match JsFuture::from(resp.json().unwrap()).await {
-                        Ok(json) => {
-                            let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap();
+                    let status = resp.status();
+                    let json = JsFuture::from(resp.json().unwrap()).await?;
+                    let text = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
+                    if DEBUG_MODE.load(Ordering::Relaxed) {
+                        debug(&format!("Received response (status {}): {}", status, text));
+                    }
+                    match serde_json::from_str::<JsonRpcResponse>(&text) {
+                        Ok(response) => {
+                            let json_str = serde_json::to_string(&response.result).unwrap_or_default();
                             debug(&format!("Received tool call response: {}", json_str));
                             Ok(JsValue::from_str(&json_str))
                         }
-                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {}", e)))
                     }
                 } else {
                     Err(JsValue::from_str("Server returned error response"))

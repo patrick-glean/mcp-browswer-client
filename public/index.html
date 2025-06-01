@@ -582,9 +582,10 @@
                         if (message.url && this.servers[message.url]) {
                             this.servers[message.url].tools = message.tools;
                             this.saveServers();
-                            if (this.selectedServerUrl === message.url) {
-                                this.updateToolsList(message.tools);
-                            }
+                        }
+                        // Always refresh the tools list for the selected server
+                        if (this.selectedServerUrl) {
+                            this.updateToolsList(this.servers[this.selectedServerUrl]?.tools || []);
                         }
                         break;
                     case 'tool_result':
