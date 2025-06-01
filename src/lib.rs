@@ -1,6 +1,6 @@
 use core::str;
 use serde::Serialize;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering, AtomicBool};
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize};
 use serde_json::{self, json};
@@ -62,6 +62,8 @@ static SERVER_REGISTRY: LazyLock<std::sync::Mutex<McpServerRegistry>> = LazyLock
         default_server: None,
     })
 });
+
+static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcRequest {
@@ -425,15 +427,6 @@ pub async fn initialize_mcp_server(url: &str) -> Result<JsValue, JsValue> {
     
     let mut registry = SERVER_REGISTRY.lock().unwrap();
     
-    // Check if server already exists
-    if registry.servers.contains_key(url) {
-        info(&format!("Server {} already registered", url));
-        return Ok(JsValue::from_str(&json!({
-            "status": "already_registered",
-            "message": format!("Server {} is already registered", url)
-        }).to_string()));
-    }
-    
     // Create new server entry
     let server = McpServer {
         url: url.to_string(),
@@ -444,7 +437,7 @@ pub async fn initialize_mcp_server(url: &str) -> Result<JsValue, JsValue> {
         last_health_check: get_timestamp(),
     };
     
-    // Add to registry
+    // Insert or update the server entry
     registry.servers.insert(url.to_string(), server);
     
     // If this is the first server, set it as default
@@ -500,6 +493,10 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
             }
         }
     });
+    
+    if DEBUG_MODE.load(Ordering::Relaxed) {
+        debug(&format!("Sending handshake request: {}", handshake_request.to_string()));
+    }
     
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
@@ -689,6 +686,10 @@ pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
         }
     });
     
+    if DEBUG_MODE.load(Ordering::Relaxed) {
+        debug(&format!("Sending tools list request: {}", tools_request.to_string()));
+    }
+    
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
     js_sys::Reflect::set(&options, &"body".into(), &tools_request.to_string().into()).unwrap();
@@ -792,4 +793,10 @@ pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsVa
         }
         Err(e) => Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
     }
+}
+
+#[wasm_bindgen]
+pub fn set_debug_mode(enabled: bool) {
+    DEBUG_MODE.store(enabled, Ordering::Relaxed);
+    log(&format!("set_debug_mode called: {}", enabled));
 }

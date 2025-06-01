@@ -19,6 +19,7 @@ declare namespace wasm_bindgen {
 	export function list_tools(url: string): Promise<any>;
 	export function get_compiled_info(): string;
 	export function call_tool(url: string, tool_name: string, args: any): Promise<any>;
+	export function set_debug_mode(enabled: boolean): void;
 	
 }
 
@@ -44,6 +45,7 @@ declare interface InitOutput {
   readonly list_tools: (a: number, b: number) => any;
   readonly get_compiled_info: () => [number, number];
   readonly call_tool: (a: number, b: number, c: number, d: number, e: any) => any;
+  readonly set_debug_mode: (a: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
@@ -52,8 +54,8 @@ declare interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure71_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure93_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure72_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure94_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

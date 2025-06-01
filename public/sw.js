@@ -154,6 +154,10 @@ async function initializeWasm() {
         // Broadcast initial status
         broadcastWasmStatus(true);
         
+        if (wasmInstance && typeof wasmInstance.set_debug_mode === 'function') {
+            wasmInstance.set_debug_mode(isDebugMode);
+        }
+        
         return true;
     } catch (error) {
         const errorMessage = `WASM initialization failed: ${error.message}`;
@@ -216,7 +220,7 @@ function startUptimeCounter() {
                 // Log uptime based on mode:
                 // - Debug mode: every second
                 // - Normal mode: every minute
-                const logInterval = isDebugMode ? 1000 : 60000;
+                const logInterval = 60000;
                 if (currentTime - lastLogTime >= logInterval) {
                     const hours = Math.floor(uptime / 3600);
                     const minutes = Math.floor((uptime % 3600) / 60);
@@ -234,10 +238,7 @@ function startUptimeCounter() {
                     lastLogTime = currentTime;
                 }
                 
-                // Update UI counter based on mode:
-                // - Debug mode: every second
-                // - Normal mode: every minute
-                if (isDebugMode || currentTime - lastLogTime >= 60000) {
+                if (isDebugMode && currentTime - lastLogTime >= 60000) {
                     broadcastToClients({
                         type: 'uptime',
                         uptime: uptime
@@ -509,6 +510,9 @@ self.addEventListener('message', async (event) => {
         case 'set-debug-mode':
             isDebugMode = message.enabled;
             mcpHandler.setDebugMode(isDebugMode);
+            if (wasmInstance && typeof wasmInstance.set_debug_mode === 'function') {
+                wasmInstance.set_debug_mode(isDebugMode);
+            }
             break;
         case 'health_check':
             // Use proper JSON-RPC format for health check
