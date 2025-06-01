@@ -43,6 +43,7 @@ struct McpServer {
     status: String,
     tools: Vec<McpTool>,
     last_health_check: u64,
+    session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -434,6 +435,7 @@ pub async fn initialize_mcp_server(url: &str) -> Result<JsValue, JsValue> {
         status: "initializing".to_string(),
         tools: Vec::new(),
         last_health_check: get_timestamp(),
+        session_id: None,
     };
     
     // Insert or update the server entry
@@ -452,6 +454,7 @@ pub async fn initialize_mcp_server(url: &str) -> Result<JsValue, JsValue> {
             server.version = server_info.version.clone();
             server.status = "connected".to_string();
             server.tools = server_info.tools.clone();
+            server.session_id = server_info.session_id.clone();
             
             info(&format!("Successfully initialized MCP server at {}", url));
             Ok(JsValue::from_str(&json!({
@@ -573,25 +576,24 @@ async fn perform_server_handshake(url: &str) -> Result<McpServer, String> {
                                 status: "connected".to_string(),
                                 tools,
                                 last_health_check: get_timestamp(),
+                                session_id: session_id.clone(),
                             };
                             
                             // Send initialized notification
-                            if let Some(session_id) = session_id {
+                            if let Some(_session_id) = session_id {
                                 let initialized_request = json!({
                                     "jsonrpc": "2.0",
                                     "method": "notifications/initialized"
                                 });
                                 
-                                let options = js_sys::Object::new();
-                                js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-                                js_sys::Reflect::set(&options, &"body".into(), &initialized_request.to_string().into()).unwrap();
-                                
-                                let headers = js_sys::Object::new();
-                                js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-                                js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
-                                js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
-                                js_sys::Reflect::set(&headers, &"mcp-session-id".into(), &session_id.into()).unwrap();
+                                let initialized_request_str = initialized_request.to_string();
+                                let headers = web_sys::Headers::new().unwrap();
+                                headers.set("Content-Type", "application/json").unwrap();
+                                if let Some(session_id) = &server_info.session_id {
+                                    headers.set("mcp-session-id", session_id).unwrap();
+                                }
                                 js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+                                js_sys::Reflect::set(&options, &"body".into(), &JsValue::from_str(&initialized_request_str)).unwrap();
                                 
                                 let _ = JsFuture::from(fetch(url, &options)).await;
                             }
@@ -632,12 +634,10 @@ pub async fn query_tools() -> Result<JsValue, JsValue> {
         "id": js_sys::Date::now() as u64
     });
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-    js_sys::Reflect::set(&options, &"body".into(), &tools_request.to_string().into()).unwrap();
-    let headers = js_sys::Object::new();
-    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json".into()).unwrap();
+    let headers = web_sys::Headers::new().unwrap();
+    headers.set("Content-Type", "application/json").unwrap();
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &JsValue::from_str(&tools_request.to_string())).unwrap();
     let promise = fetch(&server_url, &options);
     match JsFuture::from(promise).await {
         Ok(response) => {
@@ -680,8 +680,7 @@ pub async fn query_tools() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
-    info(&format!("Listing tools from {}", url));
-    
+    info(&format!("[list_tools] Called with url: {}", url));
     // Create JSON-RPC request for tool list
     let tools_request = json!({
         "jsonrpc": "2.0",
@@ -693,58 +692,75 @@ pub async fn list_tools(url: &str) -> Result<JsValue, JsValue> {
             }
         }
     });
-    
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        debug(&format!("Sending tools list request: {}", tools_request.to_string()));
-    }
-    
+    debug(&format!("[list_tools] Sending tools list request: {}", tools_request.to_string()));
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-    js_sys::Reflect::set(&options, &"body".into(), &tools_request.to_string().into()).unwrap();
-    
-    let headers = js_sys::Object::new();
-    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
+    let headers = web_sys::Headers::new().unwrap();
+    headers.set("Content-Type", "application/json").unwrap();
+    if let Some(server) = SERVER_REGISTRY.lock().unwrap().servers.get(url) {
+        if let Some(session_id) = &server.session_id {
+            debug(&format!("[list_tools] Using session_id: {}", session_id));
+            headers.set("mcp-session-id", session_id).unwrap();
+        } else {
+            debug("[list_tools] No session_id found for server");
+        }
+    } else {
+        debug("[list_tools] No server found in registry for url");
+    }
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
-    
+    js_sys::Reflect::set(&options, &"body".into(), &JsValue::from_str(&tools_request.to_string())).unwrap();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
+    info(&format!("[list_tools] About to fetch tools from {}", url));
     let promise = fetch(url, &options);
+    info(&format!("[list_tools] Fetch promise created for {}", url));
     match JsFuture::from(promise).await {
         Ok(response) => {
+            info("[list_tools] Fetch completed, processing response...");
             let resp: Option<web_sys::Response> = response.dyn_ref::<web_sys::Response>().cloned();
             if let Some(resp) = resp {
                 if resp.ok() {
+                    info("[list_tools] Response OK, parsing JSON...");
                     match JsFuture::from(resp.json().unwrap()).await {
                         Ok(json) => {
                             let json_str = js_sys::JSON::stringify(&json).unwrap().as_string().unwrap_or_default();
-                            debug(&format!("Received tools response: {}", json_str));
-                            
+                            debug(&format!("[list_tools] Received tools response: {}", json_str));
                             if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&json_str) {
                                 if let Some(result) = response.result {
+                                    info("[list_tools] Successfully parsed tools result");
                                     Ok(JsValue::from_str(&json!({
                                         "result": result
                                     }).to_string()))
                                 } else if let Some(error) = response.error {
+                                    info("[list_tools] Error in tools response");
                                     Ok(JsValue::from_str(&json!({
                                         "error": error
                                     }).to_string()))
                                 } else {
+                                    error("[list_tools] No result or error in response");
                                     Err(JsValue::from_str("No result or error in response"))
                                 }
                             } else {
+                                error("[list_tools] Failed to parse tools response");
                                 Err(JsValue::from_str("Failed to parse tools response"))
                             }
                         }
-                        Err(e) => Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                        Err(e) => {
+                            error(&format!("[list_tools] Failed to parse response: {:?}", e));
+                            Err(JsValue::from_str(&format!("Failed to parse response: {:?}", e)))
+                        }
                     }
                 } else {
+                    error("[list_tools] Server returned error response");
                     Err(JsValue::from_str("Server returned error response"))
                 }
             } else {
+                error("[list_tools] Failed to get response");
                 Err(JsValue::from_str("Failed to get response"))
             }
         }
-        Err(e) => Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
+        Err(e) => {
+            error(&format!("[list_tools] Failed to connect to server: {:?}", e));
+            Err(JsValue::from_str(&format!("Failed to connect to server: {:?}", e)))
+        }
     }
 }
 
@@ -773,10 +789,12 @@ pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsVa
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
     js_sys::Reflect::set(&options, &"body".into(), &call_request.to_string().into()).unwrap();
-    let headers = js_sys::Object::new();
-    js_sys::Reflect::set(&headers, &"Content-Type".into(), &"application/json".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept".into(), &"application/json, text/event-stream".into()).unwrap();
-    js_sys::Reflect::set(&headers, &"Accept-Language".into(), &"*".into()).unwrap();
+    let headers = web_sys::Headers::new().unwrap();
+    if let Some(server) = SERVER_REGISTRY.lock().unwrap().servers.get(url) {
+        if let Some(session_id) = &server.session_id {
+            headers.set("mcp-session-id", session_id).unwrap();
+        }
+    }
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
     let promise = fetch(url, &options);
     match JsFuture::from(promise).await {

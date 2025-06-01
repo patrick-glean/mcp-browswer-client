@@ -183,6 +183,11 @@
                 if (serverUrlInput) {
                     serverUrlInput.value = serverUrl;
                 }
+                // Select the server in the list if it exists
+                if (serverUrl && this.servers[serverUrl]) {
+                    this.selectedServerUrl = serverUrl;
+                    this.updateToolsList(this.servers[serverUrl].tools || []);
+                }
 
                 this.updateServersList();
             }
@@ -319,7 +324,15 @@
                     'stop-sw': () => this.stopServiceWorker(),
                     'start-sw': () => this.startServiceWorker(),
                     'listTools': async () => {
-                        const url = this.selectedServerUrl;
+                        // Always use the input field value if present, else selectedServerUrl
+                        let url = '';
+                        const serverUrlInput = document.getElementById('mcpServerUrl');
+                        if (serverUrlInput && serverUrlInput.value.trim()) {
+                            url = serverUrlInput.value.trim();
+                        } else {
+                            url = this.selectedServerUrl;
+                        }
+                        this.log({ level: 'DEBUG', message: `[listTools] Using URL: ${url} (selectedServerUrl: ${this.selectedServerUrl})`, timestamp: new Date().toISOString() });
                         if (!url) {
                             this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
                             return;
@@ -721,9 +734,10 @@
                     `;
                     serverItem.addEventListener('click', () => {
                         this.selectedServerUrl = server.url;
-                        this.updateServersList();
+                        this.setServerUrl(server.url);
                         this.showServerCard(server.url);
                         this.updateToolsList(server.tools || []);
+                        this.updateServersList();
                     });
                     serversList.appendChild(serverItem);
                 });
@@ -758,6 +772,7 @@
                         this.servers[newUrl] = { ...server, url: newUrl };
                         delete this.servers[server.url];
                         this.selectedServerUrl = newUrl;
+                        this.setServerUrl(newUrl);
                         server = this.servers[newUrl];
                         urlChanged = true;
                     }
@@ -963,6 +978,8 @@
                 };
                 this.servers[url] = server;
                 this.saveServers();
+                this.selectedServerUrl = url;
+                this.setServerUrl(url);
                 this.updateServersList();
                 // Clear inputs
                 document.getElementById('serverUrl').value = '';

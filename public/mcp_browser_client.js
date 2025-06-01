@@ -413,7 +413,7 @@ let wasm_bindgen;
         wasm.closure73_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_128(arg0, arg1, arg2, arg3) {
+    function __wbg_adapter_132(arg0, arg1, arg2, arg3) {
         wasm.closure95_externref_shim(arg0, arg1, arg2, arg3);
     }
 
@@ -575,6 +575,10 @@ let wasm_bindgen;
         imports.wbg.__wbg_log_a4bfb3158e81f8d3 = function(arg0, arg1) {
             console.log(getStringFromWasm0(arg0, arg1));
         };
+        imports.wbg.__wbg_new_018dcc2d6c8c2f6a = function() { return handleError(function () {
+            const ret = new Headers();
+            return ret;
+        }, arguments) };
         imports.wbg.__wbg_new_23a2665fac83c611 = function(arg0, arg1) {
             try {
                 var state0 = {a: arg0, b: arg1};
@@ -582,7 +586,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_128(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_132(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -634,6 +638,9 @@ let wasm_bindgen;
         };
         imports.wbg.__wbg_setItem_1878abfedc3ed6af = function() { return handleError(function (arg0, arg1, arg2, arg3) {
             localStorage.setItem(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
+        }, arguments) };
+        imports.wbg.__wbg_set_11cd83f45504cedf = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+            arg0.set(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
         }, arguments) };
         imports.wbg.__wbg_set_65595bdd868b3009 = function(arg0, arg1, arg2) {
             arg0.set(arg1, arg2 >>> 0);
@@ -706,7 +713,7 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper321 = function(arg0, arg1, arg2) {
+        imports.wbg.__wbindgen_closure_wrapper323 = function(arg0, arg1, arg2) {
             const ret = makeMutClosure(arg0, arg1, 74, __wbg_adapter_48);
             return ret;
         };

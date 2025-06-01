@@ -158,6 +158,22 @@ async function initializeWasm() {
             wasmInstance.set_debug_mode(isDebugMode);
         }
         
+        // Set the WASM server URL to match localStorage (or default)
+        let url = 'http://localhost:8081';
+        try {
+            url = (await self.clients.matchAll({type: 'window'}))[0]?.url;
+            // Try to get from localStorage if available
+            if (typeof self.localStorage !== 'undefined' && self.localStorage.getItem) {
+                const stored = self.localStorage.getItem('mcpServerUrl');
+                if (stored) url = stored;
+            }
+        } catch (e) {
+            // fallback to default
+        }
+        if (wasmInstance && typeof wasmInstance.set_server_url === 'function') {
+            wasmInstance.set_server_url(url);
+        }
+        
         return true;
     } catch (error) {
         const errorMessage = `WASM initialization failed: ${error.message}`;
@@ -580,19 +596,18 @@ self.addEventListener('message', async (event) => {
             }
             try {
                 const url = message.url || get_server_url();
+                debugLog(`[SW] [list_tools] Received URL: ${url}`);
                 debugLog(`Listing tools from ${url}`);
-                
                 // Let the WASM module handle the MCP protocol
                 const result = await wasmInstance.list_tools(url);
                 const parsedResult = JSON.parse(result);
-                
                 if (parsedResult.error) {
                     throw new Error(`Failed to list tools: ${parsedResult.error.message}`);
                 }
-                
                 broadcastToClients({
                     type: 'tools_list',
-                    tools: parsedResult.result.tools
+                    tools: parsedResult.result.tools,
+                    url // include the url for UI sync
                 });
             } catch (error) {
                 debugLog(`Error listing tools: ${error}`);
