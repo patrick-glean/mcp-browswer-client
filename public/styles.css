@@ -981,4 +981,13 @@ input:focus, textarea:focus, select:focus {
         flex-direction: column;
         gap: 0.5rem;
     }
+}
+
+.tool-content-section {
+    background: #191919;
+    border-radius: 8px;
+    padding: 1em;
+    border: 1px solid #444;
+    color: #eee;
+    margin-bottom: 1em;
 } 
