@@ -787,15 +787,16 @@ pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsVa
         }
     });
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
-    js_sys::Reflect::set(&options, &"body".into(), &call_request.to_string().into()).unwrap();
     let headers = web_sys::Headers::new().unwrap();
+    headers.set("Content-Type", "application/json").unwrap();
     if let Some(server) = SERVER_REGISTRY.lock().unwrap().servers.get(url) {
         if let Some(session_id) = &server.session_id {
             headers.set("mcp-session-id", session_id).unwrap();
         }
     }
     js_sys::Reflect::set(&options, &"headers".into(), &headers.into()).unwrap();
+    js_sys::Reflect::set(&options, &"body".into(), &JsValue::from_str(&call_request.to_string())).unwrap();
+    js_sys::Reflect::set(&options, &"method".into(), &"POST".into()).unwrap();
     let promise = fetch(url, &options);
     match JsFuture::from(promise).await {
         Ok(response) => {
