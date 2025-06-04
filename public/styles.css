@@ -990,4 +990,28 @@ input:focus, textarea:focus, select:focus {
     border: 1px solid #444;
     color: #eee;
     margin-bottom: 1em;
+}
+
+/* Popdown for Service Worker and WASM controls */
+.controls-popdown {
+    position: absolute;
+    left: 36%;
+    top: 70px;
+    transform: translateX(-50%);
+    min-width: 400px;
+    max-width: 90vw;
+    background: #232323;
+    border: 1px solid #444;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    z-index: 1000;
+    padding: 24px 24px 16px 24px;
+    animation: fadeIn 0.2s;
+    margin-top: 8px;
+}
+@media (max-width: 600px) {
+    .controls-popdown {
+        min-width: 90vw;
+        padding: 12px 6px 8px 6px;
+    }
 } 

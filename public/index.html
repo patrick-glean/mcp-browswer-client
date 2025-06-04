@@ -9,7 +9,7 @@
 </head>
 <body>
     <div class="container">
-        <div class="status-bar">
+        <div class="status-bar" id="statusBar" style="cursor:pointer;">
             <div class="status-item">
                 <span class="status-label">Service Worker:</span>
                 <span class="status-indicator" id="sw-status">●</span>
@@ -28,6 +28,25 @@
                 <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
             </div>
         </div>
+        <!-- Popdown for controls -->
+        <div id="controlsPopdown" class="controls-popdown" style="display:none;">
+            <button id="closeControlsPopdown" style="float:right;margin-bottom:10px;">✕</button>
+            <div class="control-group sw-controls">
+                <div>
+                    <h3>Service Worker Controls</h3>
+                    <button id="start-sw" class="start">Start Service Worker</button>
+                    <button id="stop-sw">Stop Service Worker</button>
+                </div>
+            </div>
+            <div class="control-group wasm-controls">
+                <div>
+                    <h3>WASM Module Controls</h3>
+                    <button id="check-wasm">Check WASM</button>
+                    <button id="unload-wasm">Unload WASM</button>
+                    <button id="reload-wasm" class="reload">Reload WASM</button>
+                </div>
+            </div>
+        </div>
         <div class="main-content-tabs">
             <div class="tab-bar">
                 <button id="mainTabBtn" class="tab-btn active">Main</button>
@@ -37,23 +56,7 @@
             </div>
             <div id="mainTab" class="tab-content active">
                 <div class="controls-section">
-                    <div class="control-group sw-controls">
-                        <div>
-                            <h3>Service Worker Controls</h3>
-                            <button id="start-sw" class="start">Start Service Worker</button>
-                            <button id="stop-sw">Stop Service Worker</button>
-                        </div>
-                    </div>
-
-                    <div class="control-group wasm-controls">
-                        <div>
-                            <h3>WASM Module Controls</h3>
-                            <button id="check-wasm">Check WASM</button>
-                            <button id="unload-wasm">Unload WASM</button>
-                            <button id="reload-wasm" class="reload">Reload WASM</button>
-                        </div>
-                    </div>
-
+                    <!-- Service Worker and WASM controls moved to popdown -->
                     <div class="control-group">
                         <h3>MCP Servers</h3>
                         <div class="mcp-servers-group">
@@ -1120,6 +1123,8 @@
         // Initialize the chat shell
         const chatShell = new ChatShell();
 
+        chatShell.startServiceWorker();
+
         // Add memory event
         document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
             const text = document.getElementById('memoryEventText')?.value.trim();
@@ -1274,6 +1279,20 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+
+        // Popdown controls logic
+        const statusBar = document.getElementById('statusBar');
+        const controlsPopdown = document.getElementById('controlsPopdown');
+        const closeControlsPopdown = document.getElementById('closeControlsPopdown');
+        if (statusBar && controlsPopdown && closeControlsPopdown) {
+            statusBar.addEventListener('click', () => {
+                controlsPopdown.style.display = controlsPopdown.style.display === 'none' ? 'block' : 'none';
+            });
+            closeControlsPopdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+                controlsPopdown.style.display = 'none';
+            });
         }
     </script>
 
