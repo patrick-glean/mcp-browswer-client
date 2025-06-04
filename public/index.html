@@ -49,12 +49,33 @@
         </div>
         <div class="main-content-tabs">
             <div class="tab-bar">
-                <button id="mainTabBtn" class="tab-btn active">Main</button>
+                <button id="consoleTabBtn" class="tab-btn active">Console</button>
+                <button id="mcpTabBtn" class="tab-btn">MCP</button>
                 <button id="memoryTabBtn" class="tab-btn">Memory</button>
                 <button id="logsTabBtn" class="tab-btn">Logs</button>
                 <button id="popoutLogsBtn" class="tab-btn" title="Pop out logs">↗</button>
             </div>
-            <div id="mainTab" class="tab-content active">
+            <div id="consoleTab" class="tab-content active">
+                <div class="console-section">
+                    <div class="chat-card">
+                        <div class="chat-card-left">
+                            <div id="chatMessages" class="chat-messages"></div>
+                            <div class="chat-input-row">
+                                <input type="text" id="chatUserInput" placeholder="Type your message..." autocomplete="off" />
+                                <button id="chatSendBtn" type="button">Send</button>
+                            </div>
+                        </div>
+                        <div class="chat-card-right">
+                            <div class="chat-tool-select-row">
+                                <label for="chatToolSelect">Tool:</label>
+                                <select id="chatToolSelect"></select>
+                            </div>
+                            <form id="chatToolConfigForm" class="chat-tool-config"></form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="mcpTab" class="tab-content" style="display:none;">
                 <div class="controls-section">
                     <!-- Service Worker and WASM controls moved to popdown -->
                     <div class="control-group">
@@ -1229,36 +1250,59 @@
             });
         }
 
-        document.getElementById('mainTabBtn').onclick = function() {
-            document.getElementById('mainTab').classList.add('active');
+        document.getElementById('consoleTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.add('active');
+            document.getElementById('mcpTab').classList.remove('active');
             document.getElementById('memoryTab').classList.remove('active');
             document.getElementById('logsTab').classList.remove('active');
             this.classList.add('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
             document.getElementById('memoryTabBtn').classList.remove('active');
             document.getElementById('logsTabBtn').classList.remove('active');
-            document.getElementById('mainTab').style.display = 'block';
+            document.getElementById('consoleTab').style.display = 'block';
+            document.getElementById('mcpTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('mcpTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.add('active');
+            document.getElementById('memoryTab').classList.remove('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'block';
             document.getElementById('memoryTab').style.display = 'none';
             document.getElementById('logsTab').style.display = 'none';
         };
         document.getElementById('memoryTabBtn').onclick = function() {
-            document.getElementById('mainTab').classList.remove('active');
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.remove('active');
             document.getElementById('memoryTab').classList.add('active');
             document.getElementById('logsTab').classList.remove('active');
             this.classList.add('active');
-            document.getElementById('mainTabBtn').classList.remove('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
             document.getElementById('logsTabBtn').classList.remove('active');
-            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
             document.getElementById('memoryTab').style.display = 'block';
             document.getElementById('logsTab').style.display = 'none';
         };
         document.getElementById('logsTabBtn').onclick = function() {
-            document.getElementById('mainTab').classList.remove('active');
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.remove('active');
             document.getElementById('memoryTab').classList.remove('active');
             document.getElementById('logsTab').classList.add('active');
             this.classList.add('active');
-            document.getElementById('mainTabBtn').classList.remove('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
             document.getElementById('memoryTabBtn').classList.remove('active');
-            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
             document.getElementById('memoryTab').style.display = 'none';
             document.getElementById('logsTab').style.display = 'block';
         };
@@ -1266,7 +1310,8 @@
             window.open(window.location.pathname + '?logs=1', '_blank', 'width=600,height=800');
         };
         if (window.location.search.includes('logs=1')) {
-            document.getElementById('mainTab').style.display = 'none';
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
             document.getElementById('logsTab').style.display = 'block';
             document.querySelector('.tab-bar').style.display = 'none';
         }
@@ -1294,6 +1339,162 @@
                 controlsPopdown.style.display = 'none';
             });
         }
+
+        // --- Chat Card Logic ---
+        // State for chat card
+        let chatSelectedTool = null;
+        let chatToolConfig = {};
+        let chatMessages = [];
+        let chatTools = [];
+        // Helper to render chat tool select dropdown
+        function renderChatToolSelect() {
+            const select = document.getElementById('chatToolSelect');
+            select.innerHTML = '';
+            chatTools = chatShell.servers[chatShell.selectedServerUrl]?.tools || [];
+            chatTools.forEach((tool, idx) => {
+                const opt = document.createElement('option');
+                opt.value = tool.name;
+                opt.textContent = tool.name;
+                select.appendChild(opt);
+            });
+            if (chatTools.length > 0) {
+                chatSelectedTool = chatTools[0];
+                renderChatToolConfig(chatSelectedTool);
+            }
+        }
+        // Helper to render tool config form
+        function renderChatToolConfig(tool) {
+            const form = document.getElementById('chatToolConfigForm');
+            form.innerHTML = '';
+            if (!tool) return;
+            const schema = tool.inputSchema || tool.input_schema;
+            if (schema && schema.properties) {
+                Object.entries(schema.properties).forEach(([key, prop]) => {
+                    const isRequired = (schema.required || []).includes(key);
+                    // Use renderInputField, but allow {{user_message}} in string fields
+                    let inputCard = chatShell.renderInputField(key, prop, isRequired);
+                    // Add a note for string fields
+                    if (prop.type === 'string') {
+                        const note = document.createElement('div');
+                        note.style.fontSize = '0.9em';
+                        note.style.color = '#aaa';
+                        note.textContent = 'You can use {{user_message}} as a placeholder.';
+                        inputCard.appendChild(note);
+                    }
+                    form.appendChild(inputCard);
+                });
+            }
+            // Save config on change
+            form.oninput = () => {
+                chatToolConfig = chatShell.serializeToolForm(form, schema);
+            };
+            // Initialize config
+            chatToolConfig = chatShell.serializeToolForm(form, schema);
+        }
+        // Helper to render chat messages
+        function renderChatMessages() {
+            const chatDiv = document.getElementById('chatMessages');
+            chatDiv.innerHTML = chatMessages.map(msg =>
+                `<div class="chat-msg ${msg.role}"><span>${escapeHtml(msg.text)}</span></div>`
+            ).join('');
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+        }
+        // On tool select change
+        document.getElementById('chatToolSelect').addEventListener('change', function() {
+            const tool = chatTools.find(t => t.name === this.value);
+            chatSelectedTool = tool;
+            renderChatToolConfig(tool);
+        });
+        // On send
+        document.getElementById('chatSendBtn').addEventListener('click', async function() {
+            const userInput = document.getElementById('chatUserInput').value.trim();
+            if (!userInput || !chatSelectedTool) return;
+            // Add user message
+            chatMessages.push({ role: 'user', text: userInput });
+            renderChatMessages();
+            document.getElementById('chatUserInput').value = '';
+            // Prepare tool args: replace all {{user_message}} in config with userInput
+            const schema = chatSelectedTool.inputSchema || chatSelectedTool.input_schema;
+            function fillUserMessage(obj) {
+                if (typeof obj === 'string') {
+                    return obj.replace(/{{user_message}}/g, userInput);
+                } else if (Array.isArray(obj)) {
+                    return obj.map(fillUserMessage);
+                } else if (typeof obj === 'object' && obj !== null) {
+                    const out = {};
+                    for (const k in obj) out[k] = fillUserMessage(obj[k]);
+                    return out;
+                } else {
+                    return obj;
+                }
+            }
+            const toolArgs = fillUserMessage(chatToolConfig);
+            // Call tool via service worker
+            if (chatShell.serviceWorker && chatShell.selectedServerUrl) {
+                chatShell.serviceWorker.postMessage({
+                    type: 'call_tool',
+                    url: chatShell.selectedServerUrl,
+                    toolName: chatSelectedTool.name,
+                    args: toolArgs
+                });
+            }
+            // Wait for tool_result (listen below)
+        });
+        // Enter key in chat input
+        document.getElementById('chatUserInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('chatSendBtn').click();
+            }
+        });
+        // Listen for tool_result and show in chat
+        const origRenderToolResultCard = chatShell.renderToolResultCard.bind(chatShell);
+        chatShell.renderToolResultCard = function(result) {
+            if (document.getElementById('consoleTab').classList.contains('active') && result && !result.error) {
+                // Show tool response in chat
+                let text = '';
+                if (result.result && result.result.result && Array.isArray(result.result.result.content)) {
+                    text = result.result.result.content.map(c => c.text || '').join('\n');
+                } else if (result.result && Array.isArray(result.result.content)) {
+                    text = result.result.content.map(c => c.text || '').join('\n');
+                } else if (Array.isArray(result.content)) {
+                    text = result.content.map(c => c.text || '').join('\n');
+                } else {
+                    text = '[No content]';
+                }
+                chatMessages.push({ role: 'tool', text });
+                renderChatMessages();
+            } else {
+                origRenderToolResultCard(result);
+            }
+        };
+        // When tools list changes, update chat tool select
+        const origUpdateToolsList = chatShell.updateToolsList.bind(chatShell);
+        chatShell.updateToolsList = function(tools) {
+            origUpdateToolsList(tools);
+            renderChatToolSelect();
+        };
+        // On tab switch to Console, rerender tool select/config/messages
+        document.getElementById('consoleTabBtn').addEventListener('click', function() {
+            renderChatToolSelect();
+            renderChatMessages();
+        });
+        // Initial render
+        // Set Console as default active tab
+        document.getElementById('consoleTab').classList.add('active');
+        document.getElementById('consoleTab').style.display = 'block';
+        document.getElementById('consoleTabBtn').classList.add('active');
+        document.getElementById('mcpTab').classList.remove('active');
+        document.getElementById('mcpTab').style.display = 'none';
+        document.getElementById('mcpTabBtn').classList.remove('active');
+        document.getElementById('memoryTab').classList.remove('active');
+        document.getElementById('memoryTab').style.display = 'none';
+        document.getElementById('memoryTabBtn').classList.remove('active');
+        document.getElementById('logsTab').classList.remove('active');
+        document.getElementById('logsTab').style.display = 'none';
+        document.getElementById('logsTabBtn').classList.remove('active');
+        renderChatToolSelect();
+        renderChatMessages();
     </script>
 
     <!-- Styles moved to styles.css -->
