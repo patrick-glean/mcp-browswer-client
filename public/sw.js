@@ -50,7 +50,7 @@ function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
             },
             metadata: metadata || {
                 timestamp: new Date().toISOString(),
-                version: wasmInstance ? `${wasmInstance.get_version()}` : 'unknown',
+                metadataVersion: wasmInstance ? wasmInstance.get_metadata() : 'unknown',
                 buildInfo: wasmInstance ? wasmInstance.get_compiled_info() : null
             }
         }

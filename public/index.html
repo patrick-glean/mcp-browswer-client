@@ -535,8 +535,13 @@
                         if (metadata) {
                             // Update version
                             const versionElement = document.getElementById('metadataVersion');
-                            if (versionElement && metadata.version) {
-                                versionElement.textContent = metadata.version;
+                            if (versionElement && metadata.metadataVersion) {
+                                try {
+                                    const metadataObj = JSON.parse(metadata.metadataVersion);
+                                    versionElement.textContent = metadataObj.version;
+                                } catch (e) {
+                                    console.error('Failed to parse metadata:', e);
+                                }
                             }
                             // Update build info
                             if (metadata.buildInfo) {
@@ -576,8 +581,13 @@
                             const metadata = message.params.metadata;
                             // Update version
                             const versionElement = document.getElementById('metadataVersion');
-                            if (versionElement && metadata.version) {
-                                versionElement.textContent = metadata.version;
+                            if (versionElement && metadata.metadataVersion) {
+                                try {
+                                    const metadataObj = JSON.parse(metadata.metadataVersion);
+                                    versionElement.textContent = metadataObj.version;
+                                } catch (e) {
+                                    console.error('Failed to parse metadata:', e);
+                                }
                             }
                             // Update build info
                             if (metadata.buildInfo) {
