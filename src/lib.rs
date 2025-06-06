@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use serde_wasm_bindgen;
 
 include!("build_info.rs");
+include!("bootrom.rs");
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
@@ -832,4 +833,15 @@ pub async fn call_tool(url: &str, tool_name: &str, args: JsValue) -> Result<JsVa
 pub fn set_debug_mode(enabled: bool) {
     DEBUG_MODE.store(enabled, Ordering::Relaxed);
     log(&format!("set_debug_mode called: {}", enabled));
+}
+
+#[wasm_bindgen]
+pub fn get_bootrom() -> String {
+    let bootrom_event = serde_json::json!({
+        "id": "bootrom",
+        "name": "BOOTROM",
+        "text": BOOTROM_DATA,
+        "timestamp": 0u64
+    });
+    bootrom_event.to_string()
 }

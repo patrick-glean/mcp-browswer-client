@@ -679,6 +679,28 @@ self.addEventListener('message', async (event) => {
                 }
             }
             break;
+        case 'get_bootrom':
+            if (!wasmInstance) {
+                event.source.postMessage({
+                    type: 'bootrom',
+                    error: 'WASM module not loaded'
+                });
+                break;
+            }
+            try {
+                const bootromJson = wasmInstance.get_bootrom();
+                const bootrom = JSON.parse(bootromJson);
+                event.source.postMessage({
+                    type: 'bootrom',
+                    bootrom
+                });
+            } catch (error) {
+                event.source.postMessage({
+                    type: 'bootrom',
+                    error: error.message
+                });
+            }
+            break;
         default:
             console.warn('Unknown message type:', message.type);
     }

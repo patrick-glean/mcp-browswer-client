@@ -20,6 +20,7 @@ export const list_tools: (a: number, b: number) => any;
 export const get_compiled_info: () => [number, number];
 export const call_tool: (a: number, b: number, c: number, d: number, e: any) => any;
 export const set_debug_mode: (a: number) => void;
+export const get_bootrom: () => [number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_exn_store: (a: number) => void;

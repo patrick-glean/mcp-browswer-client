@@ -409,11 +409,27 @@ let wasm_bindgen;
         wasm.set_debug_mode(enabled);
     };
 
+    /**
+     * @returns {string}
+     */
+    __exports.get_bootrom = function() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.get_bootrom();
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    };
+
     function __wbg_adapter_48(arg0, arg1, arg2) {
         wasm.closure73_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_132(arg0, arg1, arg2, arg3) {
+    function __wbg_adapter_133(arg0, arg1, arg2, arg3) {
         wasm.closure95_externref_shim(arg0, arg1, arg2, arg3);
     }
 
@@ -586,7 +602,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_132(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_133(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -713,7 +729,7 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper323 = function(arg0, arg1, arg2) {
+        imports.wbg.__wbindgen_closure_wrapper324 = function(arg0, arg1, arg2) {
             const ret = makeMutClosure(arg0, arg1, 74, __wbg_adapter_48);
             return ret;
         };

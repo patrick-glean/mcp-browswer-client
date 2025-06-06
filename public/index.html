@@ -6,6 +6,97 @@
     <title>MCP Client Test</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/styles.css">
+    <style>
+        .three-panel-memory {
+            display: flex;
+            flex-direction: row;
+            gap: 1.5rem;
+            min-height: 400px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .memory-panel {
+            background: #232323;
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #444;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+            max-width: none;
+        }
+        .memory-panel-left {
+            flex: 0 1 220px;
+            max-width: 240px;
+        }
+        .memory-panel-middle {
+            flex: 0 1 260px;
+            max-width: 280px;
+        }
+        .memory-panel-right {
+            flex: 1 1 0;
+            min-width: 320px;
+        }
+        .imprints-list {
+            margin-top: 1em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
+        }
+        .imprint-list-item {
+            background: #292929;
+            border-radius: 4px;
+            padding: 0.5em 0.75em;
+            cursor: pointer;
+            transition: background 0.2s;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+        .imprint-list-item.selected {
+            background: #2e5c9a;
+            color: #fff;
+            border-color: #3a7bd5;
+        }
+        .imprint-list-item .imprint-name {
+            font-weight: bold;
+            font-size: 1.05em;
+        }
+        .imprint-list-item .imprint-snippet {
+            font-size: 0.95em;
+            color: #aaa;
+            margin-top: 0.1em;
+        }
+        .imprint-list-item .imprint-timestamp {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 0.1em;
+        }
+        .imprint-editor {
+            margin-top: 1em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
+        }
+        .imprint-editor input, .imprint-editor textarea {
+            width: 100%;
+            background: #181818;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 0.5em;
+        }
+        .imprint-editor label {
+            font-weight: bold;
+            margin-top: 0.5em;
+        }
+        .imprint-editor .editor-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 0.5em;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -133,15 +224,19 @@
                 </div>
             </div>
             <div id="memoryTab" class="tab-content" style="display:none;">
-                <div class="memory-section">
-                    <div class="control-group">
-                        <h3>Memory Events</h3>
-                        <div class="memory-controls">
-                            <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
-                            <button id="addMemoryEvent" class="control-button">Add Event</button>
-                            <button id="clearMemoryEvents" class="control-button">Clear Events</button>
+                <div class="memory-section three-panel-memory">
+                    <!-- Imprints List (now leftmost) -->
+                    <div class="memory-panel memory-panel-middle" style="min-width:200px;max-width:260px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5em;">
+                            <h3 style="margin:0;">Imprints</h3>
+                            <button id="addImprintBtn" title="Add Imprint" style="font-size:1.5em;padding:0 0.5em;line-height:1;">+</button>
                         </div>
-                        <div id="memoryEvents" class="memory-events"></div>
+                        <div id="imprintsList" class="imprints-list"></div>
+                    </div>
+                    <!-- Editor/Previewer (right) -->
+                    <div class="memory-panel memory-panel-right">
+                        <h3>Imprint Editor/Preview</h3>
+                        <div id="imprintEditor" class="imprint-editor"></div>
                     </div>
                 </div>
             </div>
@@ -643,6 +738,9 @@
                     case 'tool_result':
                         this.renderToolResultCard(message);
                         return;
+                    case 'bootrom':
+                        // Suppress warning; handled elsewhere (e.g., via Promise)
+                        break;
                     default:
                         console.warn('Unknown message type:', message.type);
                 }
@@ -1705,6 +1803,172 @@
             }
             `;
             document.head.appendChild(style);
+        }
+
+        // --- Imprint (Memory Event) Two-Panel Logic ---
+        function generateImprintId() {
+            return 'imprint-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+        }
+        let imprints = [];
+        let selectedImprintIdx = null;
+
+        function getBootromImprint() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.serviceWorker.controller) {
+                    reject('No service worker controller');
+                    return;
+                }
+                function handler(event) {
+                    if (event.data && event.data.type === 'bootrom') {
+                        navigator.serviceWorker.removeEventListener('message', handler);
+                        if (event.data.bootrom) resolve(event.data.bootrom);
+                        else reject(event.data.error || 'Unknown error');
+                    }
+                }
+                navigator.serviceWorker.addEventListener('message', handler);
+                navigator.serviceWorker.controller.postMessage({ type: 'get_bootrom' });
+            });
+        }
+
+        function loadImprintsFromStorage() {
+            const raw = localStorage.getItem('mcp_module_metadata');
+            if (raw) {
+                try {
+                    const meta = JSON.parse(raw);
+                    imprints = meta.memory_events || [];
+                } catch (e) {
+                    imprints = [];
+                }
+            } else {
+                imprints = [];
+            }
+        }
+
+        function saveImprintsToStorage() {
+            const meta = {
+                version: '1.0.0',
+                memory_events: imprints.filter(imprint => imprint.id !== 'bootrom'), // don't save bootrom
+                last_health_check: Date.now()
+            };
+            localStorage.setItem('mcp_module_metadata', JSON.stringify(meta));
+        }
+
+        function renderImprintsList() {
+            const listDiv = document.getElementById('imprintsList');
+            listDiv.innerHTML = '';
+            if (!imprints.length) {
+                listDiv.innerHTML = '<div style="color:#888;">No imprints yet.</div>';
+                return;
+            }
+            imprints.forEach((imprint, idx) => {
+                const item = document.createElement('div');
+                item.className = 'imprint-list-item' + (selectedImprintIdx === idx ? ' selected' : '');
+                item.innerHTML = `
+                    <span class="imprint-name">${imprint.name || '(no name)'}</span>
+                    <span class="imprint-timestamp">${new Date(imprint.timestamp).toLocaleString()}</span>
+                `;
+                item.onclick = () => {
+                    selectedImprintIdx = idx;
+                    renderImprintsList();
+                    renderImprintEditor();
+                };
+                listDiv.appendChild(item);
+            });
+        }
+
+        function renderImprintEditor() {
+            const editorDiv = document.getElementById('imprintEditor');
+            editorDiv.innerHTML = '';
+            if (selectedImprintIdx === null || !imprints[selectedImprintIdx]) {
+                editorDiv.innerHTML = '<div style="color:#888;">Select an imprint to edit or preview.</div>';
+                return;
+            }
+            const imprint = imprints[selectedImprintIdx];
+            if (imprint.id === 'bootrom') {
+                editorDiv.innerHTML = `
+                    <label>Name</label>
+                    <input type="text" value="${imprint.name || ''}" disabled />
+                    <label>Text</label>
+                    <textarea rows="12" disabled>${imprint.text || ''}</textarea>
+                    <label>Timestamp</label>
+                    <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
+                    <div style="color:#888;margin-top:1em;">This imprint is read-only (bootrom instructions).</div>
+                `;
+                return;
+            }
+            // Editor form
+            const form = document.createElement('form');
+            form.innerHTML = `
+                <label>Name</label>
+                <input type="text" value="${imprint.name || ''}" required id="editImprintName" />
+                <label>Text</label>
+                <textarea rows="8" id="editImprintText">${imprint.text || ''}</textarea>
+                <label>Timestamp</label>
+                <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
+                <div class="editor-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" id="deleteImprintBtn" style="color:#e74c3c;">Delete</button>
+                </div>
+            `;
+            form.onsubmit = (e) => {
+                e.preventDefault();
+                const newName = form.querySelector('#editImprintName').value.trim();
+                const newText = form.querySelector('#editImprintText').value;
+                if (!newName) {
+                    alert('Imprint name is required.');
+                    return;
+                }
+                imprints[selectedImprintIdx].name = newName;
+                imprints[selectedImprintIdx].text = newText;
+                saveImprintsToStorage();
+                renderImprintsList();
+                renderImprintEditor();
+            };
+            form.querySelector('#deleteImprintBtn').onclick = () => {
+                if (confirm('Delete this imprint?')) {
+                    imprints.splice(selectedImprintIdx, 1);
+                    selectedImprintIdx = null;
+                    saveImprintsToStorage();
+                    renderImprintsList();
+                    renderImprintEditor();
+                }
+            };
+            editorDiv.appendChild(form);
+        }
+
+        // Add Imprint button logic
+        const addImprintBtn = document.getElementById('addImprintBtn');
+        if (addImprintBtn) {
+            addImprintBtn.onclick = () => {
+                const newImprint = {
+                    id: generateImprintId(),
+                    name: 'Untitled Imprint',
+                    text: '',
+                    timestamp: Date.now()
+                };
+                imprints.push(newImprint);
+                saveImprintsToStorage();
+                selectedImprintIdx = imprints.length - 1;
+                renderImprintsList();
+                renderImprintEditor();
+            };
+        }
+
+        // Initial load
+        if (document.getElementById('imprintsList')) {
+            getBootromImprint()
+                .then(bootrom => {
+                    loadImprintsFromStorage();
+                    imprints = imprints.filter(imprint => imprint.id !== 'bootrom');
+                    imprints.unshift(bootrom);
+                    renderImprintsList();
+                    renderImprintEditor();
+                })
+                .catch(err => {
+                    loadImprintsFromStorage();
+                    renderImprintsList();
+                    renderImprintEditor();
+                });
         }
     </script>
 

@@ -20,6 +20,7 @@ declare namespace wasm_bindgen {
 	export function get_compiled_info(): string;
 	export function call_tool(url: string, tool_name: string, args: any): Promise<any>;
 	export function set_debug_mode(enabled: boolean): void;
+	export function get_bootrom(): string;
 	
 }
 
@@ -46,6 +47,7 @@ declare interface InitOutput {
   readonly get_compiled_info: () => [number, number];
   readonly call_tool: (a: number, b: number, c: number, d: number, e: any) => any;
   readonly set_debug_mode: (a: number) => void;
+  readonly get_bootrom: () => [number, number];
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
