@@ -425,6 +425,9 @@ class MCPMessageHandler {
 const mcpHandler = new MCPMessageHandler();
 mcpHandler.setDebugMode(isDebugMode);
 
+// --- Engram NAT Table ---
+const engramNAT = new Map(); // engramId -> clientId
+
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
     const message = event.data;
@@ -623,29 +626,78 @@ self.addEventListener('message', async (event) => {
             break;
         case 'call_tool':
             if (!wasmInstance) {
-                broadcastToClients({
-                    type: 'tool_result',
-                    error: 'WASM module not loaded'
-                });
+                // Send error to the correct client if possible
+                if (message.engramId && message.requestId && event.source && event.source.id) {
+                    engramNAT.set(message.engramId, event.source.id);
+                    sendToEngramClient(message.engramId, {
+                        type: 'tool_result',
+                        error: 'WASM module not loaded',
+                        engramId: message.engramId,
+                        requestId: message.requestId
+                    });
+                } else {
+                    broadcastToClients({
+                        type: 'tool_result',
+                        error: 'WASM module not loaded'
+                    });
+                }
                 break;
             }
             try {
+                // Store engramId -> clientId mapping
+                if (message.engramId && event.source && event.source.id) {
+                    engramNAT.set(message.engramId, event.source.id);
+                }
                 const result = await wasmInstance.call_tool(message.url, message.toolName, message.args);
-                broadcastToClients({
-                    type: 'tool_result',
-                    result: JSON.parse(result)
-                });
+                const parsedResult = JSON.parse(result);
+                if (message.engramId && message.requestId) {
+                    sendToEngramClient(message.engramId, {
+                        type: 'tool_result',
+                        result: parsedResult,
+                        engramId: message.engramId,
+                        requestId: message.requestId
+                    });
+                } else {
+                    broadcastToClients({
+                        type: 'tool_result',
+                        result: parsedResult
+                    });
+                }
             } catch (error) {
-                broadcastToClients({
-                    type: 'tool_result',
-                    error: error.message || String(error)
-                });
+                if (message.engramId && message.requestId) {
+                    sendToEngramClient(message.engramId, {
+                        type: 'tool_result',
+                        error: error.message || String(error),
+                        engramId: message.engramId,
+                        requestId: message.requestId
+                    });
+                } else {
+                    broadcastToClients({
+                        type: 'tool_result',
+                        error: error.message || String(error)
+                    });
+                }
             }
             break;
         default:
             console.warn('Unknown message type:', message.type);
     }
 });
+
+// --- Send to engram client helper ---
+function sendToEngramClient(engramId, message) {
+    const clientId = engramNAT.get(engramId);
+    if (clientId) {
+        self.clients.get(clientId).then(client => {
+            if (client) {
+                client.postMessage(message);
+            }
+        });
+    } else {
+        // Fallback: broadcast if mapping missing
+        broadcastToClients(message);
+    }
+}
 
 // Initialize on install
 self.addEventListener('install', event => {
@@ -663,17 +715,16 @@ self.addEventListener('activate', event => {
 async function checkWasm(checkId) {
     try {
         if (!wasmInstance) {
-            throw new Error('WASM module not initialized');
+            // WASM not initialized: try to initialize and re-check
+            await initializeWasm();
+            if (!wasmInstance) throw new Error('WASM module not initialized after reload');
         }
-
         // Use the basic health check that doesn't depend on MCP server
         const healthy = await wasmInstance.health_check();
         const uptime = await wasmInstance.get_uptime();
-        
         // Broadcast status with current uptime
         // 0 means healthy in our WASM module
         broadcastWasmStatus(healthy === 0, uptime);
-
     } catch (error) {
         console.error('WASM module check failed:', error);
         broadcastWasmStatus(false);
