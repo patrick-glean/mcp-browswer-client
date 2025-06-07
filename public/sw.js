@@ -4,6 +4,7 @@ let isRunning = true;
 let uptimeInterval = null;
 let isDebugMode = false;
 let isInitializing = false;
+let cbusQueue = [];
 
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
@@ -663,6 +664,19 @@ self.addEventListener('message', async (event) => {
                         result: parsedResult
                     });
                 }
+                // --- Echo tool response to CBus queue ---
+                const cbusMsg = {
+                    text: extractToolResponseText(parsedResult),
+                    role: 'tool',
+                    timestamp: Date.now(),
+                    engramId: message.engramId || null
+                };
+                cbusQueue.push(cbusMsg);
+                if (cbusQueue.length > 1000) cbusQueue.shift();
+                broadcastToClients({
+                    type: 'cbus_message',
+                    message: cbusMsg
+                });
             } catch (error) {
                 if (message.engramId && message.requestId) {
                     sendToEngramClient(message.engramId, {
@@ -698,6 +712,30 @@ self.addEventListener('message', async (event) => {
                 event.source.postMessage({
                     type: 'bootrom',
                     error: error.message
+                });
+            }
+            break;
+        case 'cbus_send_message':
+            if (message && message.text) {
+                const msg = {
+                    text: message.text,
+                    role: message.role || 'user',
+                    timestamp: Date.now(),
+                    engramId: message.engramId || null
+                };
+                cbusQueue.push(msg);
+                if (cbusQueue.length > 1000) cbusQueue.shift();
+                broadcastToClients({
+                    type: 'cbus_message',
+                    message: msg
+                });
+            }
+            break;
+        case 'cbus_subscribe':
+            if (event.source) {
+                event.source.postMessage({
+                    type: 'cbus_queue',
+                    queue: cbusQueue
                 });
             }
             break;
@@ -836,3 +874,17 @@ function broadcastToClients(message) {
 //             })
 //     );
 // });
+
+// Helper to extract text from tool response
+function extractToolResponseText(parsedResult) {
+    if (parsedResult && parsedResult.result && Array.isArray(parsedResult.result.content)) {
+        return parsedResult.result.content.map(c => c.text || '').join('\n');
+    } else if (parsedResult && Array.isArray(parsedResult.content)) {
+        return parsedResult.content.map(c => c.text || '').join('\n');
+    } else if (Array.isArray(parsedResult)) {
+        return parsedResult.map(c => c.text || '').join('\n');
+    } else if (parsedResult && parsedResult.text) {
+        return parsedResult.text;
+    }
+    return '[No content]';
+}

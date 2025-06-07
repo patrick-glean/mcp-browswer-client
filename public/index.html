@@ -158,15 +158,18 @@
                             <div id="chatEngramIdDisplay"></div>
                         </div>
                         <div class="chat-card-right">
-                            <div class="chat-server-select-row">
-                                <label for="chatServerSelect">Server:</label>
-                                <select id="chatServerSelect"></select>
+                            <div class="cbus-tap-card" style="border:1px solid #444; border-radius:8px; padding:1em; margin-bottom:1em; background:#232323;">
+                                <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.5em;">CBus Tap</div>
+                                <div class="chat-server-select-row">
+                                    <label for="chatServerSelect">Server:</label>
+                                    <select id="chatServerSelect"></select>
+                                </div>
+                                <div class="chat-tool-select-row">
+                                    <label for="chatToolSelect">Tool:</label>
+                                    <select id="chatToolSelect"></select>
+                                </div>
+                                <form id="chatToolConfigForm" class="chat-tool-config"></form>
                             </div>
-                            <div class="chat-tool-select-row">
-                                <label for="chatToolSelect">Tool:</label>
-                                <select id="chatToolSelect"></select>
-                            </div>
-                            <form id="chatToolConfigForm" class="chat-tool-config"></form>
                         </div>
                     </div>
                 </div>
@@ -504,7 +507,7 @@
                 // Then check every minute
                 this.wasmCheckInterval = setInterval(() => {
                     this.checkWasm();
-                }, 60000); // 60 seconds
+                }, 600000); // 10 minutes
             }
 
             stopPeriodicWasmChecks() {
@@ -576,7 +579,7 @@
             async checkWasm() {
                 if (this.serviceWorker) {
                     const checkId = ++this.checkCounter;
-                    console.log(`Checking WASM module (check #${checkId})...`);
+                    console.log(`10 min heartbeat: WASM module (check #${checkId})...`);
                     await this.serviceWorker.postMessage({ 
                         type: 'check_wasm',
                         checkId: checkId
@@ -740,6 +743,12 @@
                         return;
                     case 'bootrom':
                         // Suppress warning; handled elsewhere (e.g., via Promise)
+                        break;
+                    case 'cbus_queue':
+                        // No-op: handled elsewhere, suppress warning
+                        break;
+                    case 'cbus_message':
+                        // No-op: handled elsewhere, suppress warning
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -1504,112 +1513,55 @@
             ).join('');
             chatDiv.scrollTop = chatDiv.scrollHeight;
         }
-        // Helper to render chat server select dropdown
-        function renderChatServerSelect() {
-            const select = document.getElementById('chatServerSelect');
-            select.innerHTML = '';
-            const servers = chatShell.servers || {};
-            const serverUrls = Object.keys(servers);
-            serverUrls.forEach(url => {
-                const opt = document.createElement('option');
-                opt.value = url;
-                opt.textContent = servers[url].alias || servers[url].name || url;
-                select.appendChild(opt);
-            });
-            // Default to first server or previous selection
-            if (serverUrls.length > 0) {
-                if (!chatSelectedServerUrl || !servers[chatSelectedServerUrl]) {
-                    chatSelectedServerUrl = serverUrls[0];
+        // Subscribe to the CBus queue on page load
+        if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+        }
+        // Handle incoming CBus messages
+        navigator.serviceWorker.addEventListener('message', (event) => {
+            const msg = event.data;
+            if (msg.type === 'cbus_message') {
+                console.log('[Client] cbus_message:', msg.message); // Debug: show all cbus messages
+                chatMessages.push(msg.message);
+                renderChatMessages();
+
+                // --- CBus Tap Forwarder ---
+                // Only forward user messages (not tool responses or messages from the tap tool itself)
+                if (msg.message.role === 'user') {
+                    const tapConfig = loadCbusTapConfig();
+                    if (
+                        tapConfig &&
+                        tapConfig.serverUrl &&
+                        tapConfig.toolName &&
+                        tapConfig.connectedArg
+                    ) {
+                        // Prevent feedback: do not forward if the message is from the tap tool itself
+                        // (user messages are safe, but double-check if needed)
+                        // If you ever want to forward tool messages, add a check here:
+                        // if (msg.message.role === 'tool' && msg.message.toolName === tapConfig.toolName) return;
+                        const toolArgs = { ...(tapConfig.args || {}) };
+                        toolArgs[tapConfig.connectedArg] = msg.message.text;
+                        chatShell.serviceWorker.postMessage({
+                            type: 'call_tool',
+                            url: tapConfig.serverUrl,
+                            toolName: tapConfig.toolName,
+                            args: toolArgs,
+                            engramId: chatEngramId,
+                            requestId: crypto.randomUUID()
+                        });
+                    }
                 }
-                select.value = chatSelectedServerUrl;
+            } else if (msg.type === 'cbus_queue') {
+                chatMessages = msg.queue;
+                renderChatMessages();
+            } else if (msg.type === 'tool_result') {
+                // Only show in tool result card if not for the current chat engramId (i.e., not for console/chat flow)
+                if (!msg.engramId || msg.engramId !== chatEngramId) {
+                    renderToolResultCard(msg);
+                }
+                // Otherwise, ignore (it will show in chat via cbus_message)
             }
-        }
-        // Helper to render chat tool select dropdown
-        function renderChatToolSelect() {
-            const select = document.getElementById('chatToolSelect');
-            select.innerHTML = '';
-            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
-            tools.forEach((tool, idx) => {
-                const opt = document.createElement('option');
-                opt.value = tool.name;
-                opt.textContent = tool.name;
-                select.appendChild(opt);
-            });
-            if (tools.length > 0) {
-                chatSelectedTool = tools[0];
-                renderChatToolConfig(chatSelectedTool);
-            } else {
-                chatSelectedTool = null;
-                renderChatToolConfig(null);
-            }
-        }
-        // Helper to render tool config form
-        function renderChatToolConfig(tool) {
-            const form = document.getElementById('chatToolConfigForm');
-            form.innerHTML = '';
-            chatToolAssignUserMessage = {};
-            if (!tool) return;
-            const schema = tool.inputSchema || tool.input_schema;
-            if (schema && schema.properties) {
-                Object.entries(schema.properties).forEach(([key, prop]) => {
-                    const isRequired = (schema.required || []).includes(key);
-                    let inputCard;
-                    if (prop.type === 'string') {
-                        inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        let label = `<label><strong>${key}</strong> (string)`;
-                        if (isRequired) label += ' <span style=\"color:#f44336\">*</span>';
-                        label += prop.description ? `<br><span style=\"color:#aaa;font-size:0.95em\">${prop.description}</span>` : '';
-                        label += '</label><br>';
-                        inputCard.innerHTML = `${label}
-                            <input type=\"text\" name=\"${key}\" />
-                            <label style=\"margin-left:0.5em;cursor:pointer;user-select:none;vertical-align:middle;\">
-                                <input type=\"checkbox\" class=\"assign-user-message solid-checkbox\" data-field=\"${key}\" style=\"vertical-align:middle;\" />
-                                <span style=\"font-size:0.9em;color:#aaa;vertical-align:middle;\">Use user message</span>
-                            </label>`;
-                        setTimeout(() => {
-                            const cb = inputCard.querySelector('.assign-user-message[data-field="' + key + '"]');
-                            const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
-                            if (cb && input) {
-                                cb.onchange = () => {
-                                    chatToolAssignUserMessage[key] = cb.checked;
-                                    input.disabled = cb.checked;
-                                };
-                                chatToolAssignUserMessage[key] = false;
-                                input.disabled = false;
-                            }
-                        }, 0);
-                    } else {
-                        inputCard = chatShell.renderInputField(key, prop, isRequired);
-                    }
-                    if (prop.type === 'string') {
-                        const note = document.createElement('div');
-                        note.style.fontSize = '0.9em';
-                        note.style.color = '#aaa';
-                        note.textContent = 'You can use {{user_message}} as a placeholder.';
-                        inputCard.appendChild(note);
-                    }
-                    form.appendChild(inputCard);
-                });
-            }
-            form.oninput = () => {
-                chatToolConfig = chatShell.serializeToolForm(form, schema);
-            };
-            chatToolConfig = chatShell.serializeToolForm(form, schema);
-        }
-        // On server select change
-        const chatServerSelect = document.getElementById('chatServerSelect');
-        chatServerSelect.addEventListener('change', function() {
-            chatSelectedServerUrl = this.value;
-            renderChatToolSelect();
-        });
-        // On tool select change
-        const chatToolSelect = document.getElementById('chatToolSelect');
-        chatToolSelect.addEventListener('change', function() {
-            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
-            const tool = tools.find(t => t.name === this.value);
-            chatSelectedTool = tool;
-            renderChatToolConfig(tool);
+            // ...existing handlers...
         });
         // Always show send button, but disable/grey it out if input is empty/whitespace
         function updateSendBtnState() {
@@ -1647,100 +1599,17 @@
         // In chatRequestHandlers[requestId], only add the tool message once
         chatSendBtn.addEventListener('click', async function() {
             const userInput = document.getElementById('chatUserInput').value.trim();
-            if (!userInput || !chatSelectedTool || !chatSelectedServerUrl) return;
-            // Add user message to chat
-            chatMessages.push({ role: 'user', text: userInput });
-            renderChatMessages();
+            if (!userInput) return;
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'cbus_send_message',
+                    text: userInput,
+                    role: 'user',
+                    engramId: chatEngramId
+                });
+            }
             document.getElementById('chatUserInput').value = '';
             updateSendBtnState();
-            const schema = chatSelectedTool.inputSchema || chatSelectedTool.input_schema;
-            const form = document.getElementById('chatToolConfigForm');
-            function buildToolArgs(schema) {
-                const result = {};
-                if (!schema || !schema.properties) return result;
-                Object.entries(schema.properties).forEach(([key, prop]) => {
-                    if (prop.type === 'string') {
-                        if (chatToolAssignUserMessage[key]) {
-                            result[key] = userInput;
-                        } else {
-                            const input = form.querySelector(`[name='${key}']`);
-                            result[key] = input ? input.value : '';
-                        }
-                    } else if (prop.type === 'array') {
-                        const values = Array.from(form.querySelectorAll(`[name='${key}[]']`)).map(input => input.value);
-                        result[key] = values;
-                    } else if (prop.type === 'object' && prop.properties) {
-                        const subSchema = { properties: prop.properties, required: prop.required };
-                        result[key] = buildToolArgs(subSchema);
-                    } else if (prop.type === 'object' && !prop.properties) {
-                        const input = form.querySelector(`[name='${key}']`);
-                        if (input) {
-                            try {
-                                result[key] = input.value ? JSON.parse(input.value) : {};
-                                input.style.borderColor = '';
-                                input.title = '';
-                            } catch (e) {
-                                input.style.borderColor = '#f44336';
-                                input.title = 'Invalid JSON';
-                                throw new Error(`Invalid JSON for ${key}`);
-                            }
-                        }
-                    } else {
-                        const input = form.querySelector(`[name='${key}']`);
-                        if (input) {
-                            if (prop.type === 'integer' || prop.type === 'number') {
-                                result[key] = input.value ? Number(input.value) : undefined;
-                            } else {
-                                result[key] = input.value;
-                            }
-                        }
-                    }
-                });
-                return result;
-            }
-            function fillUserMessage(obj) {
-                if (typeof obj === 'string') {
-                    return obj.replace(/{{user_message}}/g, userInput);
-                } else if (Array.isArray(obj)) {
-                    return obj.map(fillUserMessage);
-                } else if (typeof obj === 'object' && obj !== null) {
-                    const out = {};
-                    for (const k in obj) out[k] = fillUserMessage(obj[k]);
-                    return out;
-                } else {
-                    return obj;
-                }
-            }
-            const toolArgs = fillUserMessage(buildToolArgs(schema));
-            const requestId = crypto.randomUUID();
-            chatRequestHandlers[requestId] = (msg) => {
-                if (msg.error) {
-                    chatMessages.push({ role: 'tool', text: '[Error] ' + (msg.error.message || msg.error) });
-                } else {
-                    let text = '';
-                    if (msg.result && msg.result.result && Array.isArray(msg.result.result.content)) {
-                        text = msg.result.result.content.map(c => c.text || '').join('\n');
-                    } else if (msg.result && Array.isArray(msg.result.content)) {
-                        text = msg.result.content.map(c => c.text || '').join('\n');
-                    } else if (Array.isArray(msg.content)) {
-                        text = msg.content.map(c => c.text || '').join('\n');
-                    } else {
-                        text = '[No content]';
-                    }
-                    chatMessages.push({ role: 'tool', text });
-                }
-                renderChatMessages();
-            };
-            if (chatShell.serviceWorker) {
-                chatShell.serviceWorker.postMessage({
-                    type: 'call_tool',
-                    url: chatSelectedServerUrl,
-                    toolName: chatSelectedTool.name,
-                    args: toolArgs,
-                    engramId: chatEngramId,
-                    requestId: requestId
-                });
-            }
         });
         document.getElementById('chatUserInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
@@ -1750,14 +1619,14 @@
         });
         // On tab switch to Console, rerender server/tool select/config/messages/engramId
         document.getElementById('consoleTabBtn').addEventListener('click', function() {
-            renderChatServerSelect();
-            renderChatToolSelect();
+            renderTapServerSelect();      // For CBus Tap card
+            renderMcpServerSelect();      // For MCP page
             renderChatMessages();
             renderEngramId();
         });
         // Initial render
-        renderChatServerSelect();
-        renderChatToolSelect();
+        renderTapServerSelect();      // For CBus Tap card
+        renderMcpServerSelect();      // For MCP page
         renderChatMessages();
         renderEngramId();
 
@@ -1969,6 +1838,267 @@
                     renderImprintsList();
                     renderImprintEditor();
                 });
+        }
+
+        // --- CBus Tap Config Persistence ---
+        function loadCbusTapConfig() {
+            const raw = localStorage.getItem('cbusTapConfig');
+            if (!raw) return null;
+            try {
+                return JSON.parse(raw);
+            } catch (e) {
+                return null;
+            }
+        }
+        function saveCbusTapConfig(config) {
+            localStorage.setItem('cbusTapConfig', JSON.stringify(config));
+        }
+        function saveCurrentTapConfig() {
+            saveCbusTapConfig({
+                serverUrl: chatSelectedServerUrl,
+                toolName: chatSelectedTool?.name,
+                args: chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema),
+                connectedArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k]) || null
+            });
+        }
+        // --- CBus Tap Card Logic ---
+        function renderTapServerSelect() {
+            const select = document.getElementById('chatServerSelect');
+            if (!select) return;
+            const tapConfig = loadCbusTapConfig() || {};
+            renderServerSelect(select, tapConfig.serverUrl || chatSelectedServerUrl, chatShell.servers || {});
+            chatSelectedServerUrl = select.value;
+        }
+        function renderTapToolSelect() {
+            const select = document.getElementById('chatToolSelect');
+            if (!select) return;
+            const tapConfig = loadCbusTapConfig() || {};
+            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            select.innerHTML = '';
+            tools.forEach((tool, idx) => {
+                const opt = document.createElement('option');
+                opt.value = tool.name;
+                opt.textContent = tool.name;
+                select.appendChild(opt);
+            });
+            // Restore tool selection from config if possible
+            if (tools.length > 0) {
+                let toolToSelect = tools[0];
+                if (tapConfig.toolName) {
+                    const found = tools.find(t => t.name === tapConfig.toolName);
+                    if (found) toolToSelect = found;
+                }
+                select.value = toolToSelect.name;
+                chatSelectedTool = toolToSelect;
+                renderTapToolConfig(toolToSelect);
+            } else {
+                chatSelectedTool = null;
+                renderTapToolConfig(null);
+            }
+        }
+        function renderTapToolConfig(tool) {
+            const form = document.getElementById('chatToolConfigForm');
+            form.innerHTML = '';
+            chatToolAssignUserMessage = {};
+            if (!tool) return;
+            const schema = tool.inputSchema || tool.input_schema;
+            const tapConfig = loadCbusTapConfig() || {};
+            if (schema && schema.properties) {
+                Object.entries(schema.properties).forEach(([key, prop]) => {
+                    const isRequired = (schema.required || []).includes(key);
+                    let inputCard;
+                    if (prop.type === 'string') {
+                        inputCard = document.createElement('div');
+                        inputCard.className = 'tool-input-card';
+                        let label = `<label><strong>${key}</strong> (string)`;
+                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                        label += '</label><br>';
+                        inputCard.innerHTML = `${label}
+                            <input type="text" name="${key}" />
+                            <label style="margin-left:0.5em;cursor:pointer;user-select:none;vertical-align:middle;">
+                                <input type="checkbox" class="assign-cbus solid-checkbox" data-field="${key}" style="vertical-align:middle;" />
+                                <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus</span>
+                            </label>`;
+                        setTimeout(() => {
+                            const cb = inputCard.querySelector('.assign-cbus[data-field="' + key + '"]');
+                            const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
+                            // Restore value from config if present
+                            let value = (tapConfig.args && tapConfig.args[key]) || '';
+                            input.value = value;
+                            // Restore checkbox from config
+                            if (tapConfig.connectedArg === key) {
+                                cb.checked = true;
+                                input.disabled = true;
+                                chatToolAssignUserMessage[key] = true;
+                            }
+                            // Validation: must include {{cbus_message}}
+                            function validateCbusMessage() {
+                                if (input.value && !input.value.includes('{{cbus_message}}')) {
+                                    input.style.borderColor = '#f44336';
+                                    input.title = 'Value must include {{cbus_message}}';
+                                    if (!inputCard.querySelector('.cbus-message-warning')) {
+                                        const warn = document.createElement('div');
+                                        warn.className = 'cbus-message-warning';
+                                        warn.style.color = '#f44336';
+                                        warn.style.fontSize = '0.9em';
+                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        inputCard.appendChild(warn);
+                                    }
+                                } else {
+                                    input.style.borderColor = '';
+                                    input.title = '';
+                                    const warn = inputCard.querySelector('.cbus-message-warning');
+                                    if (warn) warn.remove();
+                                }
+                            }
+                            validateCbusMessage();
+                            input.addEventListener('input', () => {
+                                validateCbusMessage();
+                                saveCurrentTapConfig();
+                            });
+                            if (cb && input) {
+                                cb.onchange = () => {
+                                    chatToolAssignUserMessage[key] = cb.checked;
+                                    if (cb.checked) {
+                                        input.value = '{{cbus_message}}';
+                                        input.disabled = true;
+                                    } else {
+                                        input.disabled = false;
+                                        if (input.value === '{{cbus_message}}') input.value = '';
+                                    }
+                                    onConnectToCbusChanged(key, cb.checked);
+                                    saveCurrentTapConfig();
+                                };
+                                chatToolAssignUserMessage[key] = !!cb.checked;
+                                input.disabled = !!cb.checked;
+                            }
+                        }, 0);
+                        // Add note
+                        const note = document.createElement('div');
+                        note.style.fontSize = '0.9em';
+                        note.style.color = '#aaa';
+                        note.textContent = '{{cbus_message}} == bus message';
+                        inputCard.appendChild(note);
+                    } else {
+                        inputCard = chatShell.renderInputField(key, prop, isRequired);
+                    }
+                    form.appendChild(inputCard);
+                });
+            }
+            form.oninput = () => {
+                chatToolConfig = chatShell.serializeToolForm(form, schema);
+                saveCurrentTapConfig();
+            };
+            chatToolConfig = chatShell.serializeToolForm(form, schema);
+        }
+        // --- Event listeners for Tap card ---
+        const chatServerSelect = document.getElementById('chatServerSelect');
+        chatServerSelect.addEventListener('change', function() {
+            chatSelectedServerUrl = this.value;
+            renderTapToolSelect();
+            saveCurrentTapConfig();
+        });
+        const chatToolSelect = document.getElementById('chatToolSelect');
+        chatToolSelect.addEventListener('change', function() {
+            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            const tool = tools.find(t => t.name === this.value);
+            chatSelectedTool = tool;
+            renderTapToolConfig(tool);
+            saveCurrentTapConfig();
+        });
+        // Initial render for Tap card
+        renderTapServerSelect();
+        renderTapToolSelect();
+        renderTapToolConfig(chatSelectedTool);
+        // Subscribe to the CBus queue on page load (fix typo)
+        if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+        }
+
+        // --- MCP Page Logic ---
+        function renderMcpServerSelect() {
+            const select = document.getElementById('mcpServerSelect');
+            if (!select) return;
+            renderServerSelect(select, chatShell.selectedServerUrl, chatShell.servers || {});
+            // Update chatShell.selectedServerUrl to match select value
+            chatShell.selectedServerUrl = select.value;
+        }
+        // Replace all calls to renderChatServerSelect() with the appropriate new function
+        // For CBus Tap card: renderTapServerSelect()
+        // For MCP page: renderMcpServerSelect()
+        // Initial render for MCP page
+        if (document.getElementById('mcpServerSelect')) {
+            renderMcpServerSelect();
+        }
+
+        function onConnectToCbusChanged(field, checked) {
+            if (checked) {
+                // When checked, send the bootrom prompt to the selected tool/field
+                getBootromImprint().then(bootrom => {
+                    if (!chatSelectedServerUrl || !chatSelectedTool) return;
+                    const toolArgs = {};
+                    toolArgs[field] = bootrom.text || '';
+                    // Optionally fill other fields with defaults/blanks
+                    if (chatShell.serviceWorker) {
+                        chatShell.serviceWorker.postMessage({
+                            type: 'call_tool',
+                            url: chatSelectedServerUrl,
+                            toolName: chatSelectedTool.name,
+                            args: toolArgs,
+                            engramId: chatEngramId,
+                            requestId: crypto.randomUUID()
+                        });
+                    }
+                });
+            }
+        }
+
+        function renderServerSelect(selectElement, selectedServerUrl, servers) {
+            selectElement.innerHTML = '';
+            const serverUrls = Object.keys(servers);
+            serverUrls.forEach(url => {
+                const opt = document.createElement('option');
+                opt.value = url;
+                opt.textContent = servers[url].alias || servers[url].name || url;
+                selectElement.appendChild(opt);
+            });
+            // Default to first server or previous selection
+            if (serverUrls.length > 0) {
+                if (!selectedServerUrl || !servers[selectedServerUrl]) {
+                    selectElement.value = serverUrls[0];
+                } else {
+                    selectElement.value = selectedServerUrl;
+                }
+            }
+        }
+
+        // --- Robust CBus Subscription ---
+        function subscribeToCbus() {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+            } else {
+                // Wait for the SW to become active, then subscribe
+                navigator.serviceWorker.addEventListener('controllerchange', function() {
+                    if (navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+                    }
+                }, { once: true });
+            }
+        }
+        // Subscribe on page load
+        subscribeToCbus();
+        // Subscribe again when switching to Console tab
+        const consoleTabBtn = document.getElementById('consoleTabBtn');
+        if (consoleTabBtn) {
+            consoleTabBtn.addEventListener('click', function() {
+                subscribeToCbus();
+            });
+        }
+
+        // Add a no-op renderToolResultCard to prevent ReferenceError
+        function renderToolResultCard() {
+            // No-op: intentionally left blank to prevent errors
         }
     </script>
 
