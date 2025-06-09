@@ -432,12 +432,34 @@ mcpHandler.setDebugMode(isDebugMode);
 // --- Engram NAT Table ---
 const engramNAT = new Map(); // engramId -> clientId
 
+// --- UUIDv7 generator (browser-compatible, minimal) ---
+function uuidv7() {
+    // UUIDv7: 48 bits unix timestamp ms, 74 bits random
+    const now = Date.now();
+    const unixTs = now;
+    const tsHex = unixTs.toString(16).padStart(12, '0'); // 48 bits = 12 hex chars
+    // 74 bits random = 19 hex chars (but UUID is 36 chars with dashes)
+    const rand = crypto.getRandomValues(new Uint8Array(10));
+    let randHex = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
+    randHex = randHex.padEnd(20, '0');
+    // Compose UUIDv7: xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx
+    // Use timestamp for first 12 hex, then version, then random
+    const uuid = [
+        tsHex.slice(0, 8),
+        tsHex.slice(8, 12),
+        '7' + randHex.slice(0, 3),
+        (8 + (rand[3] & 0x3)).toString(16) + randHex.slice(3, 6),
+        randHex.slice(6, 18)
+    ].join('-');
+    return uuid;
+}
+
 // --- DRY helper for engram message persistence ---
 async function persistEngramMessage(msg) {
     if (!msg.engramId) return;
     const storedMsg = {
         ...msg,
-        id: msg.id || (self.crypto ? self.crypto.randomUUID() : Math.random().toString(36).slice(2)),
+        id: uuidv7(),
         timestamp: msg.timestamp || Date.now(),
     };
     const db = await (await initDB(), openDB());
@@ -798,6 +820,38 @@ self.addEventListener('message', async (event) => {
                 });
                 // --- Persist user message ---
                 await persistEngramMessage(msg);
+
+                // --- After persisting, trigger tool call if CBus Tap is configured ---
+                try {
+                    const tapConfig = JSON.parse(self.localStorage?.getItem('cbusTapConfig') || '{}');
+                    if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
+                        // Load full engram history
+                        const { messages: engramMessages } = await handleOp('load', msg.engramId, null);
+                        let toolArgs = { ...(tapConfig.args || {}) };
+                        if (tapConfig.connectedStringArg) {
+                            let template = toolArgs[tapConfig.connectedStringArg];
+                            const latestMsg = engramMessages[engramMessages.length - 1].text;
+                            if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
+                                toolArgs[tapConfig.connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
+                            } else if (typeof template === 'string' && template.length > 0) {
+                                toolArgs[tapConfig.connectedStringArg] = template;
+                            } else {
+                                toolArgs[tapConfig.connectedStringArg] = latestMsg;
+                            }
+                        }
+                        if (tapConfig.connectedArrayArg) {
+                            toolArgs[tapConfig.connectedArrayArg] = engramMessages.slice(0, -1);
+                        }
+                        // Call the tool
+                        await wasmInstance.call_tool(
+                            tapConfig.serverUrl,
+                            tapConfig.toolName,
+                            toolArgs
+                        );
+                    }
+                } catch (err) {
+                    debugLog('CBus Tap tool call failed', { error: err.message });
+                }
             }
             break;
         case 'cbus_subscribe':
