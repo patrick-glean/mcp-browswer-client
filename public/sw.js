@@ -2,45 +2,19 @@ let wasmInstance = null;
 let wasmModule = null;
 let isRunning = true;
 let uptimeInterval = null;
-let isDebugMode = false;
+let isDebugMode = true;
 let isInitializing = false;
 let cbusQueue = [];
+
+// --- TAP Config Storage ---
+let currentTapConfig = {};
 
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
 
 import { handleOp, initDB, openDB } from './chatStorage.js';
+import { debugLog } from './logger.js';
 
-
-// Debug logging function
-function debugLog(message, data = null) {
-    if (!isRunning) return;
-    
-    const timestamp = new Date().toISOString();
-    
-    // Convert BigInt values to strings in the data object
-    const safeData = data ? JSON.parse(JSON.stringify(data, (key, value) => 
-        typeof value === 'bigint' ? value.toString() : value
-    )) : null;
-    
-    const logMessage = safeData 
-        ? `[SW v${VERSION}] ${message}: ${JSON.stringify(safeData, null, 2)}`
-        : `[SW v${VERSION}] ${message}`;
-    
-    // Always log errors and important messages
-    const isImportant = message.includes('WASM') || message.includes('Error') || message.includes('Failed');
-    
-    if (isImportant || isDebugMode) {
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: isDebugMode ? 'DEBUG' : 'INFO',
-                message: logMessage,
-                timestamp: timestamp
-            }
-        });
-    }
-}
 
 // Broadcast WASM status to all clients
 function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
@@ -62,20 +36,21 @@ function broadcastWasmStatus(healthy, uptime = null, metadata = null) {
     broadcastToClients(statusMessage);
 }
 
+
 // Initialize WASM module
 async function initializeWasm() {
     if (isInitializing) {
-        debugLog('WASM initialization already in progress, skipping...');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM initialization already in progress, skipping...' });
         return false;
     }
     if (wasmInstance) {
-        debugLog('WASM module already initialized, skipping...');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM module already initialized, skipping...' });
         return true;
     }
     
     isInitializing = true;
     try {
-        debugLog('Initializing WASM module...');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Initializing WASM module...' });
         
         // Determine base path for relative fetches
         const basePath = self.location.pathname.replace(/\/[^\/]*$/, '/');
@@ -84,7 +59,7 @@ async function initializeWasm() {
         if (!bindingsResponse.ok) {
             throw new Error(`Failed to fetch WASM bindings: ${bindingsResponse.status} ${bindingsResponse.statusText}`);
         }
-        debugLog('WASM bindings fetched successfully');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM bindings fetched successfully' });
         const bindingsText = await bindingsResponse.text();
         
         // Replace window references with self
@@ -92,24 +67,24 @@ async function initializeWasm() {
             .replace(/^let wasm_bindgen;/, 'self.wasm_bindgen = undefined;')
             .replace(/window\./g, 'self.');
         eval(patchedBindingsText);
-        debugLog('WASM bindings loaded via eval');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM bindings loaded via eval' });
         
         // Now load the WASM module
         const wasmResponse = await self.fetch(`${basePath}mcp_browser_client_bg.wasm`);
         if (!wasmResponse.ok) {
             throw new Error(`Failed to fetch WASM module: ${wasmResponse.status} ${wasmResponse.statusText}`);
         }
-        debugLog('WASM module fetched successfully');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM module fetched successfully' });
         const wasmBytes = await wasmResponse.arrayBuffer();
         
         // Log the WASM module size
         const wasmSize = wasmBytes.byteLength;
         const wasmSizeKB = (wasmSize / 1024).toFixed(2);
-        debugLog(`WASM module size: ${wasmSizeKB} KB`);
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: `WASM module size: ${wasmSizeKB} KB` });
         
         // Initialize WASM module with correct call
         await self.wasm_bindgen(wasmBytes);
-        debugLog('WASM module instantiated successfully');
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM module instantiated successfully' });
         
         // All exported functions are now on self.wasm_bindgen
         wasmInstance = self.wasm_bindgen;
@@ -181,7 +156,7 @@ async function initializeWasm() {
         return true;
     } catch (error) {
         const errorMessage = `WASM initialization failed: ${error.message}`;
-        debugLog(errorMessage);
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: errorMessage });
         broadcastToClients({
             type: 'log',
             content: {
@@ -203,13 +178,13 @@ async function initializeWasm() {
 // Unload WASM module
 function unloadWasm() {
     if (wasmInstance) {
-        debugLog("Unloading WASM module...");
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Unloading WASM module..." });
         // Stop uptime counter
         stopUptimeCounter();
 
         wasmInstance = null;
         wasmModule = null;
-        debugLog("WASM module unloaded");
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "WASM module unloaded" });
         broadcastToClients({
             type: 'log',
             content: {
@@ -226,7 +201,7 @@ function unloadWasm() {
 
 // Start uptime counter
 function startUptimeCounter() {
-    debugLog("Starting uptime counter");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Starting uptime counter" });
     stopUptimeCounter(); // Clear any existing interval
     
     let lastLogTime = 0;
@@ -265,10 +240,10 @@ function startUptimeCounter() {
                     });
                 }
             } catch (error) {
-                debugLog("Failed to update uptime", { 
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "Failed to update uptime", data: { 
                     error: error.message,
                     stack: error.stack
-                });
+                } });
                 broadcastToClients({
                     type: 'log',
                     content: {
@@ -284,7 +259,7 @@ function startUptimeCounter() {
 
 // Stop uptime counter
 function stopUptimeCounter() {
-    debugLog("Stopping uptime counter");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Stopping uptime counter" });
     if (uptimeInterval) {
         clearInterval(uptimeInterval);
         uptimeInterval = null;
@@ -297,16 +272,16 @@ function stopUptimeCounter() {
 
 // Reload WASM module
 async function reloadWasm() {
-    debugLog("Reloading WASM module...");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Reloading WASM module..." });
     try {
         // First unload the existing instance
         unloadWasm();
-        debugLog("Previous WASM instance unloaded");
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Previous WASM instance unloaded" });
         
         // Initialize new instance
         const success = await initializeWasm();
         if (success) {
-            debugLog("WASM module reloaded successfully");
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "WASM module reloaded successfully" });
             // Get fresh metadata
             const buildInfo = wasmInstance.get_compiled_info();
             const version = wasmInstance.get_version();
@@ -338,7 +313,7 @@ async function reloadWasm() {
                 }
             });
         } else {
-            debugLog("Failed to reload WASM module");
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'Failed to reload WASM module' });
             broadcastToClients({
                 type: 'log',
                 content: {
@@ -353,7 +328,7 @@ async function reloadWasm() {
             });
         }
     } catch (error) {
-        debugLog(`Error during WASM reload: ${JSON.stringify({ error: error.message, stack: error.stack })}`);
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: `Error during WASM reload: ${JSON.stringify({ error: error.message, stack: error.stack })}` });
         broadcastToClients({
             type: 'log',
             content: {
@@ -413,7 +388,7 @@ class MCPMessageHandler {
             
             return response;
         } catch (error) {
-            debugLog('MCP message handling failed', { error: error.message });
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'MCP message handling failed', data: { error: error.message } });
             return JSON.stringify({
                 jsonrpc: '2.0',
                 error: {
@@ -482,7 +457,16 @@ async function persistEngramMessage(msg) {
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
     const message = event.data;
-    console.log('[SW] Received message:', message);
+    // --- TOP LEVEL EVENT LOGGING ---
+    const logObj = debugLog({
+        source: 'ServiceWorker',
+        type: 'log',
+        level: 'DEBUG',
+        message: '[SW] Top-level event received',
+        data: message
+    });
+    // Broadcast log to clients
+    broadcastToClients(logObj);
     
     // Handle MCP messages
     if (message.jsonrpc === '2.0') {
@@ -514,14 +498,14 @@ self.addEventListener('message', async (event) => {
             }
             try {
                 const result = await wasmInstance.initialize_mcp_server(message.url);
-                debugLog('Raw MCP initialization result', { result });
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Raw MCP initialization result', data: { result } });
                 const parsedResult = JSON.parse(result);
-                debugLog('Parsed MCP initialization result', { 
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Parsed MCP initialization result', data: { 
                     status: parsedResult.status,
                     message: parsedResult.message,
                     has_server_info: !!parsedResult.server_info,
                     server_info: parsedResult.server_info
-                });
+                } });
                 broadcastToClients({
                     type: 'log',
                     content: {
@@ -613,7 +597,7 @@ self.addEventListener('message', async (event) => {
             await reloadWasm();
             break;
         case 'stop':
-            debugLog("Stopping service worker...");
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Stopping service worker..." });
             isRunning = false;
             stopUptimeCounter();
             unloadWasm();
@@ -622,12 +606,12 @@ self.addEventListener('message', async (event) => {
             if (wasmInstance && message && message.text) {
                 try {
                     await wasmInstance.add_memory_event(message.text);
-                    debugLog("Memory event added", { text: message.text });
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Memory event added", data: { text: message.text } });
                 } catch (error) {
-                    debugLog("Failed to add memory event", { 
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "Failed to add memory event", data: { 
                         error: error.message,
                         stack: error.stack
-                    });
+                    } });
                 }
             }
             break;
@@ -635,12 +619,12 @@ self.addEventListener('message', async (event) => {
             if (wasmInstance) {
                 try {
                     await wasmInstance.clear_memory_events();
-                    debugLog("Memory events cleared");
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Memory events cleared" });
                 } catch (error) {
-                    debugLog("Failed to clear memory events", { 
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "Failed to clear memory events", data: { 
                         error: error.message,
                         stack: error.stack
-                    });
+                    } });
                 }
             }
             break;
@@ -650,8 +634,8 @@ self.addEventListener('message', async (event) => {
             }
             try {
                 const url = message.url || get_server_url();
-                debugLog(`[SW] [list_tools] Received URL: ${url}`);
-                debugLog(`Listing tools from ${url}`);
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] [list_tools] Received URL:', data: url });
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Listing tools from', data: url });
                 // Let the WASM module handle the MCP protocol
                 const result = await wasmInstance.list_tools(url);
                 const parsedResult = JSON.parse(result);
@@ -664,7 +648,7 @@ self.addEventListener('message', async (event) => {
                     url // include the url for UI sync
                 });
             } catch (error) {
-                debugLog(`Error listing tools: ${error}`);
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'Error listing tools:', data: error });
                 broadcastToClients({
                     type: 'log',
                     content: {
@@ -702,22 +686,21 @@ self.addEventListener('message', async (event) => {
                 let toolArgs = { ...message.args };
                 let connectedStringArg = null;
                 let connectedArrayArg = null;
-                // Try to get tap config from message or localStorage
+                // Try to get tap config from message or currentTapConfig
+                let tapConfig = message.tapConfig || currentTapConfig || {};
                 if (message.connectedStringArg) {
                     connectedStringArg = message.connectedStringArg;
+                } else if (tapConfig.connectedStringArg) {
+                    connectedStringArg = tapConfig.connectedStringArg;
                 }
                 if (message.connectedArrayArg) {
                     connectedArrayArg = message.connectedArrayArg;
+                } else if (tapConfig.connectedArrayArg) {
+                    connectedArrayArg = tapConfig.connectedArrayArg;
                 }
-                if (!connectedStringArg || !connectedArrayArg) {
-                    try {
-                        const tapConfig = JSON.parse(self.localStorage?.getItem('cbusTapConfig') || '{}');
-                        if (!connectedStringArg) connectedStringArg = tapConfig.connectedStringArg;
-                        if (!connectedArrayArg) connectedArrayArg = tapConfig.connectedArrayArg;
-                    } catch {}
-                }
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap config used in call_tool', data: tapConfig });
                 if (connectedStringArg || connectedArrayArg) {
-                    const { messages: engramMessages } = await handleOp('load', message.engramId, null);
+                    const { messages: engramMessages = [] } = await handleOp('load', message.engramId, null) || {};
                     if (engramMessages.length === 1) {
                         if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
                         if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
@@ -736,7 +719,17 @@ self.addEventListener('message', async (event) => {
                         if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1);
                     }
                 }
-                const result = await wasmInstance.call_tool(message.url, message.toolName, toolArgs);
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap: About to call tool', data: {
+                    serverUrl: tapConfig.serverUrl,
+                    toolName: tapConfig.toolName,
+                    toolArgs,
+                    requestId: message.requestId
+                } });
+                const result = await wasmInstance.call_tool(
+                    tapConfig.serverUrl || message.url,
+                    tapConfig.toolName || message.toolName,
+                    toolArgs
+                );
                 const parsedResult = JSON.parse(result);
                 if (message.engramId && message.requestId) {
                     sendToEngramClient(message.engramId, {
@@ -804,7 +797,11 @@ self.addEventListener('message', async (event) => {
                 });
             }
             break;
+        case 'cbus_message':
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: cbus_message', data: message });
+            break;
         case 'cbus_send_message':
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: cbus_send_message', data: message });
             if (message && message.text) {
                 const msg = {
                     text: message.text,
@@ -823,14 +820,15 @@ self.addEventListener('message', async (event) => {
 
                 // --- After persisting, trigger tool call if CBus Tap is configured ---
                 try {
-                    const tapConfig = JSON.parse(self.localStorage?.getItem('cbusTapConfig') || '{}');
+                    const tapConfig = currentTapConfig || {};
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap config used in cbus_send_message', data: tapConfig });
                     if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
                         // Load full engram history
-                        const { messages: engramMessages } = await handleOp('load', msg.engramId, null);
+                        const { messages: engramMessages = [] } = await handleOp('load', msg.engramId, null) || {};
                         let toolArgs = { ...(tapConfig.args || {}) };
                         if (tapConfig.connectedStringArg) {
                             let template = toolArgs[tapConfig.connectedStringArg];
-                            const latestMsg = engramMessages[engramMessages.length - 1].text;
+                            const latestMsg = engramMessages[engramMessages.length - 1]?.text || '';
                             if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
                                 toolArgs[tapConfig.connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
                             } else if (typeof template === 'string' && template.length > 0) {
@@ -842,7 +840,11 @@ self.addEventListener('message', async (event) => {
                         if (tapConfig.connectedArrayArg) {
                             toolArgs[tapConfig.connectedArrayArg] = engramMessages.slice(0, -1);
                         }
-                        // Call the tool
+                        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap: About to call tool (auto)', data: {
+                            serverUrl: tapConfig.serverUrl,
+                            toolName: tapConfig.toolName,
+                            toolArgs
+                        } });
                         await wasmInstance.call_tool(
                             tapConfig.serverUrl,
                             tapConfig.toolName,
@@ -850,8 +852,10 @@ self.addEventListener('message', async (event) => {
                         );
                     }
                 } catch (err) {
-                    debugLog('CBus Tap tool call failed', { error: err.message });
+                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'CBus Tap tool call failed', data: { error: err.message } });
                 }
+            } else {
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: No text in cbus_send_message' });
             }
             break;
         case 'cbus_subscribe':
@@ -862,6 +866,10 @@ self.addEventListener('message', async (event) => {
                 });
             }
             break;
+        case 'set_tap_config':
+            currentTapConfig = message.tapConfig || {};
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Received TAP config from client', data: currentTapConfig });
+            return;
         default:
             console.warn('Unknown message type:', message.type);
     }
@@ -884,14 +892,14 @@ function sendToEngramClient(engramId, message) {
 
 // Initialize on install
 self.addEventListener('install', event => {
-    debugLog("Service worker installing...");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Service worker installing..." });
     event.waitUntil(initializeWasm());
     event.waitUntil(initDB());
 });
 
 // Handle activation
 self.addEventListener('activate', event => {
-    debugLog("Service worker activating...");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Service worker activating..." });
     event.waitUntil(clients.claim());
 });
 
@@ -917,9 +925,9 @@ async function checkWasm(checkId) {
 
 // Check MCP server health
 async function checkMcp() {
-    debugLog("Checking MCP server health...");
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Checking MCP server health..." });
     if (!wasmInstance) {
-        debugLog("Cannot check MCP: WASM module not loaded");
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Cannot check MCP: WASM module not loaded" });
         broadcastToClients({
             type: 'log',
             content: {
@@ -936,9 +944,9 @@ async function checkMcp() {
     }
 
     try {
-        debugLog("Executing MCP server health check...");
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Executing MCP server health check..." });
         const result = await wasmInstance.check_mcp_server();
-        debugLog("MCP server health check result", { result });
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "MCP server health check result", data: { result } });
         
         // Parse the result to determine health status
         const isHealthy = result === 0; // 0 means healthy in our WASM module
@@ -959,10 +967,10 @@ async function checkMcp() {
             healthy: isHealthy
         });
     } catch (error) {
-        debugLog("MCP server health check failed", { 
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "MCP server health check failed", data: { 
             error: error.message,
             stack: error.stack
-        });
+        } });
         broadcastToClients({
             type: 'log',
             content: {
