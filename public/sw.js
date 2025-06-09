@@ -9,6 +9,9 @@ let cbusQueue = [];
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
 
+import { handleChatStorageEvent, initDB } from './chatStorage.js';
+
+
 // Debug logging function
 function debugLog(message, data = null) {
     if (!isRunning) return;
@@ -433,6 +436,22 @@ const engramNAT = new Map(); // engramId -> clientId
 self.addEventListener('message', async (event) => {
     const message = event.data;
     console.log('[SW] Received message:', message);
+
+    const handled = handleChatStorageEvent(event);
+
+    if (handled) {
+        console.log('[SW] Chat storage event handled');
+        console.log('[SW] Chat storage event:', event);
+        console.log('[SW] Chat storage event data:', event.data);
+        console.log('[SW] handled:', handled);
+    } else if (!handled) {
+        // handle other message types here
+        console.log('[SW] Chat storage event not handled');
+        console.log('[SW] Chat storage event:', event);
+        console.log('[SW] Chat storage event data:', event.data);
+        console.log('[SW] handled:', handled);
+    }
+
     
     // Handle MCP messages
     if (message.jsonrpc === '2.0') {
@@ -763,6 +782,7 @@ function sendToEngramClient(engramId, message) {
 self.addEventListener('install', event => {
     debugLog("Service worker installing...");
     event.waitUntil(initializeWasm());
+    event.waitUntil(initDB());
 });
 
 // Handle activation

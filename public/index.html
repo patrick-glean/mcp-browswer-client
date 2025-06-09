@@ -389,8 +389,8 @@
                         return Promise.all(registrations.map(registration => registration.unregister()));
                     }).then(() => {
                         console.log('Registering new service worker...');
-                        // Now register the new service worker
-                        return navigator.serviceWorker.register('sw.js');
+                        // Now register the new service worker as a module
+                        return navigator.serviceWorker.register('sw.js', { type: 'module' });
                     }).then(registration => {
                         console.log('ServiceWorker registration successful');
                         
@@ -541,7 +541,7 @@
             async startServiceWorker() {
                 try {
                     console.log('Starting service worker...');
-                    const registration = await navigator.serviceWorker.register('sw.js');
+                    const registration = await navigator.serviceWorker.register('sw.js', { type: 'module' });
                     this.serviceWorker = registration.active;
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
