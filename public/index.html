@@ -1858,7 +1858,8 @@
                 serverUrl: chatSelectedServerUrl,
                 toolName: chatSelectedTool?.name,
                 args: chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema),
-                connectedArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k]) || null
+                connectedStringArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'string') || null,
+                connectedArrayArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'array') || null
             });
         }
         // --- CBus Tap Card Logic ---
@@ -1916,70 +1917,116 @@
                         label += '</label><br>';
                         inputCard.innerHTML = `${label}
                             <input type="text" name="${key}" />
-                            <label style="margin-left:0.5em;cursor:pointer;user-select:none;vertical-align:middle;">
-                                <input type="checkbox" class="assign-cbus solid-checkbox" data-field="${key}" style="vertical-align:middle;" />
-                                <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus</span>
-                            </label>`;
+                            <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" style="vertical-align:middle;margin-left:0.5em;" />
+                            <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus Message</span>
+                            <div class="cbus-message-warning" style="color:#f44336;font-size:0.9em;display:none;margin-top:0.3em;"></div>`;
                         setTimeout(() => {
-                            const cb = inputCard.querySelector('.assign-cbus[data-field="' + key + '"]');
                             const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
+                            const cb = inputCard.querySelector('.assign-cbus-string[data-field="' + key + '"]');
+                            const warn = inputCard.querySelector('.cbus-message-warning');
                             // Restore value from config if present
                             let value = (tapConfig.args && tapConfig.args[key]) || '';
                             input.value = value;
                             // Restore checkbox from config
-                            if (tapConfig.connectedArg === key) {
+                            if (tapConfig.connectedStringArg === key) {
                                 cb.checked = true;
-                                input.disabled = true;
                                 chatToolAssignUserMessage[key] = true;
                             }
-                            // Validation: must include {{cbus_message}}
-                            function validateCbusMessage() {
-                                if (input.value && !input.value.includes('{{cbus_message}}')) {
-                                    input.style.borderColor = '#f44336';
-                                    input.title = 'Value must include {{cbus_message}}';
-                                    if (!inputCard.querySelector('.cbus-message-warning')) {
-                                        const warn = document.createElement('div');
-                                        warn.className = 'cbus-message-warning';
-                                        warn.style.color = '#f44336';
-                                        warn.style.fontSize = '0.9em';
-                                        warn.textContent = 'Value must include {{cbus_message}}';
-                                        inputCard.appendChild(warn);
-                                    }
-                                } else {
-                                    input.style.borderColor = '';
-                                    input.title = '';
-                                    const warn = inputCard.querySelector('.cbus-message-warning');
-                                    if (warn) warn.remove();
-                                }
-                            }
-                            validateCbusMessage();
-                            input.addEventListener('input', () => {
-                                validateCbusMessage();
-                                saveCurrentTapConfig();
-                            });
-                            if (cb && input) {
-                                cb.onchange = () => {
-                                    chatToolAssignUserMessage[key] = cb.checked;
-                                    if (cb.checked) {
+                            // UX logic for enabling/disabling and warning
+                            function updateInputState() {
+                                if (cb.checked) {
+                                    if (!input.value) {
                                         input.value = '{{cbus_message}}';
+                                    }
+                                    if (input.value.includes('{{cbus_message}}')) {
                                         input.disabled = true;
+                                        warn.textContent = '';
+                                        warn.style.display = 'none';
                                     } else {
                                         input.disabled = false;
-                                        if (input.value === '{{cbus_message}}') input.value = '';
+                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.style.display = '';
+                                    }
+                                } else {
+                                    input.disabled = false;
+                                    warn.textContent = '';
+                                    warn.style.display = 'none';
+                                }
+                            }
+                            cb.onchange = () => {
+                                // Only one string field can be connected
+                                Object.keys(chatToolAssignUserMessage).forEach(k => {
+                                    if (k !== key && schema.properties[k]?.type === 'string') chatToolAssignUserMessage[k] = false;
+                                });
+                                if (cb.checked) {
+                                    if (!input.value) {
+                                        input.value = '{{cbus_message}}';
+                                    }
+                                    if (!input.value.includes('{{cbus_message}}')) {
+                                        // Prevent checking, show warning, keep input enabled
+                                        cb.checked = false;
+                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.style.display = '';
+                                        input.disabled = false;
+                                        chatToolAssignUserMessage[key] = false;
+                                        return;
+                                    }
+                                    // Uncheck all other checkboxes
+                                    document.querySelectorAll('.assign-cbus-string').forEach(otherCb => {
+                                        if (otherCb !== cb) otherCb.checked = false;
+                                    });
+                                    chatToolAssignUserMessage[key] = true;
+                                } else {
+                                    // If the value is exactly '{{cbus_message}}', clear it
+                                    if (input.value.trim() === '{{cbus_message}}') {
+                                        input.value = '';
+                                    }
+                                    chatToolAssignUserMessage[key] = false;
+                                }
+                                updateInputState();
+                                onConnectToCbusChanged(key, cb.checked);
+                                saveCurrentTapConfig();
+                            };
+                            input.addEventListener('input', () => {
+                                updateInputState();
+                                saveCurrentTapConfig();
+                            });
+                            updateInputState();
+                        }, 0);
+                    } else if (prop.type === 'array') {
+                        inputCard = document.createElement('div');
+                        inputCard.className = 'tool-input-card';
+                        let label = `<label><strong>${key}</strong> (array)`;
+                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                        label += '</label><br>';
+                        inputCard.innerHTML = `${label}
+                            <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" style="vertical-align:middle;" />
+                            <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus Context</span>
+                            <div style="font-size:0.9em;color:#aaa;margin-top:0.3em;">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
+                        setTimeout(() => {
+                            const cb = inputCard.querySelector('.assign-cbus-array[data-field="' + key + '"]');
+                            if (tapConfig.connectedArrayArg === key) {
+                                cb.checked = true;
+                                chatToolAssignUserMessage[key] = true;
+                            }
+                            if (cb) {
+                                cb.onchange = () => {
+                                    // Only one array field can be connected
+                                    Object.keys(chatToolAssignUserMessage).forEach(k => {
+                                        if (k !== key && schema.properties[k]?.type === 'array') chatToolAssignUserMessage[k] = false;
+                                    });
+                                    chatToolAssignUserMessage[key] = cb.checked;
+                                    if (cb.checked) {
+                                        document.querySelectorAll('.assign-cbus-array').forEach(otherCb => {
+                                            if (otherCb !== cb) otherCb.checked = false;
+                                        });
                                     }
                                     onConnectToCbusChanged(key, cb.checked);
                                     saveCurrentTapConfig();
                                 };
-                                chatToolAssignUserMessage[key] = !!cb.checked;
-                                input.disabled = !!cb.checked;
                             }
                         }, 0);
-                        // Add note
-                        const note = document.createElement('div');
-                        note.style.fontSize = '0.9em';
-                        note.style.color = '#aaa';
-                        note.textContent = '{{cbus_message}} == bus message';
-                        inputCard.appendChild(note);
                     } else {
                         inputCard = chatShell.renderInputField(key, prop, isRequired);
                     }

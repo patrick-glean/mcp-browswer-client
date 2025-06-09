@@ -9,7 +9,7 @@ let cbusQueue = [];
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
 
-import { handleChatStorageEvent, initDB } from './chatStorage.js';
+import { handleOp, initDB, openDB } from './chatStorage.js';
 
 
 // Debug logging function
@@ -432,26 +432,35 @@ mcpHandler.setDebugMode(isDebugMode);
 // --- Engram NAT Table ---
 const engramNAT = new Map(); // engramId -> clientId
 
+// --- DRY helper for engram message persistence ---
+async function persistEngramMessage(msg) {
+    if (!msg.engramId) return;
+    const storedMsg = {
+        ...msg,
+        id: msg.id || (self.crypto ? self.crypto.randomUUID() : Math.random().toString(36).slice(2)),
+        timestamp: msg.timestamp || Date.now(),
+    };
+    const db = await (await initDB(), openDB());
+    const convStore = db.transaction('conversations', 'readonly').objectStore('conversations');
+    const getReq = convStore.get(storedMsg.engramId);
+    const exists = await new Promise(resolve => {
+        getReq.onsuccess = () => resolve(!!getReq.result);
+        getReq.onerror = () => resolve(false);
+    });
+    if (!exists) {
+        await handleOp('store', storedMsg.engramId, {
+            meta: { created: Date.now(), engramId: storedMsg.engramId },
+            messages: [storedMsg]
+        });
+    } else {
+        await handleOp('append', storedMsg.engramId, { message: storedMsg });
+    }
+}
+
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
     const message = event.data;
     console.log('[SW] Received message:', message);
-
-    const handled = handleChatStorageEvent(event);
-
-    if (handled) {
-        console.log('[SW] Chat storage event handled');
-        console.log('[SW] Chat storage event:', event);
-        console.log('[SW] Chat storage event data:', event.data);
-        console.log('[SW] handled:', handled);
-    } else if (!handled) {
-        // handle other message types here
-        console.log('[SW] Chat storage event not handled');
-        console.log('[SW] Chat storage event:', event);
-        console.log('[SW] Chat storage event data:', event.data);
-        console.log('[SW] handled:', handled);
-    }
-
     
     // Handle MCP messages
     if (message.jsonrpc === '2.0') {
@@ -668,7 +677,44 @@ self.addEventListener('message', async (event) => {
                 if (message.engramId && event.source && event.source.id) {
                     engramNAT.set(message.engramId, event.source.id);
                 }
-                const result = await wasmInstance.call_tool(message.url, message.toolName, message.args);
+                let toolArgs = { ...message.args };
+                let connectedStringArg = null;
+                let connectedArrayArg = null;
+                // Try to get tap config from message or localStorage
+                if (message.connectedStringArg) {
+                    connectedStringArg = message.connectedStringArg;
+                }
+                if (message.connectedArrayArg) {
+                    connectedArrayArg = message.connectedArrayArg;
+                }
+                if (!connectedStringArg || !connectedArrayArg) {
+                    try {
+                        const tapConfig = JSON.parse(self.localStorage?.getItem('cbusTapConfig') || '{}');
+                        if (!connectedStringArg) connectedStringArg = tapConfig.connectedStringArg;
+                        if (!connectedArrayArg) connectedArrayArg = tapConfig.connectedArrayArg;
+                    } catch {}
+                }
+                if (connectedStringArg || connectedArrayArg) {
+                    const { messages: engramMessages } = await handleOp('load', message.engramId, null);
+                    if (engramMessages.length === 1) {
+                        if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
+                        if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
+                    } else if (engramMessages.length > 1) {
+                        if (connectedStringArg) {
+                            let template = toolArgs[connectedStringArg];
+                            const latestMsg = engramMessages[engramMessages.length - 1].text;
+                            if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
+                                toolArgs[connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
+                            } else if (typeof template === 'string' && template.length > 0) {
+                                toolArgs[connectedStringArg] = template;
+                            } else {
+                                toolArgs[connectedStringArg] = latestMsg;
+                            }
+                        }
+                        if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1);
+                    }
+                }
+                const result = await wasmInstance.call_tool(message.url, message.toolName, toolArgs);
                 const parsedResult = JSON.parse(result);
                 if (message.engramId && message.requestId) {
                     sendToEngramClient(message.engramId, {
@@ -696,6 +742,8 @@ self.addEventListener('message', async (event) => {
                     type: 'cbus_message',
                     message: cbusMsg
                 });
+                // --- Persist tool message ---
+                await persistEngramMessage(cbusMsg);
             } catch (error) {
                 if (message.engramId && message.requestId) {
                     sendToEngramClient(message.engramId, {
@@ -748,6 +796,8 @@ self.addEventListener('message', async (event) => {
                     type: 'cbus_message',
                     message: msg
                 });
+                // --- Persist user message ---
+                await persistEngramMessage(msg);
             }
             break;
         case 'cbus_subscribe':
