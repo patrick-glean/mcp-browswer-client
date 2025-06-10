@@ -31,15 +31,12 @@ export async function checkWasm() {
             await initializeWasm();
             if (!wasmInstance) throw new Error('WASM module not initialized after reload');
         }
-        // Use the basic health check that doesn't depend on MCP server
-        const healthy = await wasmInstance.health_check();
+
         const uptime = await wasmInstance.get_uptime();
         const metadata = wasmInstance.get_metadata();
         const buildInfo = wasmInstance.get_compiled_info();
 
-        // Broadcast status with current uptime
-        // 0 means healthy in our WASM module
-        return { healthy: 0, uptime: uptime, metadata: metadata, buildInfo: buildInfo }
+        return { healthy: true, uptime: uptime, metadata: metadata, buildInfo: buildInfo }
     } catch (error) {
         console.error('WASM module check failed:', error);
         return false;
@@ -140,9 +137,7 @@ export async function initializeWasm() {
                 timestamp: new Date().toISOString()
             }
         });
-        
-        // (Note: broadcastWasmStatus should be handled in sw.js)
-        // broadcastWasmStatus(true);
+
         
         if (wasmInstance && typeof wasmInstance.set_debug_mode === 'function') {
             wasmInstance.set_debug_mode(isDebugMode);

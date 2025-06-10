@@ -63,6 +63,7 @@ class MCPMessageHandler {
 
     async handleMessage(message) {
         try {
+            wasmInstance = getWasmInstance();
             if (!wasmInstance) {
                 throw new Error('WASM module not initialized');
             }
@@ -182,6 +183,8 @@ self.addEventListener('message', async (event) => {
         return;
     }
 
+    wasmInstance = getWasmInstance();
+
     // Handle legacy messages
     switch (message.type) {
         case 'check-wasm':
@@ -191,7 +194,6 @@ self.addEventListener('message', async (event) => {
             break;
         case 'initialize-wasm':
             await initializeWasm();
-            wasmInstance = getWasmInstance();
             break;
         case 'initialize-mcp':
             if (!wasmInstance) {
@@ -615,6 +617,7 @@ self.addEventListener('activate', event => {
 
 // Check MCP server health
 async function checkMcp() {
+    wasmInstance = getWasmInstance();
     debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Checking MCP server health..." });
     if (!wasmInstance) {
         debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Cannot check MCP: WASM module not loaded" });
