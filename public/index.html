@@ -159,7 +159,7 @@
                         </div>
                         <div class="chat-card-right">
                             <div class="cbus-tap-card" style="border:1px solid #444; border-radius:8px; padding:1em; margin-bottom:1em; background:#232323;">
-                                <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.5em;">CBus Tap</div>
+                                <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.5em;">LLM Target (Server/Tool)</div>
                                 <div class="chat-server-select-row">
                                     <label for="chatServerSelect">Server:</label>
                                     <select id="chatServerSelect"></select>
@@ -748,6 +748,9 @@
                         // No-op: handled elsewhere, suppress warning
                         break;
                     case 'cbus_message':
+                        // print out tool config from local storage
+                        const cbusTapConfig = loadCbusTapConfig();
+                        console.log('CBus Tap config:', cbusTapConfig);
                         // No-op: handled elsewhere, suppress warning
                         break;
                     default:
@@ -1917,8 +1920,10 @@
                         label += '</label><br>';
                         inputCard.innerHTML = `${label}
                             <input type="text" name="${key}" />
-                            <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" style="vertical-align:middle;margin-left:0.5em;" />
-                            <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus Message</span>
+                            <span class="cbus-checkbox-label" style="margin-left:0.5em;">
+                                <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" />
+                                <span class="cbus-checkbox-text">Target For message</span>
+                            </span>
                             <div class="cbus-message-warning" style="color:#f44336;font-size:0.9em;display:none;margin-top:0.3em;"></div>`;
                         setTimeout(() => {
                             const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
@@ -2001,8 +2006,10 @@
                         label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
                         label += '</label><br>';
                         inputCard.innerHTML = `${label}
-                            <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" style="vertical-align:middle;" />
-                            <span style="font-size:0.9em;color:#aaa;vertical-align:middle;">Connect to CBus Context</span>
+                            <span class="cbus-checkbox-label">
+                                <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" />
+                                <span class="cbus-checkbox-text">Target For [context]</span>
+                            </span>
                             <div style="font-size:0.9em;color:#aaa;margin-top:0.3em;">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
                         setTimeout(() => {
                             const cb = inputCard.querySelector('.assign-cbus-array[data-field="' + key + '"]');
@@ -2147,6 +2154,26 @@
         function renderToolResultCard() {
             // No-op: intentionally left blank to prevent errors
         }
+
+        function sendTapConfigToServiceWorker() {
+            const tapConfig = loadCbusTapConfig();
+            if (tapConfig && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'set_tap_config',
+                    tapConfig
+                });
+            }
+        }
+
+        // Send on page load if SW is already controlling
+        if (navigator.serviceWorker.controller) {
+            sendTapConfigToServiceWorker();
+        }
+
+        // Also send when the SW takes control (first activation)
+        navigator.serviceWorker.oncontrollerchange = () => {
+            sendTapConfigToServiceWorker();
+        };
     </script>
 
     <!-- Styles moved to styles.css -->

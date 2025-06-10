@@ -1169,4 +1169,17 @@ input:focus, textarea:focus, select:focus {
 }
 #chatSendBtn:hover {
     background: #45a049;
+}
+
+.cbus-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.5em;
+}
+.cbus-checkbox-text {
+    font-size: 0.9em;
+    color: #aaa;
+    font-style: italic;
+    font-weight: bold;
+    margin-left: 0.4em;
 } 

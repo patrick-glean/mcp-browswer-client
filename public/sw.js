@@ -409,7 +409,6 @@ self.addEventListener('message', async (event) => {
                 } else if (tapConfig.connectedArrayArg) {
                     connectedArrayArg = tapConfig.connectedArrayArg;
                 }
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap config used in call_tool', data: tapConfig });
                 if (connectedStringArg || connectedArrayArg) {
                     const { messages: engramMessages = [] } = await handleOp('load', message.engramId, null) || {};
                     if (engramMessages.length === 1) {
@@ -512,7 +511,6 @@ self.addEventListener('message', async (event) => {
             debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: cbus_message', data: message });
             break;
         case 'cbus_send_message':
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: cbus_send_message', data: message });
             if (message && message.text) {
                 const msg = {
                     text: message.text,
@@ -532,7 +530,6 @@ self.addEventListener('message', async (event) => {
                 // --- After persisting, trigger tool call if CBus Tap is configured ---
                 try {
                     const tapConfig = currentTapConfig || {};
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap config used in cbus_send_message', data: tapConfig });
                     if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
                         // Load full engram history
                         const { messages: engramMessages = [] } = await handleOp('load', msg.engramId, null) || {};
@@ -549,7 +546,8 @@ self.addEventListener('message', async (event) => {
                             }
                         }
                         if (tapConfig.connectedArrayArg) {
-                            toolArgs[tapConfig.connectedArrayArg] = engramMessages.slice(0, -1);
+                            // The Glean MCP server expects an array of strings, so we need to convert the engram messages to an array of strings
+                            toolArgs[tapConfig.connectedArrayArg] = engramMessages.slice(0, -1).map(msg => msg.text)
                         }
                         debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap: About to call tool (auto)', data: {
                             serverUrl: tapConfig.serverUrl,
