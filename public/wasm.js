@@ -148,15 +148,9 @@ export async function initializeWasm() {
             wasmInstance.set_debug_mode(isDebugMode);
         }
         
-        // Set the WASM server URL to match localStorage (or default)
         let url = 'http://localhost:8081';
         try {
             url = (await self.clients.matchAll({type: 'window'}))[0]?.url;
-            // Try to get from localStorage if available
-            if (typeof self.localStorage !== 'undefined' && self.localStorage.getItem) {
-                const stored = self.localStorage.getItem('mcpServerUrl');
-                if (stored) url = stored;
-            }
         } catch (e) {
             // fallback to default
         }

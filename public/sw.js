@@ -191,6 +191,7 @@ self.addEventListener('message', async (event) => {
             break;
         case 'initialize-wasm':
             await initializeWasm();
+            wasmInstance = getWasmInstance();
             break;
         case 'initialize-mcp':
             if (!wasmInstance) {
