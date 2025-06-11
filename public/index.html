@@ -1212,7 +1212,7 @@
                 const args = this.serializeToolForm(form, schema);
                 // Send to service worker
                 if (this.serviceWorker) {
-                    this.serviceWorker.postMessage({
+                    navigator.serviceWorker.controller?.postMessage({
                         type: 'call_tool',
                         url,
                         toolName: tool.name,
@@ -1223,7 +1223,7 @@
                     if (resultArea) {
                         resultArea.innerHTML = '<span style="color:#aaa;">Calling tool...</span>';
                     }
-                }
+                } 
             }
 
             serializeToolForm(form, schema) {
