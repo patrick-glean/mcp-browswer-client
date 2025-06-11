@@ -29,6 +29,14 @@ import {
 // Set up broadcast for wasm.js
 setWasmBroadcast(broadcastToClients);
 
+
+// Add this near the top of sw.js
+async function initialWasmBroadcast() {
+    const wasmState = await checkWasm();
+    broadcastWasmStatus(wasmState);
+}
+
+
 // Broadcast WASM status to all clients
 function broadcastWasmStatus(wasmState) {
 
@@ -610,6 +618,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
     debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Service worker activating..." });
     event.waitUntil(clients.claim());
+    event.waitUntil(initialWasmBroadcast());
 });
 
 
