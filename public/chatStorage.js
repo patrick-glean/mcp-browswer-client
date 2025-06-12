@@ -75,6 +75,9 @@ async function appendMessage(engramId, message) {
 }
 
 async function loadConversation(engramId, options = {}) {
+  if (engramId === null || engramId === undefined) {
+    return { engramId, messages: [] };
+  }
   const db = await openDB();
   const tx = db.transaction(MESSAGES_STORE, 'readonly');
   const msgStore = tx.objectStore(MESSAGES_STORE);

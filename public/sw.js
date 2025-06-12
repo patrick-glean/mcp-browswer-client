@@ -462,21 +462,6 @@ self.addEventListener('message', async (event) => {
                         result: parsedResult
                     });
                 }
-                // --- Echo tool response to CBus queue ---
-                const cbusMsg = {
-                    text: extractToolResponseText(parsedResult),
-                    role: 'tool',
-                    timestamp: Date.now(),
-                    engramId: message.engramId || null
-                };
-                cbusQueue.push(cbusMsg);
-                if (cbusQueue.length > 1000) cbusQueue.shift();
-                broadcastToClients({
-                    type: 'cbus_message',
-                    message: cbusMsg
-                });
-                // --- Persist tool message ---
-                await persistEngramMessage(cbusMsg);
             } catch (error) {
                 if (message.engramId && message.requestId) {
                     sendToEngramClient(message.engramId, {
@@ -516,7 +501,7 @@ self.addEventListener('message', async (event) => {
             }
             break;
         case 'cbus_message':
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: cbus_message', data: message });
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'This should not happen in service worker: cbus_message', data: message });
             break;
         case 'cbus_send_message':
             if (message && message.text) {
@@ -562,11 +547,39 @@ self.addEventListener('message', async (event) => {
                             toolName: tapConfig.toolName,
                             toolArgs
                         } });
-                        await wasmInstance.call_tool(
+                        const test = await wasmInstance.call_tool(
                             tapConfig.serverUrl,
                             tapConfig.toolName,
                             toolArgs
                         );
+
+                        // Parse the result (test is a JSON string)
+                        let parsedResult;
+                        try {
+                            parsedResult = typeof test === 'string' ? JSON.parse(test) : test;
+                        } catch (e) {
+                            parsedResult = { text: '[Tool returned invalid JSON]' };
+                        }
+
+                        // Extract the text content (use your helper)
+                        const toolText = extractToolResponseText(parsedResult);
+
+                        // Create a chat message object
+                        const toolMsg = {
+                            text: toolText,
+                            role: 'tool',
+                            timestamp: Date.now(),
+                            engramId: msg.engramId || null
+                        };
+
+                        // Push to queue and broadcast
+                        cbusQueue.push(toolMsg);
+                        if (cbusQueue.length > 1000) cbusQueue.shift();
+                        broadcastToClients({
+                            type: 'cbus_message',
+                            message: toolMsg
+                        });
+                        await persistEngramMessage(toolMsg);
                     }
                 } catch (err) {
                     debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'CBus Tap tool call failed', data: { error: err.message } });

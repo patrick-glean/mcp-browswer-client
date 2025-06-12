@@ -749,8 +749,6 @@
                         break;
                     case 'cbus_message':
                         // print out tool config from local storage
-                        const cbusTapConfig = loadCbusTapConfig();
-                        console.log('CBus Tap config:', cbusTapConfig);
                         // No-op: handled elsewhere, suppress warning
                         break;
                     default:
@@ -1544,7 +1542,8 @@
                         // if (msg.message.role === 'tool' && msg.message.toolName === tapConfig.toolName) return;
                         const toolArgs = { ...(tapConfig.args || {}) };
                         toolArgs[tapConfig.connectedArg] = msg.message.text;
-                        chatShell.serviceWorker.postMessage({
+                        //chatShell.serviceWorker.postMessage({
+                        navigator.serviceWorker.controller?.postMessage({
                             type: 'call_tool',
                             url: tapConfig.serverUrl,
                             toolName: tapConfig.toolName,
@@ -1559,10 +1558,10 @@
                 renderChatMessages();
             } else if (msg.type === 'tool_result') {
                 // Only show in tool result card if not for the current chat engramId (i.e., not for console/chat flow)
-                if (!msg.engramId || msg.engramId !== chatEngramId) {
-                    renderToolResultCard(msg);
-                }
-                // Otherwise, ignore (it will show in chat via cbus_message)
+                // if (!msg.engramId || msg.engramId !== chatEngramId) {
+                //     renderToolResultCard(msg);
+                // }
+                // // Otherwise, ignore (it will show in chat via cbus_message)
             }
             // ...existing handlers...
         });
@@ -1591,14 +1590,6 @@
             `;
             document.head.appendChild(style);
         }
-        // Fix double message issue: Only add tool response to chat in the service worker message handler, not in renderToolResultCard or elsewhere
-        navigator.serviceWorker.addEventListener('message', (event) => {
-            const msg = event.data;
-            if (msg.engramId === chatEngramId && msg.requestId && chatRequestHandlers[msg.requestId]) {
-                chatRequestHandlers[msg.requestId](msg);
-                // Do NOT delete handler unless session is over
-            }
-        });
         // In chatRequestHandlers[requestId], only add the tool message once
         chatSendBtn.addEventListener('click', async function() {
             const userInput = document.getElementById('chatUserInput').value.trim();
@@ -2087,25 +2078,7 @@
         }
 
         function onConnectToCbusChanged(field, checked) {
-            if (checked) {
-                // When checked, send the bootrom prompt to the selected tool/field
-                getBootromImprint().then(bootrom => {
-                    if (!chatSelectedServerUrl || !chatSelectedTool) return;
-                    const toolArgs = {};
-                    toolArgs[field] = bootrom.text || '';
-                    // Optionally fill other fields with defaults/blanks
-                    if (chatShell.serviceWorker) {
-                        chatShell.serviceWorker.postMessage({
-                            type: 'call_tool',
-                            url: chatSelectedServerUrl,
-                            toolName: chatSelectedTool.name,
-                            args: toolArgs,
-                            engramId: chatEngramId,
-                            requestId: crypto.randomUUID()
-                        });
-                    }
-                });
-            }
+            console.log("onConnectToCbusChanged: " + field + " " + checked);
         }
 
         function renderServerSelect(selectElement, selectedServerUrl, servers) {
@@ -2151,7 +2124,9 @@
         }
 
         // Add a no-op renderToolResultCard to prevent ReferenceError
-        function renderToolResultCard() {
+        function renderToolResultCard(data) {
+            console.log("renderToolResultCard");
+            console.log(JSON.stringify(data));
             // No-op: intentionally left blank to prevent errors
         }
 
