@@ -381,102 +381,25 @@ self.addEventListener('message', async (event) => {
         case 'call_tool':
             if (!wasmInstance) {
                 // Send error to the correct client if possible
+                const errorMsg = {
+                    type: 'tool_result',
+                    error: 'WASM module not loaded',
+                    engramId: message.engramId || null,
+                    requestId: message.requestId || null,
+                    source: 'console'
+                };
                 if (message.engramId && message.requestId && event.source && event.source.id) {
                     engramNAT.set(message.engramId, event.source.id);
-                    sendToEngramClient(message.engramId, {
-                        type: 'tool_result',
-                        error: 'WASM module not loaded',
-                        engramId: message.engramId,
-                        requestId: message.requestId
-                    });
+                    sendToEngramClient(message.engramId, errorMsg);
+                } else if (event?.source) {
+                    event.source.postMessage(errorMsg);
                 } else {
-                    broadcastToClients({
-                        type: 'tool_result',
-                        error: 'WASM module not loaded'
-                    });
+                    broadcastToClients(errorMsg);
                 }
                 break;
             }
-            try {
-                // Store engramId -> clientId mapping
-                if (message.engramId && event.source && event.source.id) {
-                    engramNAT.set(message.engramId, event.source.id);
-                }
-                let toolArgs = { ...message.args };
-                let connectedStringArg = null;
-                let connectedArrayArg = null;
-                // Try to get tap config from message or currentTapConfig
-                let tapConfig = message.tapConfig || currentTapConfig || {};
-                if (message.connectedStringArg) {
-                    connectedStringArg = message.connectedStringArg;
-                } else if (tapConfig.connectedStringArg) {
-                    connectedStringArg = tapConfig.connectedStringArg;
-                }
-                if (message.connectedArrayArg) {
-                    connectedArrayArg = message.connectedArrayArg;
-                } else if (tapConfig.connectedArrayArg) {
-                    connectedArrayArg = tapConfig.connectedArrayArg;
-                }
-                if (connectedStringArg || connectedArrayArg) {
-                    const { messages: engramMessages = [] } = await handleOp('load', message.engramId, null) || {};
-                    if (engramMessages.length === 1) {
-                        if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
-                        if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
-                    } else if (engramMessages.length > 1) {
-                        if (connectedStringArg) {
-                            let template = toolArgs[connectedStringArg];
-                            const latestMsg = engramMessages[engramMessages.length - 1].text;
-                            if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
-                                toolArgs[connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
-                            } else if (typeof template === 'string' && template.length > 0) {
-                                toolArgs[connectedStringArg] = template;
-                            } else {
-                                toolArgs[connectedStringArg] = latestMsg;
-                            }
-                        }
-                        if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1);
-                    }
-                }
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap: About to call tool', data: {
-                    serverUrl: tapConfig.serverUrl,
-                    toolName: tapConfig.toolName,
-                    toolArgs,
-                    requestId: message.requestId
-                } });
-                const result = await wasmInstance.call_tool(
-                    tapConfig.serverUrl || message.url,
-                    tapConfig.toolName || message.toolName,
-                    toolArgs
-                );
-                const parsedResult = JSON.parse(result);
-                if (message.engramId && message.requestId) {
-                    sendToEngramClient(message.engramId, {
-                        type: 'tool_result',
-                        result: parsedResult,
-                        engramId: message.engramId,
-                        requestId: message.requestId
-                    });
-                } else {
-                    broadcastToClients({
-                        type: 'tool_result',
-                        result: parsedResult
-                    });
-                }
-            } catch (error) {
-                if (message.engramId && message.requestId) {
-                    sendToEngramClient(message.engramId, {
-                        type: 'tool_result',
-                        error: error.message || String(error),
-                        engramId: message.engramId,
-                        requestId: message.requestId
-                    });
-                } else {
-                    broadcastToClients({
-                        type: 'tool_result',
-                        error: error.message || String(error)
-                    });
-                }
-            }
+            // Only use message.tapConfig if present, do NOT fall back to currentTapConfig
+            await handleToolCall({ source: 'console', tapConfig: message.tapConfig, message, event });
             break;
         case 'get_bootrom':
             if (!wasmInstance) {
@@ -526,60 +449,7 @@ self.addEventListener('message', async (event) => {
                     if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
                         // Load full engram history
                         const { messages: engramMessages = [] } = await handleOp('load', msg.engramId, null) || {};
-                        let toolArgs = { ...(tapConfig.args || {}) };
-                        if (tapConfig.connectedStringArg) {
-                            let template = toolArgs[tapConfig.connectedStringArg];
-                            const latestMsg = engramMessages[engramMessages.length - 1]?.text || '';
-                            if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
-                                toolArgs[tapConfig.connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
-                            } else if (typeof template === 'string' && template.length > 0) {
-                                toolArgs[tapConfig.connectedStringArg] = template;
-                            } else {
-                                toolArgs[tapConfig.connectedStringArg] = latestMsg;
-                            }
-                        }
-                        if (tapConfig.connectedArrayArg) {
-                            // The Glean MCP server expects an array of strings, so we need to convert the engram messages to an array of strings
-                            toolArgs[tapConfig.connectedArrayArg] = engramMessages.slice(0, -1).map(msg => msg.text)
-                        }
-                        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'CBus Tap: About to call tool (auto)', data: {
-                            serverUrl: tapConfig.serverUrl,
-                            toolName: tapConfig.toolName,
-                            toolArgs
-                        } });
-                        const test = await wasmInstance.call_tool(
-                            tapConfig.serverUrl,
-                            tapConfig.toolName,
-                            toolArgs
-                        );
-
-                        // Parse the result (test is a JSON string)
-                        let parsedResult;
-                        try {
-                            parsedResult = typeof test === 'string' ? JSON.parse(test) : test;
-                        } catch (e) {
-                            parsedResult = { text: '[Tool returned invalid JSON]' };
-                        }
-
-                        // Extract the text content (use your helper)
-                        const toolText = extractToolResponseText(parsedResult);
-
-                        // Create a chat message object
-                        const toolMsg = {
-                            text: toolText,
-                            role: 'tool',
-                            timestamp: Date.now(),
-                            engramId: msg.engramId || null
-                        };
-
-                        // Push to queue and broadcast
-                        cbusQueue.push(toolMsg);
-                        if (cbusQueue.length > 1000) cbusQueue.shift();
-                        broadcastToClients({
-                            type: 'cbus_message',
-                            message: toolMsg
-                        });
-                        await persistEngramMessage(toolMsg);
+                        await handleToolCall({ source: 'tap', tapConfig, message: msg, engramMessages });
                     }
                 } catch (err) {
                     debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'CBus Tap tool call failed', data: { error: err.message } });
@@ -590,10 +460,25 @@ self.addEventListener('message', async (event) => {
             break;
         case 'cbus_subscribe':
             if (event.source) {
-                event.source.postMessage({
-                    type: 'cbus_queue',
-                    queue: cbusQueue
-                });
+                // Load the engram's messages from IndexedDB
+                let engramId = message?.engramId;
+                if (!engramId && event.source) {
+                    // Try to get engramId from NAT table if available
+                    // (Optional: you may want to pass engramId explicitly from the client)
+                }
+                if (engramId) {
+                    const { messages = [] } = await handleOp('load', engramId, null) || {};
+                    event.source.postMessage({
+                        type: 'cbus_queue',
+                        queue: messages
+                    });
+                } else {
+                    // If no engramId, send empty queue
+                    event.source.postMessage({
+                        type: 'cbus_queue',
+                        queue: []
+                    });
+                }
             }
             break;
         case 'set_tap_config':
@@ -732,4 +617,112 @@ function extractToolResponseText(parsedResult) {
         return parsedResult.text;
     }
     return '[No content]';
+}
+
+// --- Unified Tool Call Handler ---
+/**
+ * Handles all tool calls, routing results to the correct output.
+ * @param {Object} opts - Options for the tool call.
+ * @param {'tap'|'console'} opts.source - Source of the tool call.
+ * @param {Object} opts.tapConfig - Tap config (if any).
+ * @param {Object} opts.message - The original message triggering the call.
+ * @param {Object} opts.event - The event (for client routing).
+ * @param {Array} [opts.engramMessages] - Engram history (if any).
+ */
+async function handleToolCall({ source, tapConfig, message, event, engramMessages }) {
+    // Use only tapConfig for all tool call parameters
+    const toolArgs = { ...(tapConfig.args || {}) };
+    const connectedStringArg = tapConfig.connectedStringArg;
+    const connectedArrayArg = tapConfig.connectedArrayArg;
+    // Prepare engram messages if needed
+    if ((connectedStringArg || connectedArrayArg) && message.engramId) {
+        if (!engramMessages) {
+            const loaded = await handleOp('load', message.engramId, null) || {};
+            engramMessages = loaded.messages || [];
+        }
+        if (engramMessages.length === 1) {
+            if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
+            if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
+        } else if (engramMessages.length > 1) {
+            if (connectedStringArg) {
+                let template = toolArgs[connectedStringArg];
+                const latestMsg = engramMessages[engramMessages.length - 1].text;
+                if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
+                    toolArgs[connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
+                } else if (typeof template === 'string' && template.length > 0) {
+                    toolArgs[connectedStringArg] = template;
+                } else {
+                    toolArgs[connectedStringArg] = latestMsg;
+                }
+            }
+            if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1).map(msg => msg.text);
+        }
+    }
+    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[handleToolCall] Calling tool', data: { tapConfig, toolArgs, requestId: message.requestId, source } });
+    let result;
+    try {
+        result = await wasmInstance.call_tool(
+            tapConfig.serverUrl,
+            tapConfig.toolName,
+            toolArgs
+        );
+    } catch (err) {
+        const errorMsg = {
+            type: 'tool_result',
+            error: err.message || String(err),
+            source,
+            engramId: message.engramId || null,
+            requestId: message.requestId || null
+        };
+        if (message.engramId && message.requestId) {
+            sendToEngramClient(message.engramId, errorMsg);
+        } else if (event?.source) {
+            event.source.postMessage(errorMsg);
+        } else {
+            broadcastToClients(errorMsg);
+        }
+        return;
+    }
+    let parsedResult;
+    try {
+        parsedResult = typeof result === 'string' ? JSON.parse(result) : result;
+    } catch (e) {
+        parsedResult = { text: '[Tool returned invalid JSON]' };
+    }
+    // For tap/auto, also create a cbus_message and persist
+    if (source === 'tap') {
+        const toolText = extractToolResponseText(parsedResult);
+        const toolMsg = {
+            text: toolText,
+            role: 'tool',
+            timestamp: Date.now(),
+            engramId: message.engramId || null
+        };
+        cbusQueue.push(toolMsg);
+        if (cbusQueue.length > 1000) cbusQueue.shift();
+        // Only send cbus_message to the correct client/engram
+        if (message.engramId && message.requestId) {
+            sendToEngramClient(message.engramId, { type: 'cbus_message', message: toolMsg });
+        } else if (event?.source) {
+            event.source.postMessage({ type: 'cbus_message', message: toolMsg });
+        } else {
+            broadcastToClients({ type: 'cbus_message', message: toolMsg });
+        }
+        await persistEngramMessage(toolMsg);
+    }
+    // Route tool_result strictly
+    const resultMsg = {
+        type: 'tool_result',
+        result: parsedResult,
+        source,
+        engramId: message.engramId || null,
+        requestId: message.requestId || null
+    };
+    if (message.engramId && message.requestId) {
+        sendToEngramClient(message.engramId, resultMsg);
+    } else if (event?.source) {
+        event.source.postMessage(resultMsg);
+    } else {
+        broadcastToClients(resultMsg);
+    }
 }

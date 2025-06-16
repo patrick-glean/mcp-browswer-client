@@ -739,7 +739,11 @@
                         }
                         break;
                     case 'tool_result':
-                        this.renderToolResultCard(message);
+                        // Only show in ToolResultsCard if not for the current chat engramId (i.e., not for console/chat flow)
+                        if (!message.engramId || message.engramId !== chatEngramId) {
+                            this.renderToolResultCard(message);
+                        }
+                        // Otherwise, ignore (it will show in chat via cbus_message)
                         return;
                     case 'bootrom':
                         // Suppress warning; handled elsewhere (e.g., via Promise)
@@ -1208,13 +1212,26 @@
                 // Serialize form data
                 const schema = tool.inputSchema || tool.input_schema;
                 const args = this.serializeToolForm(form, schema);
+                // Build tapConfig for this tool call
+                let tapConfig = {
+                    serverUrl: url,
+                    toolName: tool.name,
+                    args
+                };
+                if (tool.connectedStringArg) tapConfig.connectedStringArg = tool.connectedStringArg;
+                if (tool.connectedArrayArg) tapConfig.connectedArrayArg = tool.connectedArrayArg;
+                // Generate or reuse a unique engramId for MCP tool calls
+                let mcpEngramId = sessionStorage.getItem('mcpEngramId');
+                if (!mcpEngramId) {
+                    mcpEngramId = crypto.randomUUID();
+                    sessionStorage.setItem('mcpEngramId', mcpEngramId);
+                }
                 // Send to service worker
                 if (this.serviceWorker) {
                     navigator.serviceWorker.controller?.postMessage({
                         type: 'call_tool',
-                        url,
-                        toolName: tool.name,
-                        args
+                        tapConfig,
+                        engramId: mcpEngramId
                     });
                     // Optionally, show loading state
                     const resultArea = form.querySelector('.tool-result-area');
@@ -1476,8 +1493,16 @@
         function getCurrentEngramId() {
             let engramId = sessionStorage.getItem('consoleChatEngramId');
             if (!engramId) {
-                engramId = crypto.randomUUID();
+                // Try to get last used engramId from localStorage
+                engramId = localStorage.getItem('lastEngramId');
+                if (!engramId) {
+                    engramId = crypto.randomUUID();
+                }
                 sessionStorage.setItem('consoleChatEngramId', engramId);
+                localStorage.setItem('lastEngramId', engramId);
+            } else {
+                // Always update localStorage to reflect the current session's engramId
+                localStorage.setItem('lastEngramId', engramId);
             }
             return engramId;
         }
@@ -1502,6 +1527,9 @@
                     chatEngramId = crypto.randomUUID();
                     sessionStorage.setItem('consoleChatEngramId', chatEngramId);
                     renderEngramId();
+                    // Clear chat history for new engram
+                    chatMessages = [];
+                    renderChatMessages();
                 };
             }
         }
@@ -1516,7 +1544,7 @@
         }
         // Subscribe to the CBus queue on page load
         if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
         }
         // Handle incoming CBus messages
         navigator.serviceWorker.addEventListener('message', (event) => {
@@ -2058,7 +2086,7 @@
         renderTapToolConfig(chatSelectedTool);
         // Subscribe to the CBus queue on page load (fix typo)
         if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
         }
 
         // --- MCP Page Logic ---
@@ -2103,12 +2131,12 @@
         // --- Robust CBus Subscription ---
         function subscribeToCbus() {
             if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+                navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
             } else {
                 // Wait for the SW to become active, then subscribe
                 navigator.serviceWorker.addEventListener('controllerchange', function() {
                     if (navigator.serviceWorker.controller) {
-                        navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe' });
+                        navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
                     }
                 }, { once: true });
             }
