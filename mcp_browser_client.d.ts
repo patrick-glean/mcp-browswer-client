@@ -18,6 +18,9 @@ declare namespace wasm_bindgen {
 	export function query_tools(): Promise<any>;
 	export function list_tools(url: string): Promise<any>;
 	export function get_compiled_info(): string;
+	export function call_tool(url: string, tool_name: string, args: any): Promise<any>;
+	export function set_debug_mode(enabled: boolean): void;
+	export function get_bootrom(): string;
 	
 }
 
@@ -42,16 +45,19 @@ declare interface InitOutput {
   readonly query_tools: () => any;
   readonly list_tools: (a: number, b: number) => any;
   readonly get_compiled_info: () => [number, number];
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_export_2: WebAssembly.Table;
+  readonly call_tool: (a: number, b: number, c: number, d: number, e: any) => any;
+  readonly set_debug_mode: (a: number) => void;
+  readonly get_bootrom: () => [number, number];
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+  readonly __wbindgen_exn_store: (a: number) => void;
+  readonly __externref_table_alloc: () => number;
+  readonly __wbindgen_export_4: WebAssembly.Table;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure62_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure84_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure70_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure92_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

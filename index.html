@@ -6,10 +6,101 @@
     <title>MCP Client Test</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/styles.css">
+    <style>
+        .three-panel-memory {
+            display: flex;
+            flex-direction: row;
+            gap: 1.5rem;
+            min-height: 400px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .memory-panel {
+            background: #232323;
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #444;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+            max-width: none;
+        }
+        .memory-panel-left {
+            flex: 0 1 220px;
+            max-width: 240px;
+        }
+        .memory-panel-middle {
+            flex: 0 1 260px;
+            max-width: 280px;
+        }
+        .memory-panel-right {
+            flex: 1 1 0;
+            min-width: 320px;
+        }
+        .imprints-list {
+            margin-top: 1em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
+        }
+        .imprint-list-item {
+            background: #292929;
+            border-radius: 4px;
+            padding: 0.5em 0.75em;
+            cursor: pointer;
+            transition: background 0.2s;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+        .imprint-list-item.selected {
+            background: #2e5c9a;
+            color: #fff;
+            border-color: #3a7bd5;
+        }
+        .imprint-list-item .imprint-name {
+            font-weight: bold;
+            font-size: 1.05em;
+        }
+        .imprint-list-item .imprint-snippet {
+            font-size: 0.95em;
+            color: #aaa;
+            margin-top: 0.1em;
+        }
+        .imprint-list-item .imprint-timestamp {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 0.1em;
+        }
+        .imprint-editor {
+            margin-top: 1em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
+        }
+        .imprint-editor input, .imprint-editor textarea {
+            width: 100%;
+            background: #181818;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 0.5em;
+        }
+        .imprint-editor label {
+            font-weight: bold;
+            margin-top: 0.5em;
+        }
+        .imprint-editor .editor-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 0.5em;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <div class="status-bar">
+        <div class="status-bar" id="statusBar" style="cursor:pointer;">
             <div class="status-item">
                 <span class="status-label">Service Worker:</span>
                 <span class="status-indicator" id="sw-status">●</span>
@@ -21,10 +112,6 @@
                 <span class="status-uptime" id="wasm-uptime">0s</span>
             </div>
             <div class="status-item">
-                <span class="status-label">MCP Server:</span>
-                <span class="status-indicator" id="mcp-status">●</span>
-            </div>
-            <div class="status-item">
                 <span class="status-label">Metadata Version:</span>
                 <span id="metadataVersion">-</span>
             </div>
@@ -32,16 +119,16 @@
                 <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
             </div>
         </div>
-        
-        <div class="controls-section">
+        <!-- Popdown for controls -->
+        <div id="controlsPopdown" class="controls-popdown" style="display:none;">
+            <button id="closeControlsPopdown" style="float:right;margin-bottom:10px;">✕</button>
             <div class="control-group sw-controls">
                 <div>
                     <h3>Service Worker Controls</h3>
-                    <button id="stop-sw">Stop Service Worker</button>
                     <button id="start-sw" class="start">Start Service Worker</button>
+                    <button id="stop-sw">Stop Service Worker</button>
                 </div>
             </div>
-
             <div class="control-group wasm-controls">
                 <div>
                     <h3>WASM Module Controls</h3>
@@ -50,71 +137,126 @@
                     <button id="reload-wasm" class="reload">Reload WASM</button>
                 </div>
             </div>
-
-
-            <div class="control-group">
-                <h3>Memory Events</h3>
-                <div class="memory-controls">
-                    <input type="text" id="memoryEventText" placeholder="Enter memory event text" class="memory-input">
-                    <button id="addMemoryEvent" class="control-button">Add Event</button>
-                    <button id="clearMemoryEvents" class="control-button">Clear Events</button>
-                </div>
-                <div id="memoryEvents" class="memory-events"></div>
+        </div>
+        <div class="main-content-tabs">
+            <div class="tab-bar">
+                <button id="consoleTabBtn" class="tab-btn active">Console</button>
+                <button id="mcpTabBtn" class="tab-btn">MCP</button>
+                <button id="memoryTabBtn" class="tab-btn">Memory</button>
+                <button id="logsTabBtn" class="tab-btn">Logs</button>
+                <button id="popoutLogsBtn" class="tab-btn" title="Pop out logs">↗</button>
             </div>
-
-            <div class="control-group">
-                <h3>MCP Initialization</h3>
-                <div class="mcp-controls">
-                    <div class="server-config">
-                        <label for="mcpServerUrl">URL</label>
-                        <div class="url-input-container">
-                            <input type="text" id="mcpServerUrl" value="http://localhost:8081">
-                            <div class="url-status-icon">
-                                <svg class="default-icon" viewBox="0 0 24 24" width="16" height="16">
-                                    <rect width="16" height="16" fill="none"/>
-                                </svg>
-                                <svg class="edit-icon" viewBox="0 0 24 24" width="16" height="16">
-                                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-                                </svg>
-                                <svg class="success-icon" viewBox="0 0 24 24" width="16" height="16">
-                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                                </svg>
+            <div id="consoleTab" class="tab-content active">
+                <div class="console-section">
+                    <div class="chat-card">
+                        <div class="chat-card-left">
+                            <div id="chatMessages" class="chat-messages"></div>
+                            <div class="chat-input-row">
+                                <input type="text" id="chatUserInput" placeholder="Type your message..." autocomplete="off" />
+                                <button id="chatSendBtn" type="button">Send</button>
+                            </div>
+                            <div id="chatEngramIdDisplay"></div>
+                        </div>
+                        <div class="chat-card-right">
+                            <div class="cbus-tap-card" style="border:1px solid #444; border-radius:8px; padding:1em; margin-bottom:1em; background:#232323;">
+                                <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.5em;">LLM Target (Server/Tool)</div>
+                                <div class="chat-server-select-row">
+                                    <label for="chatServerSelect">Server:</label>
+                                    <select id="chatServerSelect"></select>
+                                </div>
+                                <div class="chat-tool-select-row">
+                                    <label for="chatToolSelect">Tool:</label>
+                                    <select id="chatToolSelect"></select>
+                                </div>
+                                <form id="chatToolConfigForm" class="chat-tool-config"></form>
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="init-steps">
-                        <button id="check-mcp">Check MCP</button>
-                        <button id="initProtocol">Initialize Protocol</button>
-                        <button id="listTools">List Tools</button>
-                        <button id="registerTools">Register Tools</button>
-                    </div>
-                    
-                    <div class="server-tools-container">
-                        <div class="servers-display">
-                            <h4>Available Servers</h4>
-                            <div id="serversList"></div>
-                        </div>
-                        <div class="tools-display">
-                            <h4>Available Tools</h4>
-                            <div id="toolsList"></div>
+                </div>
+            </div>
+            <div id="mcpTab" class="tab-content" style="display:none;">
+                <div class="controls-section">
+                    <!-- Service Worker and WASM controls moved to popdown -->
+                    <div class="control-group">
+                        <h3>MCP Servers</h3>
+                        <div class="mcp-servers-group">
+                            <div class="mcp-controls-header">
+                                <div class="add-server-controls">
+                                    <input type="text" id="serverUrl" placeholder="Server URL">
+                                    <input type="text" id="serverAlias" placeholder="Alias (optional)">
+                                    <button id="addServerBtn">Add</button>
+                                </div>
+                                <div class="mcp-controls-bar">
+                                    <button id="check-mcp">Check MCP</button>
+                                    <button id="initProtocol">Initialize</button>
+                                    <button id="listTools">List Tools</button>
+                                </div>
+                            </div>
+                            <div class="mcp-servers-section">
+                                <div class="servers-list-panel">
+                                    <div id="serversList"></div>
+                                </div>
+                                <div class="server-card-panel">
+                                    <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
+                                        <h4>Server Details</h4>
+                                        <div class="server-card-fields autosave-group">
+                                            <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
+                                            <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
+                                            <label>Name: <input type="text" id="cardServerName" disabled></label><br>
+                                            <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
+                                            <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
+                                            <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
+                                        </div>
+                                        <div style="margin-top: 1rem;">
+                                            <!--<button id="saveServerBtn">Save</button>-->
+                                            <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tools-display">
+                                    <h4>Available Tools</h4>
+                                    <div id="toolsList"></div>
+                                </div>
+                            </div>
+                            <div class="tool-cards-row">
+                                <div id="toolCard" class="tool-card"></div>
+                                <div id="toolResultCard" class="tool-result-card"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="log-section">
-            <div class="control-group">
-                <div class="log-header">
-                    <h3>Logs</h3>
-                    <label class="debug-toggle">
-                        <input type="checkbox" id="debugModeToggle">
-                        <span class="slider"></span>
-                        Debug Mode
-                    </label>
+            <div id="memoryTab" class="tab-content" style="display:none;">
+                <div class="memory-section three-panel-memory">
+                    <!-- Imprints List (now leftmost) -->
+                    <div class="memory-panel memory-panel-middle" style="min-width:200px;max-width:260px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5em;">
+                            <h3 style="margin:0;">Imprints</h3>
+                            <button id="addImprintBtn" title="Add Imprint" style="font-size:1.5em;padding:0 0.5em;line-height:1;">+</button>
+                        </div>
+                        <div id="imprintsList" class="imprints-list"></div>
+                    </div>
+                    <!-- Editor/Previewer (right) -->
+                    <div class="memory-panel memory-panel-right">
+                        <h3>Imprint Editor/Preview</h3>
+                        <div id="imprintEditor" class="imprint-editor"></div>
+                    </div>
                 </div>
-                <div class="log-container" id="log-container"></div>
+            </div>
+            <div id="logsTab" class="tab-content" style="display:none;">
+                <div class="log-section">
+                    <div class="control-group">
+                        <div class="log-header">
+                            <h3>Logs</h3>
+                            <label class="debug-toggle">
+                                <input type="checkbox" id="debugModeToggle">
+                                <span class="slider"></span>
+                                Debug Mode
+                            </label>
+                        </div>
+                        <div class="log-container" id="log-container"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -127,12 +269,10 @@
                 this.wasmStatus = document.getElementById('wasm-status');
                 this.mcpStatus = document.getElementById('mcp-status');
                 this.swUptime = document.getElementById('sw-uptime');
-                this.wasmUptime = document.getElementById('wasm-uptime');
                 this.serviceWorker = null;
                 this.startTime = Date.now();
                 this.wasmStartTime = null;
                 this.uptimeInterval = null;
-                this.wasmUptimeInterval = null;
                 this.lastMcpCheck = null;
                 this.mcpCheckTimeout = null;
                 this.wasmCheckInterval = null;
@@ -140,6 +280,7 @@
                 this.selectedServerUrl = null;
                 this.isInitialized = false;
                 this.isDebugMode = false;
+                this.servers = this.loadServers();
                 
                 // Store the bound message handler
                 this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
@@ -169,6 +310,13 @@
                 if (serverUrlInput) {
                     serverUrlInput.value = serverUrl;
                 }
+                // Select the server in the list if it exists
+                if (serverUrl && this.servers[serverUrl]) {
+                    this.selectedServerUrl = serverUrl;
+                    this.updateToolsList(this.servers[serverUrl].tools || []);
+                }
+
+                this.updateServersList();
             }
 
             startUptimeCounter() {
@@ -241,8 +389,8 @@
                         return Promise.all(registrations.map(registration => registration.unregister()));
                     }).then(() => {
                         console.log('Registering new service worker...');
-                        // Now register the new service worker
-                        return navigator.serviceWorker.register('sw.js');
+                        // Now register the new service worker as a module
+                        return navigator.serviceWorker.register('sw.js', { type: 'module' });
                     }).then(registration => {
                         console.log('ServiceWorker registration successful');
                         
@@ -287,32 +435,43 @@
             setupEventListeners() {
                 const buttons = {
                     'check-wasm': () => this.checkWasm(),
-                    'check-mcp': () => this.checkMcp(),
+                    'check-mcp': async () => {
+                        const url = this.selectedServerUrl;
+                        if (!url) {
+                            this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
+                            return;
+                        }
+                        if (this.serviceWorker) {
+                            this.log({ level: 'INFO', message: `Checking MCP server at ${url}`, timestamp: new Date().toISOString() });
+                            await this.serviceWorker.postMessage({ type: 'health_check', url });
+                        }
+                    },
                     'unload-wasm': () => this.unloadWasm(),
                     'reload-wasm': () => this.reloadWasm(),
                     'stop-sw': () => this.stopServiceWorker(),
                     'start-sw': () => this.startServiceWorker(),
                     'listTools': async () => {
-                        const url = document.getElementById('mcpServerUrl').value.trim();
+                        // Always use the input field value if present, else selectedServerUrl
+                        let url = '';
+                        const serverUrlInput = document.getElementById('mcpServerUrl');
+                        if (serverUrlInput && serverUrlInput.value.trim()) {
+                            url = serverUrlInput.value.trim();
+                        } else {
+                            url = this.selectedServerUrl;
+                        }
+                        this.log({ level: 'DEBUG', message: `[listTools] Using URL: ${url} (selectedServerUrl: ${this.selectedServerUrl})`, timestamp: new Date().toISOString() });
                         if (!url) {
-                            this.log({ level: 'ERROR', message: 'Please enter a valid MCP Server URL', timestamp: new Date().toISOString() });
+                            this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
                             return;
                         }
-                        
-                        this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
                         if (this.serviceWorker) {
-                            try {
-                                await this.serviceWorker.postMessage({ 
-                                    type: 'list_tools',
-                                    url: url
-                                });
-                            } catch (err) {
-                                this.log({ level: 'ERROR', message: `Tools query failed: ${err}`, timestamp: new Date().toISOString() });
-                            }
-                        } else {
-                            this.log({ level: 'ERROR', message: 'Service worker not available', timestamp: new Date().toISOString() });
+                            this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
+                            await this.serviceWorker.postMessage({ type: 'list_tools', url });
                         }
-                    }
+                    },
+                    'addServerBtn': () => this.handleAddServer(),
+                    'saveServerBtn': () => this.handleSaveServer(),
+                    'deleteServerBtn': () => this.handleDeleteServer()
                 };
 
                 Object.entries(buttons).forEach(([id, handler]) => {
@@ -348,7 +507,7 @@
                 // Then check every minute
                 this.wasmCheckInterval = setInterval(() => {
                     this.checkWasm();
-                }, 60000); // 60 seconds
+                }, 600000); // 10 minutes
             }
 
             stopPeriodicWasmChecks() {
@@ -382,7 +541,7 @@
             async startServiceWorker() {
                 try {
                     console.log('Starting service worker...');
-                    const registration = await navigator.serviceWorker.register('sw.js');
+                    const registration = await navigator.serviceWorker.register('sw.js', { type: 'module' });
                     this.serviceWorker = registration.active;
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
@@ -420,7 +579,7 @@
             async checkWasm() {
                 if (this.serviceWorker) {
                     const checkId = ++this.checkCounter;
-                    console.log(`Checking WASM module (check #${checkId})...`);
+                    console.log(`10 min heartbeat: WASM module (check #${checkId})...`);
                     await this.serviceWorker.postMessage({ 
                         type: 'check_wasm',
                         checkId: checkId
@@ -474,8 +633,13 @@
                         if (metadata) {
                             // Update version
                             const versionElement = document.getElementById('metadataVersion');
-                            if (versionElement && metadata.version) {
-                                versionElement.textContent = metadata.version;
+                            if (versionElement && metadata.metadataVersion) {
+                                try {
+                                    const metadataObj = JSON.parse(metadata.metadataVersion);
+                                    versionElement.textContent = metadataObj.version;
+                                } catch (e) {
+                                    console.error('Failed to parse metadata:', e);
+                                }
                             }
                             // Update build info
                             if (metadata.buildInfo) {
@@ -515,8 +679,13 @@
                             const metadata = message.params.metadata;
                             // Update version
                             const versionElement = document.getElementById('metadataVersion');
-                            if (versionElement && metadata.version) {
-                                versionElement.textContent = metadata.version;
+                            if (versionElement && metadata.metadataVersion) {
+                                try {
+                                    const metadataObj = JSON.parse(metadata.metadataVersion);
+                                    versionElement.textContent = metadataObj.version;
+                                } catch (e) {
+                                    console.error('Failed to parse metadata:', e);
+                                }
                             }
                             // Update build info
                             if (metadata.buildInfo) {
@@ -535,6 +704,16 @@
                         this.log({ level: 'INFO', message: `Server initialized: ${serverName}`, timestamp: new Date().toISOString() });
                         this.getServerInfo();
                         this.updateToolsList(message.server.tools);
+                        // Update the server's name in memory and localStorage
+                        if (message.server?.url && this.servers[message.server.url]) {
+                            this.servers[message.server.url].name = message.server.name;
+                            this.servers[message.server.url].date_modified = new Date().toISOString();
+                            this.saveServers();
+                            this.updateServersList();
+                            if (this.selectedServerUrl === message.server.url) {
+                                this.showServerCard(message.server.url);
+                            }
+                        }
                         break;
                     case 'wasm_initialized':
                         const initMessage = `WASM module initialized (${message.size} KB) - ${message.buildInfo}`;
@@ -550,7 +729,31 @@
                         break;
                     case 'tools_list':
                         this.log({ level: 'INFO', message: `Tools list received: ${JSON.stringify(message.tools)}`, timestamp: new Date().toISOString() });
-                        this.updateToolsList(message.tools);
+                        if (message.url && this.servers[message.url]) {
+                            this.servers[message.url].tools = message.tools;
+                            this.saveServers();
+                        }
+                        // Always refresh the tools list for the selected server
+                        if (this.selectedServerUrl) {
+                            this.updateToolsList(this.servers[this.selectedServerUrl]?.tools || []);
+                        }
+                        break;
+                    case 'tool_result':
+                        // Only show in ToolResultsCard if not for the current chat engramId (i.e., not for console/chat flow)
+                        if (!message.engramId || message.engramId !== chatEngramId) {
+                            this.renderToolResultCard(message);
+                        }
+                        // Otherwise, ignore (it will show in chat via cbus_message)
+                        return;
+                    case 'bootrom':
+                        // Suppress warning; handled elsewhere (e.g., via Promise)
+                        break;
+                    case 'cbus_queue':
+                        // No-op: handled elsewhere, suppress warning
+                        break;
+                    case 'cbus_message':
+                        // print out tool config from local storage
+                        // No-op: handled elsewhere, suppress warning
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -638,9 +841,9 @@
             }
 
             async initializeMcpServer() {
-                const url = document.getElementById('mcpServerUrl').value;
+                const url = this.selectedServerUrl;
                 if (!url) {
-                    this.log({ level: 'ERROR', message: 'Please enter a server URL', timestamp: new Date().toISOString() });
+                    this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
                     return;
                 }
                 this.log({ level: 'INFO', message: `Initializing MCP server at ${url}...`, timestamp: new Date().toISOString() });
@@ -656,58 +859,220 @@
                 });
             }
 
-            updateServersList(servers) {
+            updateServersList() {
                 const serversList = document.getElementById('serversList');
                 serversList.innerHTML = '';
-                Object.entries(servers).forEach(([url, server]) => {
+                const serversArr = Object.values(this.servers);
+                if (serversArr.length === 0) {
+                    serversList.innerHTML = '<div style="color:#888;">No servers added.</div>';
+                }
+                serversArr.forEach(server => {
                     const serverItem = document.createElement('div');
                     serverItem.className = 'server-item';
-                    if (url === this.selectedServerUrl) {
+                    if (server.url === this.selectedServerUrl) {
                         serverItem.classList.add('selected');
                     }
-                    const hostname = new URL(server.url).host;
+                    // Priority: alias > name > url
+                    let displayName = server.url;
+                    if (server.name && server.name.trim()) {
+                        displayName = server.name;
+                    }
+                    if (server.alias && server.alias.trim()) {
+                        displayName = server.alias;
+                    }
                     serverItem.innerHTML = `
-                        <div class="server-name" title="${server.url}">${hostname}</div>
+                        <div class="server-name" title="${server.url}">${displayName}</div>
                     `;
                     serverItem.addEventListener('click', () => {
-                        if (this.selectedServerUrl === url) {
-                            this.selectedServerUrl = null;
-                            this.updateToolsList([]);
-                        } else {
-                            this.selectedServerUrl = url;
-                            this.updateToolsList(server.tools);
-                        }
-                        this.updateServersList(servers);
+                        this.selectedServerUrl = server.url;
+                        this.setServerUrl(server.url);
+                        this.showServerCard(server.url);
+                        this.updateToolsList(server.tools || []);
+                        this.updateServersList();
                     });
                     serversList.appendChild(serverItem);
                 });
+                // Hide card if no server selected
+                if (!this.selectedServerUrl || !this.servers[this.selectedServerUrl]) {
+                    this.hideServerCard();
+                }
+            }
+
+            showServerCard(url) {
+                const server = this.servers[url];
+                if (!server) return;
+                const card = document.getElementById('serverCard');
+                card.style.display = 'block';
+                document.getElementById('cardServerName').value = server.name;
+                document.getElementById('cardServerAlias').value = server.alias || '';
+                document.getElementById('cardServerUrl').value = server.url;
+                document.getElementById('cardServerStatus').value = server.status;
+                document.getElementById('cardServerDateAdded').value = server.date_added;
+                document.getElementById('cardServerDateModified').value = server.date_modified;
+                // Setup autosave for alias and url
+                this.initAutosaveGroup(card.querySelector('.autosave-group'), (fields) => {
+                    // fields: {cardServerUrl, cardServerAlias}
+                    if (!this.selectedServerUrl) return;
+                    let server = this.servers[this.selectedServerUrl];
+                    if (!server) return;
+                    const newUrl = fields.cardServerUrl.trim();
+                    const newAlias = fields.cardServerAlias.trim();
+                    let urlChanged = false;
+                    if (newUrl && newUrl !== server.url) {
+                        // Re-key the server object
+                        this.servers[newUrl] = { ...server, url: newUrl };
+                        delete this.servers[server.url];
+                        this.selectedServerUrl = newUrl;
+                        this.setServerUrl(newUrl);
+                        server = this.servers[newUrl];
+                        urlChanged = true;
+                    }
+                    server.alias = newAlias;
+                    server.date_modified = new Date().toISOString();
+                    this.saveServers();
+                    this.updateServersList();
+                    this.showServerCard(server.url);
+                    if (urlChanged) {
+                        this.log({ level: 'INFO', message: `Server URL changed to ${newUrl}`, timestamp: new Date().toISOString() });
+                    }
+                });
+            }
+
+            hideServerCard() {
+                const card = document.getElementById('serverCard');
+                card.style.display = 'none';
             }
 
             updateToolsList(tools) {
                 const toolsList = document.getElementById('toolsList');
                 toolsList.innerHTML = '';
-                if (this.selectedServerUrl) {
-                    if (tools.length === 0) {
-                        const defaultTool = document.createElement('div');
-                        defaultTool.className = 'tool-item';
-                        defaultTool.innerHTML = `
-                            <strong>Check MCP</strong>
-                        `;
-                        defaultTool.title = 'Perform a health check on the MCP server.';
-                        defaultTool.addEventListener('click', () => this.checkMcp());
-                        toolsList.appendChild(defaultTool);
-                    } else {
-                        tools.forEach(tool => {
-                            const toolItem = document.createElement('div');
-                            toolItem.className = 'tool-item';
-                            toolItem.innerHTML = `
-                                <strong>${tool.name}</strong> (v${tool.version})
-                                <div>${tool.description}</div>
-                            `;
-                            toolsList.appendChild(toolItem);
-                        });
-                    }
+                if (!tools || tools.length === 0) {
+                    toolsList.innerHTML = '<div style="color:#888;">No tools available.</div>';
+                    this.renderToolCard(null);
+                    this.renderToolResultCard(null);
+                    return;
                 }
+                tools.forEach((tool, idx) => {
+                    const toolItem = document.createElement('div');
+                    toolItem.className = 'tool-item';
+                    toolItem.textContent = tool.name;
+                    toolItem.style.cursor = 'pointer';
+                    toolItem.onclick = () => {
+                        this.renderToolCard(tool);
+                        this.renderToolResultCard(null);
+                    };
+                    toolsList.appendChild(toolItem);
+                });
+                this.renderToolCard(null);
+                this.renderToolResultCard(null);
+            }
+
+            // Recursive input field renderer for tool schemas
+            renderInputField(key, prop, isRequired) {
+                const inputCard = document.createElement('div');
+                inputCard.className = 'tool-input-card';
+                let label = `<label><strong>${key}</strong> (${prop.type || 'string'})`;
+                if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                label += '</label><br>';
+
+                if (prop.type === 'object' && !prop.properties) {
+                    inputCard.innerHTML = `${label}<textarea name="${key}" placeholder="{}" rows="3" style="font-family:monospace;"></textarea>`;
+                } else if (prop.type === 'string') {
+                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                } else if (prop.type === 'integer' || prop.type === 'number') {
+                    inputCard.innerHTML = `${label}<input type="number" name="${key}" />`;
+                } else if (prop.type === 'array' && prop.items) {
+                    inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item">Add</button>`;
+                    const arrayInputs = inputCard.querySelector('.array-inputs');
+                    inputCard.querySelector('.add-array-item').onclick = () => {
+                        arrayInputs.appendChild(this.renderInputField(key + '[]', prop.items, false));
+                    };
+                } else if (prop.type === 'object' && prop.properties) {
+                    inputCard.innerHTML = `${label}<div class="object-inputs"></div>`;
+                    const objectInputs = inputCard.querySelector('.object-inputs');
+                    Object.entries(prop.properties).forEach(([subKey, subProp]) => {
+                        objectInputs.appendChild(this.renderInputField(subKey, subProp, (prop.required || []).includes(subKey)));
+                    });
+                } else {
+                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                }
+                return inputCard;
+            }
+
+            renderToolCard(tool) {
+                const toolCard = document.getElementById('toolCard');
+                toolCard.innerHTML = '';
+                if (!tool) {
+                    toolCard.innerHTML = '<div class="tool-card-inner"><span style="color:#888;">Select a tool to view details and call it.</span></div>';
+                    return;
+                }
+                toolCard.style.display = 'block';
+                const card = document.createElement('form');
+                card.className = 'tool-card-inner';
+                card.onsubmit = (e) => {
+                    e.preventDefault();
+                    this.handleCallTool(tool, card);
+                };
+                card.innerHTML = `
+                    <h3>${tool.name}</h3>
+                    <div class="tool-description">${tool.description || ''}</div>
+                    <div class="tool-input-schema"></div>
+                    <button type="submit" class="call-tool-btn">Call Tool</button>
+                `;
+                toolCard.appendChild(card);
+                // Render input schema if present
+                const schema = tool.inputSchema || tool.input_schema;
+                if (schema && schema.properties) {
+                    const schemaDiv = card.querySelector('.tool-input-schema');
+                    schemaDiv.innerHTML = '<h4>Inputs</h4>';
+                    Object.entries(schema.properties).forEach(([key, prop]) => {
+                        const isRequired = (schema.required || []).includes(key);
+                        schemaDiv.appendChild(this.renderInputField(key, prop, isRequired));
+                    });
+                }
+            }
+
+            renderToolResultCard(result) {
+                const toolResultCard = document.getElementById('toolResultCard');
+                if (!result) {
+                    toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span style="color:#888;">Tool output will appear here.</span></div>';
+                    return;
+                }
+                if (result.error) {
+                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span style='color:#f44336;'>${result.error}</span></div>`;
+                    return;
+                }
+                // Collapsible raw JSON (collapsed by default)
+                let rawJson = `<details class='tool-raw-json'><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(result.result || result, null, 2))}</pre></details>`;
+                // Always render content card
+                let contentHtml = '';
+                let contentArr = [];
+                if (result.result && result.result.result && Array.isArray(result.result.result.content)) {
+                    contentArr = result.result.result.content;
+                    console.log('Tool content (result.result.result.content):', contentArr);
+                } else if (result.result && Array.isArray(result.result.content)) {
+                    contentArr = result.result.content;
+                    console.log('Tool content (result.result.content):', contentArr);
+                } else if (Array.isArray(result.content)) {
+                    contentArr = result.content;
+                    console.log('Tool content (result.content):', contentArr);
+                } else {
+                    console.log('Tool content: [] (no content found)');
+                }
+                if (contentArr.length > 0) {
+                    contentHtml = contentArr.map((item, idx) => {
+                        if (item && item.type === 'text' && typeof item.text === 'string') {
+                            const safeText = escapeHtml(item.text).replace(/\n/g, '<br>');
+                            return `<div class='tool-content-text'>${safeText}</div>`;
+                        }
+                        return `<div class='tool-content-unknown'>[Unknown content type: ${escapeHtml(JSON.stringify(item))}]</div>`;
+                    }).join('<hr style="border:none;border-top:1px solid #444;margin:1em 0;">');
+                } else {
+                    contentHtml = `<div class='tool-content-empty'><span style='color:#888;'>No content to display.</span></div>`;
+                }
+                contentHtml = `<div class='tool-content-section'>${contentHtml}</div>`;
+                toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${rawJson}<div class="tool-content-header"> > result.content</div>${contentHtml}</div>`;
             }
 
             updateBuildInfo(buildInfo) {
@@ -735,10 +1100,191 @@
                     serverUrlInput.value = url;
                 }
             }
+
+            loadServers() {
+                const stored = localStorage.getItem('servers');
+                return stored ? JSON.parse(stored) : {};
+            }
+
+            saveServers() {
+                localStorage.setItem('servers', JSON.stringify(this.servers));
+            }
+
+            handleAddServer() {
+                const url = document.getElementById('serverUrl').value.trim();
+                const name_alias = document.getElementById('serverAlias').value.trim();
+                if (!url) {
+                    this.log({ level: 'ERROR', message: 'Server URL is required', timestamp: new Date().toISOString() });
+                    return;
+                }
+                const now = new Date().toISOString();
+                const server = {
+                    name: '',
+                    name_alias,
+                    url,
+                    tools: [],
+                    date_added: now,
+                    date_modified: now,
+                    status: 'unknown'
+                };
+                this.servers[url] = server;
+                this.saveServers();
+                this.selectedServerUrl = url;
+                this.setServerUrl(url);
+                this.updateServersList();
+                // Clear inputs
+                document.getElementById('serverUrl').value = '';
+                document.getElementById('serverAlias').value = '';
+            }
+
+            handleSaveServer() {
+                if (!this.selectedServerUrl) return;
+                const server = this.servers[this.selectedServerUrl];
+                if (!server) return;
+                server.name_alias = document.getElementById('cardServerAlias').value.trim();
+                server.url = document.getElementById('cardServerUrl').value.trim();
+                server.date_modified = new Date().toISOString();
+                // If URL changed, update key
+                if (server.url !== this.selectedServerUrl) {
+                    this.servers[server.url] = server;
+                    delete this.servers[this.selectedServerUrl];
+                    this.selectedServerUrl = server.url;
+                }
+                this.saveServers();
+                this.updateServersList();
+                this.showServerCard(server.url);
+            }
+
+            handleDeleteServer() {
+                if (!this.selectedServerUrl) return;
+                delete this.servers[this.selectedServerUrl];
+                this.saveServers();
+                this.selectedServerUrl = null;
+                this.updateServersList();
+                this.hideServerCard();
+                this.updateToolsList([]);
+            }
+
+            // Utility to add autosave to all inputs/textareas in a container
+            initAutosaveGroup(container, onSave) {
+                if (!container) return;
+                let debounceTimer = null;
+                let lastInputId = null;
+                const collectFields = () => {
+                    const fields = {};
+                    container.querySelectorAll('input, textarea').forEach(input => {
+                        fields[input.id] = input.value;
+                    });
+                    return fields;
+                };
+                const showCheckmark = (inputId) => {
+                    const check = document.getElementById('checkmark-' + inputId);
+                    if (check) {
+                        check.innerHTML = `<svg width='18' height='18' viewBox='0 0 20 20' style='display:inline;vertical-align:middle;'><polyline points='4,11 9,16 16,5' style='fill:none;stroke:#4CAF50;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;'/></svg>`;
+                        check.style.display = 'inline-block';
+                        setTimeout(() => { check.style.display = 'none'; }, 1500);
+                    }
+                };
+                const triggerSave = (inputId) => {
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        const before = collectFields();
+                        onSave(before);
+                        if (inputId) showCheckmark(inputId);
+                    }, 1000);
+                };
+                container.querySelectorAll('input, textarea').forEach(input => {
+                    input.removeEventListener('input', input._autosaveHandler || (()=>{}));
+                    input._autosaveHandler = (e) => {
+                        lastInputId = input.id;
+                        triggerSave(input.id);
+                    };
+                    input.addEventListener('input', input._autosaveHandler);
+                });
+            }
+
+            handleCallTool(tool, form) {
+                const url = this.selectedServerUrl;
+                if (!url) {
+                    this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
+                    return;
+                }
+                // Serialize form data
+                const schema = tool.inputSchema || tool.input_schema;
+                const args = this.serializeToolForm(form, schema);
+                // Build tapConfig for this tool call
+                let tapConfig = {
+                    serverUrl: url,
+                    toolName: tool.name,
+                    args
+                };
+                if (tool.connectedStringArg) tapConfig.connectedStringArg = tool.connectedStringArg;
+                if (tool.connectedArrayArg) tapConfig.connectedArrayArg = tool.connectedArrayArg;
+                // Generate or reuse a unique engramId for MCP tool calls
+                let mcpEngramId = sessionStorage.getItem('mcpEngramId');
+                if (!mcpEngramId) {
+                    mcpEngramId = crypto.randomUUID();
+                    sessionStorage.setItem('mcpEngramId', mcpEngramId);
+                }
+                // Send to service worker
+                if (this.serviceWorker) {
+                    navigator.serviceWorker.controller?.postMessage({
+                        type: 'call_tool',
+                        tapConfig,
+                        engramId: mcpEngramId
+                    });
+                    // Optionally, show loading state
+                    const resultArea = form.querySelector('.tool-result-area');
+                    if (resultArea) {
+                        resultArea.innerHTML = '<span style="color:#aaa;">Calling tool...</span>';
+                    }
+                } 
+            }
+
+            serializeToolForm(form, schema) {
+                const result = {};
+                if (!schema || !schema.properties) return result;
+                Object.entries(schema.properties).forEach(([key, prop]) => {
+                    if (prop.type === 'array') {
+                        const values = Array.from(form.querySelectorAll(`[name='${key}[]']`)).map(input => input.value);
+                        result[key] = values;
+                    } else if (prop.type === 'object' && prop.properties) {
+                        // Recursively serialize object
+                        const subSchema = { properties: prop.properties, required: prop.required };
+                        result[key] = this.serializeToolForm(form, subSchema);
+                    } else if (prop.type === 'object' && !prop.properties) {
+                        // Try to parse textarea as JSON
+                        const input = form.querySelector(`[name='${key}']`);
+                        if (input) {
+                            try {
+                                result[key] = input.value ? JSON.parse(input.value) : {};
+                                input.style.borderColor = '';
+                                input.title = '';
+                            } catch (e) {
+                                input.style.borderColor = '#f44336';
+                                input.title = 'Invalid JSON';
+                                throw new Error(`Invalid JSON for ${key}`);
+                            }
+                        }
+                    } else {
+                        const input = form.querySelector(`[name='${key}']`);
+                        if (input) {
+                            if (prop.type === 'integer' || prop.type === 'number') {
+                                result[key] = input.value ? Number(input.value) : undefined;
+                            } else {
+                                result[key] = input.value;
+                            }
+                        }
+                    }
+                });
+                return result;
+            }
         }
 
         // Initialize the chat shell
         const chatShell = new ChatShell();
+
+        chatShell.startServiceWorker();
 
         // Add memory event
         document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
@@ -843,6 +1389,794 @@
                 }
             });
         }
+
+        document.getElementById('consoleTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.add('active');
+            document.getElementById('mcpTab').classList.remove('active');
+            document.getElementById('memoryTab').classList.remove('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
+            document.getElementById('logsTabBtn').classList.remove('active');
+            document.getElementById('consoleTab').style.display = 'block';
+            document.getElementById('mcpTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('mcpTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.add('active');
+            document.getElementById('memoryTab').classList.remove('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'block';
+            document.getElementById('memoryTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('memoryTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.remove('active');
+            document.getElementById('memoryTab').classList.add('active');
+            document.getElementById('logsTab').classList.remove('active');
+            this.classList.add('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
+            document.getElementById('logsTabBtn').classList.remove('active');
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'block';
+            document.getElementById('logsTab').style.display = 'none';
+        };
+        document.getElementById('logsTabBtn').onclick = function() {
+            document.getElementById('consoleTab').classList.remove('active');
+            document.getElementById('mcpTab').classList.remove('active');
+            document.getElementById('memoryTab').classList.remove('active');
+            document.getElementById('logsTab').classList.add('active');
+            this.classList.add('active');
+            document.getElementById('consoleTabBtn').classList.remove('active');
+            document.getElementById('mcpTabBtn').classList.remove('active');
+            document.getElementById('memoryTabBtn').classList.remove('active');
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
+            document.getElementById('memoryTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'block';
+        };
+        document.getElementById('popoutLogsBtn').onclick = function() {
+            window.open(window.location.pathname + '?logs=1', '_blank', 'width=600,height=800');
+        };
+        if (window.location.search.includes('logs=1')) {
+            document.getElementById('consoleTab').style.display = 'none';
+            document.getElementById('mcpTab').style.display = 'none';
+            document.getElementById('logsTab').style.display = 'block';
+            document.querySelector('.tab-bar').style.display = 'none';
+        }
+
+        // Add a helper for HTML escaping
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Popdown controls logic
+        const statusBar = document.getElementById('statusBar');
+        const controlsPopdown = document.getElementById('controlsPopdown');
+        const closeControlsPopdown = document.getElementById('closeControlsPopdown');
+        if (statusBar && controlsPopdown && closeControlsPopdown) {
+            statusBar.addEventListener('click', () => {
+                controlsPopdown.style.display = controlsPopdown.style.display === 'none' ? 'block' : 'none';
+            });
+            closeControlsPopdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+                controlsPopdown.style.display = 'none';
+            });
+        }
+
+        // --- Chat Card Logic ---
+        let chatSelectedTool = null;
+        let chatToolConfig = {};
+        let chatToolAssignUserMessage = {}; // fieldName -> boolean
+        let chatMessages = [];
+        let chatTools = [];
+        let chatSelectedServerUrl = null;
+        // Map of requestId -> callback (if needed for advanced routing)
+        const chatRequestHandlers = {};
+        // --- EngramId session logic ---
+        function getCurrentEngramId() {
+            let engramId = sessionStorage.getItem('consoleChatEngramId');
+            if (!engramId) {
+                // Try to get last used engramId from localStorage
+                engramId = localStorage.getItem('lastEngramId');
+                if (!engramId) {
+                    engramId = crypto.randomUUID();
+                }
+                sessionStorage.setItem('consoleChatEngramId', engramId);
+                localStorage.setItem('lastEngramId', engramId);
+            } else {
+                // Always update localStorage to reflect the current session's engramId
+                localStorage.setItem('lastEngramId', engramId);
+            }
+            return engramId;
+        }
+        let chatEngramId = getCurrentEngramId();
+        // Helper to render engramId below chat input, with New button
+        function renderEngramId() {
+            let engramDiv = document.getElementById('chatEngramIdDisplay');
+            if (!engramDiv) {
+                engramDiv = document.createElement('div');
+                engramDiv.id = 'chatEngramIdDisplay';
+                engramDiv.style.fontSize = '0.85em';
+                engramDiv.style.color = '#888';
+                engramDiv.style.marginTop = '0.25em';
+                const inputRow = document.querySelector('.chat-input-row');
+                inputRow.parentNode.insertBefore(engramDiv, inputRow.nextSibling);
+            }
+            engramDiv.innerHTML = `<span>engramId:</span> <span style=\"font-family:monospace;\">${chatEngramId}</span> <button id=\"newEngramBtn\" title=\"Start new engram\">New</button>`;
+            // Attach handler for New button
+            const newBtn = document.getElementById('newEngramBtn');
+            if (newBtn) {
+                newBtn.onclick = function() {
+                    chatEngramId = crypto.randomUUID();
+                    sessionStorage.setItem('consoleChatEngramId', chatEngramId);
+                    renderEngramId();
+                    // Clear chat history for new engram
+                    chatMessages = [];
+                    renderChatMessages();
+                };
+            }
+        }
+        renderEngramId();
+        // Helper to render chat messages
+        function renderChatMessages() {
+            const chatDiv = document.getElementById('chatMessages');
+            chatDiv.innerHTML = chatMessages.map(msg =>
+                `<div class="chat-msg ${msg.role}"><span>${escapeHtml(msg.text)}</span></div>`
+            ).join('');
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+        }
+        // Subscribe to the CBus queue on page load
+        if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
+        }
+        // Handle incoming CBus messages
+        navigator.serviceWorker.addEventListener('message', (event) => {
+            const msg = event.data;
+            if (msg.type === 'cbus_message') {
+                console.log('[Client] cbus_message:', msg.message); // Debug: show all cbus messages
+                chatMessages.push(msg.message);
+                renderChatMessages();
+
+                // --- CBus Tap Forwarder ---
+                // Only forward user messages (not tool responses or messages from the tap tool itself)
+                if (msg.message.role === 'user') {
+                    const tapConfig = loadCbusTapConfig();
+                    if (
+                        tapConfig &&
+                        tapConfig.serverUrl &&
+                        tapConfig.toolName &&
+                        tapConfig.connectedArg
+                    ) {
+                        // Prevent feedback: do not forward if the message is from the tap tool itself
+                        // (user messages are safe, but double-check if needed)
+                        // If you ever want to forward tool messages, add a check here:
+                        // if (msg.message.role === 'tool' && msg.message.toolName === tapConfig.toolName) return;
+                        const toolArgs = { ...(tapConfig.args || {}) };
+                        toolArgs[tapConfig.connectedArg] = msg.message.text;
+                        //chatShell.serviceWorker.postMessage({
+                        navigator.serviceWorker.controller?.postMessage({
+                            type: 'call_tool',
+                            url: tapConfig.serverUrl,
+                            toolName: tapConfig.toolName,
+                            args: toolArgs,
+                            engramId: chatEngramId,
+                            requestId: crypto.randomUUID()
+                        });
+                    }
+                }
+            } else if (msg.type === 'cbus_queue') {
+                chatMessages = msg.queue;
+                renderChatMessages();
+            } else if (msg.type === 'tool_result') {
+                // Only show in tool result card if not for the current chat engramId (i.e., not for console/chat flow)
+                // if (!msg.engramId || msg.engramId !== chatEngramId) {
+                //     renderToolResultCard(msg);
+                // }
+                // // Otherwise, ignore (it will show in chat via cbus_message)
+            }
+            // ...existing handlers...
+        });
+        // Always show send button, but disable/grey it out if input is empty/whitespace
+        function updateSendBtnState() {
+            if (chatUserInput.value.trim().length > 0) {
+                chatSendBtn.disabled = false;
+            } else {
+                chatSendBtn.disabled = true;
+            }
+        }
+        updateSendBtnState();
+        chatUserInput.addEventListener('input', updateSendBtnState);
+        // Add style for disabled send button if not present
+        if (!document.getElementById('sendBtnDisabledStyle')) {
+            const style = document.createElement('style');
+            style.id = 'sendBtnDisabledStyle';
+            style.textContent = `
+            #chatSendBtn:disabled {
+                background: #333 !important;
+                color: #888 !important;
+                border-color: #222 !important;
+                cursor: not-allowed !important;
+                opacity: 0.7;
+            }
+            `;
+            document.head.appendChild(style);
+        }
+        // In chatRequestHandlers[requestId], only add the tool message once
+        chatSendBtn.addEventListener('click', async function() {
+            const userInput = document.getElementById('chatUserInput').value.trim();
+            if (!userInput) return;
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'cbus_send_message',
+                    text: userInput,
+                    role: 'user',
+                    engramId: chatEngramId
+                });
+            }
+            document.getElementById('chatUserInput').value = '';
+            updateSendBtnState();
+        });
+        document.getElementById('chatUserInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('chatSendBtn').click();
+            }
+        });
+        // On tab switch to Console, rerender server/tool select/config/messages/engramId
+        document.getElementById('consoleTabBtn').addEventListener('click', function() {
+            renderTapServerSelect();      // For CBus Tap card
+            renderMcpServerSelect();      // For MCP page
+            renderChatMessages();
+            renderEngramId();
+        });
+        // Initial render
+        renderTapServerSelect();      // For CBus Tap card
+        renderMcpServerSelect();      // For MCP page
+        renderChatMessages();
+        renderEngramId();
+
+        // Add this style block for solid-checkbox and disabled input greying if not present
+        if (!document.getElementById('solidCheckboxStyle')) {
+            const style = document.createElement('style');
+            style.id = 'solidCheckboxStyle';
+            style.textContent = `
+            .solid-checkbox {
+              appearance: none;
+              -webkit-appearance: none;
+              width: 1.1em;
+              height: 1.1em;
+              background: #444;
+              border-radius: 3px;
+              margin-right: 0.2em;
+              vertical-align: middle;
+              text-align: center;
+              line-height: 1.1em;
+              font-size: 1.1em;
+              color: #fff;
+              cursor: pointer;
+              border: none;
+              outline: none;
+              display: inline-block;
+              position: relative;
+            }
+            .solid-checkbox:checked {
+              background: #2196f3;
+            }
+            .solid-checkbox:after {
+              content: '';
+              display: block;
+              width: 100%;
+              height: 100%;
+            }
+            .tool-input-card input:disabled {
+              background: #2a2a2a !important;
+              color: #888 !important;
+              border-color: #333 !important;
+              opacity: 0.7;
+              cursor: not-allowed;
+            }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // --- Imprint (Memory Event) Two-Panel Logic ---
+        function generateImprintId() {
+            return 'imprint-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+        }
+        let imprints = [];
+        let selectedImprintIdx = null;
+
+        function getBootromImprint() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.serviceWorker.controller) {
+                    reject('No service worker controller');
+                    return;
+                }
+                function handler(event) {
+                    if (event.data && event.data.type === 'bootrom') {
+                        navigator.serviceWorker.removeEventListener('message', handler);
+                        if (event.data.bootrom) resolve(event.data.bootrom);
+                        else reject(event.data.error || 'Unknown error');
+                    }
+                }
+                navigator.serviceWorker.addEventListener('message', handler);
+                navigator.serviceWorker.controller.postMessage({ type: 'get_bootrom' });
+            });
+        }
+
+        function loadImprintsFromStorage() {
+            const raw = localStorage.getItem('mcp_module_metadata');
+            if (raw) {
+                try {
+                    const meta = JSON.parse(raw);
+                    imprints = meta.memory_events || [];
+                } catch (e) {
+                    imprints = [];
+                }
+            } else {
+                imprints = [];
+            }
+        }
+
+        function saveImprintsToStorage() {
+            const meta = {
+                version: '1.0.0',
+                memory_events: imprints.filter(imprint => imprint.id !== 'bootrom'), // don't save bootrom
+                last_health_check: Date.now()
+            };
+            localStorage.setItem('mcp_module_metadata', JSON.stringify(meta));
+        }
+
+        function renderImprintsList() {
+            const listDiv = document.getElementById('imprintsList');
+            listDiv.innerHTML = '';
+            if (!imprints.length) {
+                listDiv.innerHTML = '<div style="color:#888;">No imprints yet.</div>';
+                return;
+            }
+            imprints.forEach((imprint, idx) => {
+                const item = document.createElement('div');
+                item.className = 'imprint-list-item' + (selectedImprintIdx === idx ? ' selected' : '');
+                item.innerHTML = `
+                    <span class="imprint-name">${imprint.name || '(no name)'}</span>
+                    <span class="imprint-timestamp">${new Date(imprint.timestamp).toLocaleString()}</span>
+                `;
+                item.onclick = () => {
+                    selectedImprintIdx = idx;
+                    renderImprintsList();
+                    renderImprintEditor();
+                };
+                listDiv.appendChild(item);
+            });
+        }
+
+        function renderImprintEditor() {
+            const editorDiv = document.getElementById('imprintEditor');
+            editorDiv.innerHTML = '';
+            if (selectedImprintIdx === null || !imprints[selectedImprintIdx]) {
+                editorDiv.innerHTML = '<div style="color:#888;">Select an imprint to edit or preview.</div>';
+                return;
+            }
+            const imprint = imprints[selectedImprintIdx];
+            if (imprint.id === 'bootrom') {
+                editorDiv.innerHTML = `
+                    <label>Name</label>
+                    <input type="text" value="${imprint.name || ''}" disabled />
+                    <label>Text</label>
+                    <textarea rows="12" disabled>${imprint.text || ''}</textarea>
+                    <label>Timestamp</label>
+                    <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
+                    <div style="color:#888;margin-top:1em;">This imprint is read-only (bootrom instructions).</div>
+                `;
+                return;
+            }
+            // Editor form
+            const form = document.createElement('form');
+            form.innerHTML = `
+                <label>Name</label>
+                <input type="text" value="${imprint.name || ''}" required id="editImprintName" />
+                <label>Text</label>
+                <textarea rows="8" id="editImprintText">${imprint.text || ''}</textarea>
+                <label>Timestamp</label>
+                <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
+                <div class="editor-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" id="deleteImprintBtn" style="color:#e74c3c;">Delete</button>
+                </div>
+            `;
+            form.onsubmit = (e) => {
+                e.preventDefault();
+                const newName = form.querySelector('#editImprintName').value.trim();
+                const newText = form.querySelector('#editImprintText').value;
+                if (!newName) {
+                    alert('Imprint name is required.');
+                    return;
+                }
+                imprints[selectedImprintIdx].name = newName;
+                imprints[selectedImprintIdx].text = newText;
+                saveImprintsToStorage();
+                renderImprintsList();
+                renderImprintEditor();
+            };
+            form.querySelector('#deleteImprintBtn').onclick = () => {
+                if (confirm('Delete this imprint?')) {
+                    imprints.splice(selectedImprintIdx, 1);
+                    selectedImprintIdx = null;
+                    saveImprintsToStorage();
+                    renderImprintsList();
+                    renderImprintEditor();
+                }
+            };
+            editorDiv.appendChild(form);
+        }
+
+        // Add Imprint button logic
+        const addImprintBtn = document.getElementById('addImprintBtn');
+        if (addImprintBtn) {
+            addImprintBtn.onclick = () => {
+                const newImprint = {
+                    id: generateImprintId(),
+                    name: 'Untitled Imprint',
+                    text: '',
+                    timestamp: Date.now()
+                };
+                imprints.push(newImprint);
+                saveImprintsToStorage();
+                selectedImprintIdx = imprints.length - 1;
+                renderImprintsList();
+                renderImprintEditor();
+            };
+        }
+
+        // Initial load
+        if (document.getElementById('imprintsList')) {
+            getBootromImprint()
+                .then(bootrom => {
+                    loadImprintsFromStorage();
+                    imprints = imprints.filter(imprint => imprint.id !== 'bootrom');
+                    imprints.unshift(bootrom);
+                    renderImprintsList();
+                    renderImprintEditor();
+                })
+                .catch(err => {
+                    loadImprintsFromStorage();
+                    renderImprintsList();
+                    renderImprintEditor();
+                });
+        }
+
+        // --- CBus Tap Config Persistence ---
+        function loadCbusTapConfig() {
+            const raw = localStorage.getItem('cbusTapConfig');
+            if (!raw) return null;
+            try {
+                return JSON.parse(raw);
+            } catch (e) {
+                return null;
+            }
+        }
+        function saveCbusTapConfig(config) {
+            localStorage.setItem('cbusTapConfig', JSON.stringify(config));
+        }
+        function saveCurrentTapConfig() {
+            saveCbusTapConfig({
+                serverUrl: chatSelectedServerUrl,
+                toolName: chatSelectedTool?.name,
+                args: chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema),
+                connectedStringArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'string') || null,
+                connectedArrayArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'array') || null
+            });
+        }
+        // --- CBus Tap Card Logic ---
+        function renderTapServerSelect() {
+            const select = document.getElementById('chatServerSelect');
+            if (!select) return;
+            const tapConfig = loadCbusTapConfig() || {};
+            renderServerSelect(select, tapConfig.serverUrl || chatSelectedServerUrl, chatShell.servers || {});
+            chatSelectedServerUrl = select.value;
+        }
+        function renderTapToolSelect() {
+            const select = document.getElementById('chatToolSelect');
+            if (!select) return;
+            const tapConfig = loadCbusTapConfig() || {};
+            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            select.innerHTML = '';
+            tools.forEach((tool, idx) => {
+                const opt = document.createElement('option');
+                opt.value = tool.name;
+                opt.textContent = tool.name;
+                select.appendChild(opt);
+            });
+            // Restore tool selection from config if possible
+            if (tools.length > 0) {
+                let toolToSelect = tools[0];
+                if (tapConfig.toolName) {
+                    const found = tools.find(t => t.name === tapConfig.toolName);
+                    if (found) toolToSelect = found;
+                }
+                select.value = toolToSelect.name;
+                chatSelectedTool = toolToSelect;
+                renderTapToolConfig(toolToSelect);
+            } else {
+                chatSelectedTool = null;
+                renderTapToolConfig(null);
+            }
+        }
+        function renderTapToolConfig(tool) {
+            const form = document.getElementById('chatToolConfigForm');
+            form.innerHTML = '';
+            chatToolAssignUserMessage = {};
+            if (!tool) return;
+            const schema = tool.inputSchema || tool.input_schema;
+            const tapConfig = loadCbusTapConfig() || {};
+            if (schema && schema.properties) {
+                Object.entries(schema.properties).forEach(([key, prop]) => {
+                    const isRequired = (schema.required || []).includes(key);
+                    let inputCard;
+                    if (prop.type === 'string') {
+                        inputCard = document.createElement('div');
+                        inputCard.className = 'tool-input-card';
+                        let label = `<label><strong>${key}</strong> (string)`;
+                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                        label += '</label><br>';
+                        inputCard.innerHTML = `${label}
+                            <input type="text" name="${key}" />
+                            <span class="cbus-checkbox-label" style="margin-left:0.5em;">
+                                <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" />
+                                <span class="cbus-checkbox-text">Target For message</span>
+                            </span>
+                            <div class="cbus-message-warning" style="color:#f44336;font-size:0.9em;display:none;margin-top:0.3em;"></div>`;
+                        setTimeout(() => {
+                            const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
+                            const cb = inputCard.querySelector('.assign-cbus-string[data-field="' + key + '"]');
+                            const warn = inputCard.querySelector('.cbus-message-warning');
+                            // Restore value from config if present
+                            let value = (tapConfig.args && tapConfig.args[key]) || '';
+                            input.value = value;
+                            // Restore checkbox from config
+                            if (tapConfig.connectedStringArg === key) {
+                                cb.checked = true;
+                                chatToolAssignUserMessage[key] = true;
+                            }
+                            // UX logic for enabling/disabling and warning
+                            function updateInputState() {
+                                if (cb.checked) {
+                                    if (!input.value) {
+                                        input.value = '{{cbus_message}}';
+                                    }
+                                    if (input.value.includes('{{cbus_message}}')) {
+                                        input.disabled = true;
+                                        warn.textContent = '';
+                                        warn.style.display = 'none';
+                                    } else {
+                                        input.disabled = false;
+                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.style.display = '';
+                                    }
+                                } else {
+                                    input.disabled = false;
+                                    warn.textContent = '';
+                                    warn.style.display = 'none';
+                                }
+                            }
+                            cb.onchange = () => {
+                                // Only one string field can be connected
+                                Object.keys(chatToolAssignUserMessage).forEach(k => {
+                                    if (k !== key && schema.properties[k]?.type === 'string') chatToolAssignUserMessage[k] = false;
+                                });
+                                if (cb.checked) {
+                                    if (!input.value) {
+                                        input.value = '{{cbus_message}}';
+                                    }
+                                    if (!input.value.includes('{{cbus_message}}')) {
+                                        // Prevent checking, show warning, keep input enabled
+                                        cb.checked = false;
+                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.style.display = '';
+                                        input.disabled = false;
+                                        chatToolAssignUserMessage[key] = false;
+                                        return;
+                                    }
+                                    // Uncheck all other checkboxes
+                                    document.querySelectorAll('.assign-cbus-string').forEach(otherCb => {
+                                        if (otherCb !== cb) otherCb.checked = false;
+                                    });
+                                    chatToolAssignUserMessage[key] = true;
+                                } else {
+                                    // If the value is exactly '{{cbus_message}}', clear it
+                                    if (input.value.trim() === '{{cbus_message}}') {
+                                        input.value = '';
+                                    }
+                                    chatToolAssignUserMessage[key] = false;
+                                }
+                                updateInputState();
+                                onConnectToCbusChanged(key, cb.checked);
+                                saveCurrentTapConfig();
+                            };
+                            input.addEventListener('input', () => {
+                                updateInputState();
+                                saveCurrentTapConfig();
+                            });
+                            updateInputState();
+                        }, 0);
+                    } else if (prop.type === 'array') {
+                        inputCard = document.createElement('div');
+                        inputCard.className = 'tool-input-card';
+                        let label = `<label><strong>${key}</strong> (array)`;
+                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
+                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
+                        label += '</label><br>';
+                        inputCard.innerHTML = `${label}
+                            <span class="cbus-checkbox-label">
+                                <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" />
+                                <span class="cbus-checkbox-text">Target For [context]</span>
+                            </span>
+                            <div style="font-size:0.9em;color:#aaa;margin-top:0.3em;">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
+                        setTimeout(() => {
+                            const cb = inputCard.querySelector('.assign-cbus-array[data-field="' + key + '"]');
+                            if (tapConfig.connectedArrayArg === key) {
+                                cb.checked = true;
+                                chatToolAssignUserMessage[key] = true;
+                            }
+                            if (cb) {
+                                cb.onchange = () => {
+                                    // Only one array field can be connected
+                                    Object.keys(chatToolAssignUserMessage).forEach(k => {
+                                        if (k !== key && schema.properties[k]?.type === 'array') chatToolAssignUserMessage[k] = false;
+                                    });
+                                    chatToolAssignUserMessage[key] = cb.checked;
+                                    if (cb.checked) {
+                                        document.querySelectorAll('.assign-cbus-array').forEach(otherCb => {
+                                            if (otherCb !== cb) otherCb.checked = false;
+                                        });
+                                    }
+                                    onConnectToCbusChanged(key, cb.checked);
+                                    saveCurrentTapConfig();
+                                };
+                            }
+                        }, 0);
+                    } else {
+                        inputCard = chatShell.renderInputField(key, prop, isRequired);
+                    }
+                    form.appendChild(inputCard);
+                });
+            }
+            form.oninput = () => {
+                chatToolConfig = chatShell.serializeToolForm(form, schema);
+                saveCurrentTapConfig();
+            };
+            chatToolConfig = chatShell.serializeToolForm(form, schema);
+        }
+        // --- Event listeners for Tap card ---
+        const chatServerSelect = document.getElementById('chatServerSelect');
+        chatServerSelect.addEventListener('change', function() {
+            chatSelectedServerUrl = this.value;
+            renderTapToolSelect();
+            saveCurrentTapConfig();
+        });
+        const chatToolSelect = document.getElementById('chatToolSelect');
+        chatToolSelect.addEventListener('change', function() {
+            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            const tool = tools.find(t => t.name === this.value);
+            chatSelectedTool = tool;
+            renderTapToolConfig(tool);
+            saveCurrentTapConfig();
+        });
+        // Initial render for Tap card
+        renderTapServerSelect();
+        renderTapToolSelect();
+        renderTapToolConfig(chatSelectedTool);
+        // Subscribe to the CBus queue on page load (fix typo)
+        if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
+        }
+
+        // --- MCP Page Logic ---
+        function renderMcpServerSelect() {
+            const select = document.getElementById('mcpServerSelect');
+            if (!select) return;
+            renderServerSelect(select, chatShell.selectedServerUrl, chatShell.servers || {});
+            // Update chatShell.selectedServerUrl to match select value
+            chatShell.selectedServerUrl = select.value;
+        }
+        // Replace all calls to renderChatServerSelect() with the appropriate new function
+        // For CBus Tap card: renderTapServerSelect()
+        // For MCP page: renderMcpServerSelect()
+        // Initial render for MCP page
+        if (document.getElementById('mcpServerSelect')) {
+            renderMcpServerSelect();
+        }
+
+        function onConnectToCbusChanged(field, checked) {
+            console.log("onConnectToCbusChanged: " + field + " " + checked);
+        }
+
+        function renderServerSelect(selectElement, selectedServerUrl, servers) {
+            selectElement.innerHTML = '';
+            const serverUrls = Object.keys(servers);
+            serverUrls.forEach(url => {
+                const opt = document.createElement('option');
+                opt.value = url;
+                opt.textContent = servers[url].alias || servers[url].name || url;
+                selectElement.appendChild(opt);
+            });
+            // Default to first server or previous selection
+            if (serverUrls.length > 0) {
+                if (!selectedServerUrl || !servers[selectedServerUrl]) {
+                    selectElement.value = serverUrls[0];
+                } else {
+                    selectElement.value = selectedServerUrl;
+                }
+            }
+        }
+
+        // --- Robust CBus Subscription ---
+        function subscribeToCbus() {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
+            } else {
+                // Wait for the SW to become active, then subscribe
+                navigator.serviceWorker.addEventListener('controllerchange', function() {
+                    if (navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
+                    }
+                }, { once: true });
+            }
+        }
+        // Subscribe on page load
+        subscribeToCbus();
+        // Subscribe again when switching to Console tab
+        const consoleTabBtn = document.getElementById('consoleTabBtn');
+        if (consoleTabBtn) {
+            consoleTabBtn.addEventListener('click', function() {
+                subscribeToCbus();
+            });
+        }
+
+        // Add a no-op renderToolResultCard to prevent ReferenceError
+        function renderToolResultCard(data) {
+            console.log("renderToolResultCard");
+            console.log(JSON.stringify(data));
+            // No-op: intentionally left blank to prevent errors
+        }
+
+        function sendTapConfigToServiceWorker() {
+            const tapConfig = loadCbusTapConfig();
+            if (tapConfig && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'set_tap_config',
+                    tapConfig
+                });
+            }
+        }
+
+        // Send on page load if SW is already controlling
+        if (navigator.serviceWorker.controller) {
+            sendTapConfigToServiceWorker();
+        }
+
+        // Also send when the SW takes control (first activation)
+        navigator.serviceWorker.oncontrollerchange = () => {
+            sendTapConfigToServiceWorker();
+        };
     </script>
 
     <!-- Styles moved to styles.css -->
