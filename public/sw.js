@@ -4,7 +4,6 @@ let isRunning = true;
 let uptimeInterval = null;
 let isDebugMode = true;
 let isInitializing = false;
-let cbusQueue = [];
 
 // --- TAP Config Storage ---
 let currentTapConfig = {};
@@ -434,8 +433,6 @@ self.addEventListener('message', async (event) => {
                     timestamp: Date.now(),
                     engramId: message.engramId || null
                 };
-                cbusQueue.push(msg);
-                if (cbusQueue.length > 1000) cbusQueue.shift();
                 broadcastToClients({
                     type: 'cbus_message',
                     message: msg
@@ -698,8 +695,6 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
             timestamp: Date.now(),
             engramId: message.engramId || null
         };
-        cbusQueue.push(toolMsg);
-        if (cbusQueue.length > 1000) cbusQueue.shift();
         // Only send cbus_message to the correct client/engram
         if (message.engramId && message.requestId) {
             sendToEngramClient(message.engramId, { type: 'cbus_message', message: toolMsg });
