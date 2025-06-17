@@ -172,6 +172,9 @@ async function persistEngramMessage(msg) {
     }
 }
 
+// --- MCP Servers Index ---
+const mcpServersIndex = {};
+
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
     const message = event.data;
@@ -363,10 +366,13 @@ self.addEventListener('message', async (event) => {
                 if (parsedResult.error) {
                     throw new Error(`Failed to list tools: ${parsedResult.error.message}`);
                 }
+                // Update mcpServersIndex to match client structure
+                if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
+                mcpServersIndex[url].tools = parsedResult.result.tools;
                 broadcastToClients({
                     type: 'tools_list',
                     tools: parsedResult.result.tools,
-                    url // include the url for UI sync
+                    url,
                 });
             } catch (error) {
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'Error listing tools:', data: error });
@@ -489,6 +495,12 @@ self.addEventListener('message', async (event) => {
             if (Array.isArray(message.imprints)) {
                 currentImprints = message.imprints;
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Updated memory/imprints', data: { count: currentImprints.length, imprints: currentImprints } });
+            }
+            break;
+        case 'init_mcp_servers_index':
+            if (message.servers && typeof message.servers === 'object') {
+                Object.assign(mcpServersIndex, message.servers);
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Initialized mcpServersIndex from client', data: { keys: Object.keys(mcpServersIndex) } });
             }
             break;
         default:
@@ -655,6 +667,11 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
                     engramMessages.unshift({ text: imprint.text, role: 'memory', timestamp: Date.now() });
                 }
             }
+
+            // insert a json encoded servers list
+            engramMessages.unshift({ text: JSON.stringify(mcpServersIndex), role: 'memory', timestamp: Date.now() });
+
+
             // Insert bootrom if it exists and has text
             const bootrom = memory[0];
             if (bootrom && typeof bootrom.text === 'string' && bootrom.text.trim()) {

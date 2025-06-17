@@ -2101,6 +2101,19 @@
         navigator.serviceWorker.oncontrollerchange = () => {
             sendTapConfigToServiceWorker();
         };
+
+        function getServersFromLocalStorage() {
+            const raw = localStorage.getItem('servers');
+            return raw ? JSON.parse(raw) : {};
+        }
+
+        // After service worker registration and activation:
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'init_mcp_servers_index',
+                servers: getServersFromLocalStorage()
+            });
+        }
     </script>
 
     <!-- Styles moved to styles.css -->
