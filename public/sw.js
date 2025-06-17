@@ -637,6 +637,61 @@ function extractToolResponseText(parsedResult) {
     return '[No content]';
 }
 
+// --- JSON-RPC Extraction Helper ---
+/**
+ * Extracts all JSON-RPC objects from code blocks in a text blob (handles escaped quotes).
+ * Returns an array of parsed JSON objects.
+ */
+function extractJsonRpcCalls(text) {
+    const results = [];
+    if (!text || typeof text !== 'string') return results;
+    // Regex to match ```json ... ``` or ``` ... ```
+    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let match;
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+        let code = match[1].trim();
+        // Try to unescape if needed (handles double-escaped quotes)
+        try {
+            // Try as-is
+            let obj = JSON.parse(code);
+            if (obj && obj.jsonrpc === '2.0' && typeof obj.method === 'string') {
+                results.push(obj);
+                continue;
+            }
+        } catch (e) {}
+        try {
+            // Try unescaping quotes (for escaped JSON in markdown)
+            let unescaped = code.replace(/\\"/g, '"');
+            let obj = JSON.parse(unescaped);
+            if (obj && obj.jsonrpc === '2.0' && typeof obj.method === 'string') {
+                results.push(obj);
+            }
+        } catch (e) {}
+    }
+    return results;
+}
+
+// --- Tool Call Dispatch Helper ---
+async function maybeCallExtractedTool(jsonRpcObj, engramId, tapConfig) {
+    // Prevent tool loop: don't call back to the tap target
+    if (tapConfig && tapConfig.toolName && jsonRpcObj.method === tapConfig.toolName) {
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Skipping tool call to avoid loop', data: { method: jsonRpcObj.method } });
+        return;
+    }
+    // Only handle tool calls (method should match a known tool)
+    // You can add more business logic here
+    if (jsonRpcObj && jsonRpcObj.method && jsonRpcObj.jsonrpc === '2.0') {
+        // Dispatch as a tool call
+        // You may want to map method to a server/tool here
+        // For now, just log and broadcast
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'INFO', message: '[SW] Dispatching extracted tool call', data: jsonRpcObj });
+        // TODO: Actually dispatch tool call (e.g., call handleToolCall or similar)
+        // Example: await handleToolCall({ source: 'extracted', tapConfig: null, message: { ...jsonRpcObj, engramId }, event: null, engramMessages: null, memory: null });
+        // For now, just broadcast to clients for visibility
+        broadcastToClients({ type: 'extracted_tool_call', engramId, toolCall: jsonRpcObj });
+    }
+}
+
 // --- Unified Tool Call Handler ---
 /**
  * Handles all tool calls, routing results to the correct output.
@@ -728,9 +783,16 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     } catch (e) {
         parsedResult = { text: '[Tool returned invalid JSON]' };
     }
+    // --- Extract and dispatch tool calls from tool output ---
+    let toolText = extractToolResponseText(parsedResult);
+    let extractedCalls = extractJsonRpcCalls(toolText);
+    if (Array.isArray(extractedCalls) && extractedCalls.length > 0) {
+        for (const call of extractedCalls) {
+            await maybeCallExtractedTool(call, message.engramId || null, tapConfig);
+        }
+    }
     // For tap/auto, also create a cbus_message and persist
     if (source === 'tap') {
-        const toolText = extractToolResponseText(parsedResult);
         const toolMsg = {
             text: toolText,
             role: 'tool',
