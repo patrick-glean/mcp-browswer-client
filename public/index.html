@@ -1644,6 +1644,15 @@
             }
         }
 
+        function syncImprintsToServiceWorker() {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'update_memory',
+                    imprints: imprints
+                });
+            }
+        }
+
         function saveImprintsToStorage() {
             const meta = {
                 version: '1.0.0',
@@ -1651,6 +1660,7 @@
                 last_health_check: Date.now()
             };
             localStorage.setItem('mcp_module_metadata', JSON.stringify(meta));
+            syncImprintsToServiceWorker();
         }
 
         function renderImprintsList() {
@@ -1723,6 +1733,7 @@
                 saveImprintsToStorage();
                 renderImprintsList();
                 renderImprintEditor();
+                syncImprintsToServiceWorker();
             };
             form.querySelector('#deleteImprintBtn').onclick = () => {
                 if (confirm('Delete this imprint?')) {
@@ -1731,6 +1742,7 @@
                     saveImprintsToStorage();
                     renderImprintsList();
                     renderImprintEditor();
+                    syncImprintsToServiceWorker();
                 }
             };
             editorDiv.appendChild(form);
@@ -1751,6 +1763,7 @@
                 selectedImprintIdx = imprints.length - 1;
                 renderImprintsList();
                 renderImprintEditor();
+                syncImprintsToServiceWorker();
             };
         }
 
@@ -1763,11 +1776,13 @@
                     imprints.unshift(bootrom);
                     renderImprintsList();
                     renderImprintEditor();
+                    syncImprintsToServiceWorker();
                 })
                 .catch(err => {
                     loadImprintsFromStorage();
                     renderImprintsList();
                     renderImprintEditor();
+                    syncImprintsToServiceWorker();
                 });
         }
 

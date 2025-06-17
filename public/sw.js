@@ -8,6 +8,9 @@ let isInitializing = false;
 // --- TAP Config Storage ---
 let currentTapConfig = {};
 
+// --- Memory/Imprints Store ---
+let currentImprints = [];
+
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
 
@@ -398,7 +401,7 @@ self.addEventListener('message', async (event) => {
                 break;
             }
             // Only use message.tapConfig if present, do NOT fall back to currentTapConfig
-            await handleToolCall({ source: 'console', tapConfig: message.tapConfig, message, event });
+            await handleToolCall({ source: 'console', tapConfig: message.tapConfig, message, event, memory: currentImprints });
             break;
         case 'get_bootrom':
             if (!wasmInstance) {
@@ -446,7 +449,7 @@ self.addEventListener('message', async (event) => {
                     if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
                         // Load full engram history
                         const { messages: engramMessages = [] } = await handleOp('load', msg.engramId, null) || {};
-                        await handleToolCall({ source: 'tap', tapConfig, message: msg, engramMessages });
+                        await handleToolCall({ source: 'tap', tapConfig, message: msg, engramMessages, memory: currentImprints });
                     }
                 } catch (err) {
                     debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'CBus Tap tool call failed', data: { error: err.message } });
@@ -482,6 +485,12 @@ self.addEventListener('message', async (event) => {
             currentTapConfig = message.tapConfig || {};
             debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Received TAP config from client', data: currentTapConfig });
             return;
+        case 'update_memory':
+            if (Array.isArray(message.imprints)) {
+                currentImprints = message.imprints;
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Updated memory/imprints', data: { count: currentImprints.length, imprints: currentImprints } });
+            }
+            break;
         default:
             console.warn('Unknown message type:', message.type);
     }
@@ -625,18 +634,34 @@ function extractToolResponseText(parsedResult) {
  * @param {Object} opts.message - The original message triggering the call.
  * @param {Object} opts.event - The event (for client routing).
  * @param {Array} [opts.engramMessages] - Engram history (if any).
+ * @param {Array} [opts.memory] - Memory/imprints (if any).
  */
-async function handleToolCall({ source, tapConfig, message, event, engramMessages }) {
+async function handleToolCall({ source, tapConfig, message, event, engramMessages, memory }) {
     // Use only tapConfig for all tool call parameters
     const toolArgs = { ...(tapConfig.args || {}) };
     const connectedStringArg = tapConfig.connectedStringArg;
     const connectedArrayArg = tapConfig.connectedArrayArg;
-    // Prepare engram messages if needed
     if ((connectedStringArg || connectedArrayArg) && message.engramId) {
         if (!engramMessages) {
             const loaded = await handleOp('load', message.engramId, null) || {};
             engramMessages = loaded.messages || [];
         }
+
+        // Hardened memory injection
+        if (Array.isArray(memory) && memory.length > 0) {
+            // Insert all imprints except the first (bootrom) as memory messages
+            for (const imprint of memory.slice(1)) {
+                if (imprint && typeof imprint.text === 'string' && imprint.text.trim()) {
+                    engramMessages.unshift({ text: imprint.text, role: 'memory', timestamp: Date.now() });
+                }
+            }
+            // Insert bootrom if it exists and has text
+            const bootrom = memory[0];
+            if (bootrom && typeof bootrom.text === 'string' && bootrom.text.trim()) {
+                engramMessages.unshift({ text: bootrom.text, role: 'memory', timestamp: Date.now() });
+            }
+        }
+
         if (engramMessages.length === 1) {
             if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
             if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
