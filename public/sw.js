@@ -722,7 +722,9 @@ async function maybeCallExtractedTool(toolCall, engramId) {
             return;
         }
         const { serverUrl, tool } = found;
-        const tapConfig = buildTapConfigForTool(serverUrl, tool);
+        // Extract args from toolCall.params
+        const args = toolCall.params || {};
+        const tapConfig = { ...buildTapConfigForTool(serverUrl, tool), args };
 
         try {
             debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] About to execute tool call', data: { toolCall, tapConfig } });
