@@ -11,6 +11,12 @@ let currentTapConfig = {};
 // --- Memory/Imprints Store ---
 let currentImprints = [];
 
+// --- MCP Servers Index ---
+const mcpServersIndex = {};
+
+// --- Tool Call Circuit Breaker ---
+const toolCallHistory = {}; // { engramId: [timestamps] }
+
 const VERSION = '1.0.0';
 const BUILD_TIME = new Date().toISOString();
 
@@ -172,8 +178,19 @@ async function persistEngramMessage(msg) {
     }
 }
 
-// --- MCP Servers Index ---
-const mcpServersIndex = {};
+
+
+
+function shouldBreakCircuit(engramId) {
+    const now = Date.now();
+    if (!engramId) return false;
+    if (!toolCallHistory[engramId]) toolCallHistory[engramId] = [];
+    // Keep only timestamps from the last 10 seconds
+    toolCallHistory[engramId] = toolCallHistory[engramId].filter(ts => now - ts < 10000);
+    if (toolCallHistory[engramId].length >= 3) return true; // max 3 calls per 10s
+    toolCallHistory[engramId].push(now);
+    return false;
+}
 
 // Handle messages from clients
 self.addEventListener('message', async (event) => {
@@ -503,6 +520,13 @@ self.addEventListener('message', async (event) => {
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Initialized mcpServersIndex from client', data: { keys: Object.keys(mcpServersIndex) } });
             }
             break;
+        case 'extracted_tool_call': {
+            // message.toolCall (the JSON-RPC object), message.engramId, message.tapConfig
+            const toolCall = message.toolCall;
+            const engramId = message.engramId || null;
+            await maybeCallExtractedTool(toolCall, engramId);
+            break;
+        }
         default:
             console.warn('Unknown message type:', message.type);
     }
@@ -672,23 +696,56 @@ function extractJsonRpcCalls(text) {
 }
 
 // --- Tool Call Dispatch Helper ---
-async function maybeCallExtractedTool(jsonRpcObj, engramId, tapConfig) {
-    // Prevent tool loop: don't call back to the tap target
-    if (tapConfig && tapConfig.toolName && jsonRpcObj.method === tapConfig.toolName) {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Skipping tool call to avoid loop', data: { method: jsonRpcObj.method } });
+async function maybeCallExtractedTool(toolCall, engramId) {
+    // Circuit breaker: prevent rapid-fire loops
+    if (shouldBreakCircuit(engramId)) {
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'WARN', message: '[SW] Circuit breaker: too many tool calls, skipping', data: { engramId } });
+        broadcastToClients({
+            type: 'tool_result',
+            error: 'Circuit breaker: too many tool calls in a short period',
+            engramId,
+            source: 'extracted'
+        });
         return;
     }
-    // Only handle tool calls (method should match a known tool)
-    // You can add more business logic here
-    if (jsonRpcObj && jsonRpcObj.method && jsonRpcObj.jsonrpc === '2.0') {
-        // Dispatch as a tool call
-        // You may want to map method to a server/tool here
-        // For now, just log and broadcast
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'INFO', message: '[SW] Dispatching extracted tool call', data: jsonRpcObj });
-        // TODO: Actually dispatch tool call (e.g., call handleToolCall or similar)
-        // Example: await handleToolCall({ source: 'extracted', tapConfig: null, message: { ...jsonRpcObj, engramId }, event: null, engramMessages: null, memory: null });
-        // For now, just broadcast to clients for visibility
-        broadcastToClients({ type: 'extracted_tool_call', engramId, toolCall: jsonRpcObj });
+    if (toolCall && toolCall.method && toolCall.jsonrpc === '2.0') {
+        // Find the tool and server
+        const found = findToolAndServerByMethod(toolCall.method);
+        if (!found) {
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] Tool not found for extracted tool call', data: { method: toolCall.method } });
+            broadcastToClients({
+                type: 'tool_result',
+                error: `Tool not found: ${toolCall.method}`,
+                engramId,
+                source: 'extracted'
+            });
+            return;
+        }
+        const { serverUrl, tool } = found;
+        const tapConfig = buildTapConfigForTool(serverUrl, tool);
+
+        try {
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] About to execute tool call', data: { toolCall, tapConfig } });
+            await handleToolCall({
+                source: 'extracted',
+                tapConfig,
+                message: { ...toolCall, engramId },
+                event: null,
+                engramMessages: null,
+                memory: null
+            });
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Tool call executed', data: { toolCall, tapConfig } });
+        } catch (err) {
+            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] Error dispatching extracted tool call', data: { error: err.message, toolCall } });
+            broadcastToClients({
+                type: 'tool_result',
+                error: err.message,
+                engramId,
+                source: 'extracted'
+            });
+        }
+    } else {
+        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] No tool call found in extracted_tool_call', data: { toolCall } });
     }
 }
 
@@ -783,16 +840,9 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     } catch (e) {
         parsedResult = { text: '[Tool returned invalid JSON]' };
     }
-    // --- Extract and dispatch tool calls from tool output ---
     let toolText = extractToolResponseText(parsedResult);
-    let extractedCalls = extractJsonRpcCalls(toolText);
-    if (Array.isArray(extractedCalls) && extractedCalls.length > 0) {
-        for (const call of extractedCalls) {
-            await maybeCallExtractedTool(call, message.engramId || null, tapConfig);
-        }
-    }
     // For tap/auto, also create a cbus_message and persist
-    if (source === 'tap') {
+    if (source === 'tap' || source === 'extracted') {
         const toolMsg = {
             text: toolText,
             role: 'tool',
@@ -824,4 +874,34 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     } else {
         broadcastToClients(resultMsg);
     }
+
+    // --- Extract and dispatch tool calls from tool output ---
+    let extractedCalls = extractJsonRpcCalls(toolText);
+    if (Array.isArray(extractedCalls) && extractedCalls.length > 0) {
+        for (const call of extractedCalls) {
+            await maybeCallExtractedTool(call, message.engramId || null);
+        }
+    }
+}
+
+// --- Tool/Server Lookup Helper ---
+function findToolAndServerByMethod(method) {
+    for (const [url, server] of Object.entries(mcpServersIndex)) {
+        if (server.tools && Array.isArray(server.tools)) {
+            const tool = server.tools.find(t => t.name === method);
+            if (tool) {
+                return { serverUrl: url, tool };
+            }
+        }
+    }
+    return null;
+}
+
+// --- TapConfig Builder ---
+function buildTapConfigForTool(serverUrl, tool) {
+    return {
+        serverUrl,
+        toolName: tool.name,
+        // Optionally: add connectedStringArg, connectedArrayArg, etc.
+    };
 }

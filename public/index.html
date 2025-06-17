@@ -664,6 +664,9 @@
                         // print out tool config from local storage
                         // No-op: handled elsewhere, suppress warning
                         break;
+                    case 'extracted_tool_call':
+                        // No-op: handled elsewhere, suppress warning
+                        break;
                     default:
                         console.warn('Unknown message type:', message.type);
                 }
