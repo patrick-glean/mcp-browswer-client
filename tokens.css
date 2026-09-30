@@ -1,0 +1,97 @@
+/*
+ * Design tokens from the Glean UI kit, trimmed to the ones this app uses.
+ * Light applies at :root and inside .light-theme; dark applies inside .dark-theme.
+ * Always style with these variables (never raw values) so both themes keep working.
+ */
+
+:root {
+  --font-body: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-heading: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-mono: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+
+  --radius-100: 4px;
+  --radius-200: 8px;
+  --radius-300: 12px;
+  --radius-400: 16px;
+  --radius-600: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 8px 8px -4px rgba(0, 0, 0, 0.15), 0 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+:root,
+.light-theme {
+  --theme-alternate: #ffffff;
+  --theme-background: #fff;
+  --theme-background-dark: #bdbdbd;
+  --theme-background-light: #f6f6f6;
+  --theme-background-mid: #f0f0f0;
+  --theme-border-dark: #ccc;
+  --theme-border-light: #e5e5e5;
+  --theme-button-secondary-destructive-border: var(--theme-border-dark);
+  --theme-disabled: rgba(0, 0, 0, 0.25);
+  --theme-disabled-highlight: #999999;
+  --theme-error: #e02e2a;
+  --theme-error-background: #feebef;
+  --theme-error-foreground: #c22f30;
+  --theme-error-hover: #d34e4e;
+  --theme-feedback-hover: #e0e0e0;
+  --theme-foreground-light: #ffffff;
+  --theme-hover: #f0f0f0;
+  --theme-info-background: #eef0fd;
+  --theme-info-foreground: #3749bb;
+  --theme-link: #2468fa;
+  --theme-link-hover: #1b52d4;
+  --theme-neutral: #888888;
+  --theme-primary-highlight: #1b1b1b;
+  --theme-primary-hover: #404040;
+  --theme-selected: #dbdbdb;
+  --theme-success: #27ae60;
+  --theme-success-background: #f1faf2;
+  --theme-success-foreground: #359a54;
+  --theme-text-highlight-background: #aed9fc;
+  --theme-text-primary: #1b1b1b;
+  --theme-text-secondary: #727272;
+  --theme-warning-background: #fff8e5;
+  --theme-warning-dark: #fac748;
+  --theme-warning-foreground: #cc7700;
+}
+
+.dark-theme {
+  --theme-alternate: #1a1a1a;
+  --theme-background: #1a1a1a;
+  --theme-background-dark: #404040;
+  --theme-background-light: #242424;
+  --theme-background-mid: #2e2e2e;
+  --theme-border-dark: #404040;
+  --theme-border-light: #2e2e2e;
+  --theme-button-secondary-destructive-border: var(--theme-error);
+  --theme-disabled: #7e7e7e;
+  --theme-disabled-highlight: #555555;
+  --theme-error: #f39a9a;
+  --theme-error-background: #2d0909;
+  --theme-error-foreground: #f0483f;
+  --theme-error-hover: #f4a4a4;
+  --theme-feedback-hover: #444444;
+  --theme-foreground-light: #383838;
+  --theme-hover: #383838;
+  --theme-info-background: #0f1435;
+  --theme-info-foreground: #5067f6;
+  --theme-link: #6b9fff;
+  --theme-link-hover: #8db5ff;
+  --theme-neutral: #999999;
+  --theme-primary-highlight: #ffffff;
+  --theme-primary-hover: #d9d9d9;
+  --theme-selected: #4d4d4d;
+  --theme-success: #7dcea0;
+  --theme-success-background: #00180e;
+  --theme-success-foreground: #65b579;
+  --theme-text-highlight-background: #5183aa;
+  --theme-text-primary: #ffffff;
+  --theme-text-secondary: #999999;
+  --theme-warning-background: #230c00;
+  --theme-warning-dark: #e3b543;
+  --theme-warning-foreground: #f0a400;
+}

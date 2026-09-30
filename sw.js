@@ -24,6 +24,7 @@ import { handleOp, initDB, openDB } from './chatStorage.js';
 import { debugLog } from './logger.js';
 import {
     checkWasm,
+    ensureWasm,
     initializeWasm,
     reloadWasm,
     unloadWasm,
@@ -67,66 +68,44 @@ function broadcastWasmStatus(wasmState) {
 }
 
 
-// MCP Message Handler class
-class MCPMessageHandler {
-    constructor() {
-        this.debugMode = false;
-    }
+// --- MCP client helpers ---
 
-    setDebugMode(enabled) {
-        this.debugMode = enabled;
-    }
-
-    async handleMessage(message) {
-        try {
-            wasmInstance = getWasmInstance();
-            if (!wasmInstance) {
-                throw new Error('WASM module not initialized');
-            }
-
-            const response = await wasmInstance.handle_message(message);
-            const parsedResponse = JSON.parse(response);
-            
-            // Forward WASM logs to UI
-            if (parsedResponse.logs) {
-                parsedResponse.logs.forEach(log => {
-                    broadcastToClients({
-                        type: 'log',
-                        content: {
-                            level: log.level || 'INFO',
-                            message: log.message,
-                            timestamp: log.timestamp || new Date().toISOString()
-                        }
-                    });
-                });
-            }
-            
-            // If this is a health check response, verify the status
-            if (parsedResponse.result && parsedResponse.result.status) {
-                const isHealthy = parsedResponse.result.status === 'healthy';
-                broadcastToClients({
-                    type: 'mcp_status',
-                    healthy: isHealthy
-                });
-            }
-            
-            return response;
-        } catch (error) {
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'MCP message handling failed', data: { error: error.message } });
-            return JSON.stringify({
-                jsonrpc: '2.0',
-                error: {
-                    code: -32000,
-                    message: error.message
-                }
-            });
-        }
-    }
+// Options for the WASM MCP client. The bearer token comes with the message, or from the
+// server list the page last sent.
+function mcpOptions(url, message = {}, extra = {}) {
+    const bearerToken = message.bearerToken ?? mcpServersIndex[url]?.bearerToken;
+    return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...extra });
 }
 
-// Initialize MCP message handler
-const mcpHandler = new MCPMessageHandler();
-mcpHandler.setDebugMode(isDebugMode);
+// WASM MCP calls reject with a JSON McpError: {kind, message, status?, code?, data?}.
+function mcpError(error) {
+    if (typeof error === 'string') {
+        try {
+            return JSON.parse(error);
+        } catch {
+            return { kind: 'internal', message: error };
+        }
+    }
+    return { kind: 'internal', message: error?.message || String(error) };
+}
+
+function broadcastLog(level, message) {
+    broadcastToClients({
+        type: 'log',
+        content: { level, message, timestamp: new Date().toISOString() }
+    });
+}
+
+function broadcastMcpError(url, action, error) {
+    broadcastToClients({ type: 'mcp_server_error', url, action, error });
+    const what = action === 'list_tools' ? 'Listing tools from' : 'Connecting to';
+    broadcastLog('ERROR', `${what} ${url} failed: ${error.message}`);
+}
+
+// Messages can carry bearer tokens; keep them out of the logs the page displays.
+function redactSecrets(message) {
+    return JSON.parse(JSON.stringify(message, (key, value) => (key === 'bearerToken' && value ? '[redacted]' : value)));
+}
 
 // --- Engram NAT Table ---
 const engramNAT = new Map(); // engramId -> clientId
@@ -192,8 +171,13 @@ function shouldBreakCircuit(engramId) {
     return false;
 }
 
-// Handle messages from clients
-self.addEventListener('message', async (event) => {
+// Handle messages from clients. waitUntil keeps the worker alive until the handler finishes,
+// so a long MCP call isn't cut off when the browser would otherwise stop an idle worker.
+self.addEventListener('message', (event) => {
+    event.waitUntil(handleClientMessage(event));
+});
+
+async function handleClientMessage(event) {
     const message = event.data;
     // --- TOP LEVEL EVENT LOGGING ---
     const logObj = debugLog({
@@ -201,19 +185,13 @@ self.addEventListener('message', async (event) => {
         type: 'log',
         level: 'DEBUG',
         message: '[SW] Top-level event received',
-        data: message
+        data: redactSecrets(message)
     });
     // Broadcast log to clients
     broadcastToClients(logObj);
-    
-    // Handle MCP messages
-    if (message.jsonrpc === '2.0') {
-        const response = await mcpHandler.handleMessage(JSON.stringify(message));
-        event.source.postMessage(JSON.parse(response));
-        return;
-    }
 
-    wasmInstance = getWasmInstance();
+    const managesWasmLifecycle = ['unload_wasm', 'reload_wasm', 'stop'].includes(message.type);
+    wasmInstance = managesWasmLifecycle ? getWasmInstance() : await ensureWasm();
 
     // Handle legacy messages
     switch (message.type) {
@@ -225,110 +203,35 @@ self.addEventListener('message', async (event) => {
         case 'initialize-wasm':
             await initializeWasm();
             break;
-        case 'initialize-mcp':
+        // 'initialize-mcp' is the pre-2026 name for connecting; there's no handshake anymore
+        // unless the server turns out to be a legacy one.
+        case 'connect-mcp':
+        case 'initialize-mcp': {
+            const url = message.url;
             if (!wasmInstance) {
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: 'ERROR',
-                        message: 'Cannot initialize MCP server: WASM module not loaded',
-                        timestamp: new Date().toISOString()
-                    }
-                });
+                broadcastMcpError(url, 'connect', { kind: 'internal', message: 'The WASM module is not loaded.' });
                 break;
             }
             try {
-                const result = await wasmInstance.initialize_mcp_server(message.url);
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Raw MCP initialization result', data: { result } });
-                const parsedResult = JSON.parse(result);
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Parsed MCP initialization result', data: { 
-                    status: parsedResult.status,
-                    message: parsedResult.message,
-                    has_server_info: !!parsedResult.server_info,
-                    server_info: parsedResult.server_info
-                } });
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: parsedResult.status === 'success' ? 'INFO' : 'ERROR',
-                        message: parsedResult.message,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-                if (parsedResult.status === 'success') {
-                    broadcastToClients({
-                        type: 'mcp_server_initialized',
-                        server: parsedResult.server_info
-                    });
-                }
+                const info = JSON.parse(await wasmInstance.connect(url, mcpOptions(url, message)));
+                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Connected to MCP server', data: info });
+                broadcastToClients({ type: 'mcp_server_connected', url, info });
+                broadcastLog('INFO', `Connected to ${url} (MCP ${info.protocolVersion}, ${info.era})`);
             } catch (error) {
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: 'ERROR',
-                        message: `Failed to initialize MCP server: ${error.message}`,
-                        timestamp: new Date().toISOString()
-                    }
-                });
+                broadcastMcpError(url, 'connect', mcpError(error));
             }
             break;
-        case 'get-server-info':
-            if (!wasmInstance) {
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: 'ERROR',
-                        message: 'Cannot get server info: WASM module not loaded',
-                        timestamp: new Date().toISOString()
-                    }
-                });
-                break;
-            }
-            try {
-                const result = await wasmInstance.get_server_info();
-                const parsedResult = JSON.parse(result);
-                broadcastToClients({
-                    type: 'server_info',
-                    info: parsedResult
-                });
-            } catch (error) {
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: 'ERROR',
-                        message: `Failed to get server info: ${error.message}`,
-                        timestamp: new Date().toISOString()
-                    }
-                });
+        }
+        case 'forget-mcp':
+            if (message.url) {
+                wasmInstance?.forget_server(message.url);
+                delete mcpServersIndex[message.url];
             }
             break;
         case 'set-debug-mode':
             isDebugMode = message.enabled;
-            mcpHandler.setDebugMode(isDebugMode);
             if (wasmInstance && typeof wasmInstance.set_debug_mode === 'function') {
                 wasmInstance.set_debug_mode(isDebugMode);
-            }
-            break;
-        case 'health_check':
-            // Use proper JSON-RPC format for health check
-            const healthCheckMessage = {
-                jsonrpc: '2.0',
-                method: 'health_check',
-                params: {},
-                id: Date.now()
-            };
-            const response = await mcpHandler.handleMessage(JSON.stringify(healthCheckMessage));
-            const result = JSON.parse(response);
-            if (result.error) {
-                broadcastToClients({
-                    type: 'mcp_status',
-                    healthy: false
-                });
-            } else {
-                broadcastToClients({
-                    type: 'mcp_status',
-                    healthy: result.result.status === 'healthy'
-                });
             }
             break;
         case 'unload_wasm':
@@ -369,40 +272,34 @@ self.addEventListener('message', async (event) => {
                 }
             }
             break;
-        case 'list_tools':
+        case 'list_tools': {
+            const url = message.url;
             if (!wasmInstance) {
-                throw new Error('WASM module not initialized');
+                broadcastMcpError(url, 'list_tools', { kind: 'internal', message: 'The WASM module is not loaded.' });
+                break;
             }
             try {
-                const url = message.url || get_server_url();
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] [list_tools] Received URL:', data: url });
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Listing tools from', data: url });
-                // Let the WASM module handle the MCP protocol
-                const result = await wasmInstance.list_tools(url);
-                const parsedResult = JSON.parse(result);
-                if (parsedResult.error) {
-                    throw new Error(`Failed to list tools: ${parsedResult.error.message}`);
-                }
-                // Update mcpServersIndex to match client structure
+                const options = mcpOptions(url, message, { refresh: !!message.refresh });
+                const listing = JSON.parse(await wasmInstance.list_tools(url, options));
                 if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
-                mcpServersIndex[url].tools = parsedResult.result.tools;
+                mcpServersIndex[url].tools = listing.tools;
                 broadcastToClients({
                     type: 'tools_list',
-                    tools: parsedResult.result.tools,
                     url,
+                    tools: listing.tools,
+                    rejected: listing.rejected,
+                    ttlMs: listing.ttlMs,
+                    fromCache: listing.fromCache
                 });
+                for (const tool of listing.rejected) {
+                    broadcastLog('WARN', `Hid tool ${tool.name} from ${url}: ${tool.reason}`);
+                }
             } catch (error) {
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'Error listing tools:', data: error });
-                broadcastToClients({
-                    type: 'log',
-                    content: {
-                        level: 'ERROR',
-                        message: `Failed to list tools: ${error.message}`,
-                        timestamp: new Date().toISOString()
-                    }
-                });
+                broadcastMcpError(url, 'list_tools', mcpError(error));
             }
             break;
+        }
         case 'call_tool':
             if (!wasmInstance) {
                 // Send error to the correct client if possible
@@ -530,7 +427,7 @@ self.addEventListener('message', async (event) => {
         default:
             console.warn('Unknown message type:', message.type);
     }
-});
+}
 
 // --- Send to engram client helper ---
 function sendToEngramClient(engramId, message) {
@@ -562,70 +459,6 @@ self.addEventListener('activate', event => {
 });
 
 
-// Check MCP server health
-async function checkMcp() {
-    wasmInstance = getWasmInstance();
-    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Checking MCP server health..." });
-    if (!wasmInstance) {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Cannot check MCP: WASM module not loaded" });
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: 'ERROR',
-                message: 'Cannot check MCP server: WASM module not loaded',
-                timestamp: new Date().toISOString()
-            }
-        });
-        broadcastToClients({
-            type: 'mcp_status',
-            healthy: false
-        });
-        return;
-    }
-
-    try {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Executing MCP server health check..." });
-        const result = await wasmInstance.check_mcp_server();
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "MCP server health check result", data: { result } });
-        
-        // Parse the result to determine health status
-        const isHealthy = result === 0; // 0 means healthy in our WASM module
-        
-        // Broadcast detailed log message
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: 'INFO',
-                message: `MCP server health check completed: ${isHealthy ? 'healthy' : 'unhealthy'}`,
-                timestamp: new Date().toISOString()
-            }
-        });
-        
-        // Broadcast status
-        broadcastToClients({
-            type: 'mcp_status',
-            healthy: isHealthy
-        });
-    } catch (error) {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "MCP server health check failed", data: { 
-            error: error.message,
-            stack: error.stack
-        } });
-        broadcastToClients({
-            type: 'log',
-            content: {
-                level: 'ERROR',
-                message: `MCP server health check failed: ${error.message}`,
-                timestamp: new Date().toISOString()
-            }
-        });
-        broadcastToClients({
-            type: 'mcp_status',
-            healthy: false
-        });
-    }
-}
-
 // Broadcast message to all clients
 function broadcastToClients(message) {
     if (!isRunning) return;
@@ -649,6 +482,9 @@ function broadcastToClients(message) {
 
 // Helper to extract text from tool response
 function extractToolResponseText(parsedResult) {
+    if (parsedResult?.resultType === 'input_required') {
+        return 'The tool asked for more input, which this client does not support yet.';
+    }
     if (parsedResult && parsedResult.result && Array.isArray(parsedResult.result.content)) {
         return parsedResult.result.content.map(c => c.text || '').join('\n');
     } else if (parsedResult && Array.isArray(parsedResult.content)) {
@@ -814,15 +650,20 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[handleToolCall] Calling tool', data: { tapConfig, toolArgs, requestId: message.requestId, source } });
     let result;
     try {
+        // Only calls the page asked for directly may bring a token; calls started from chat or
+        // from tool output use the one the page registered for the server.
         result = await wasmInstance.call_tool(
             tapConfig.serverUrl,
             tapConfig.toolName,
-            toolArgs
+            JSON.stringify(toolArgs),
+            mcpOptions(tapConfig.serverUrl, source === 'console' ? message : {})
         );
     } catch (err) {
+        const error = mcpError(err);
         const errorMsg = {
             type: 'tool_result',
-            error: err.message || String(err),
+            error: error.message,
+            errorKind: error.kind,
             source,
             engramId: message.engramId || null,
             requestId: message.requestId || null
