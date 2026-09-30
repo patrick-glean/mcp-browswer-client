@@ -943,6 +943,19 @@ input[type='checkbox'] {
     pointer-events: none;
 }
 
+.server-error {
+    margin-top: 12px;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.tool-notice {
+    padding: 8px 12px;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+    font-size: 0.75rem;
+}
+
 .tool-cards-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

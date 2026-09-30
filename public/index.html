@@ -118,12 +118,11 @@
                         <div class="section-header">
                             <div>
                                 <h2>MCP servers</h2>
-                                <p class="section-subtitle">Add a server, initialize it, then list its tools.</p>
+                                <p class="section-subtitle">Add a server and connect to see its tools. Servers on MCP 2026-07-28 and older revisions both work.</p>
                             </div>
                             <div class="mcp-controls-bar">
-                                <button id="check-mcp">Check MCP</button>
-                                <button id="initProtocol">Initialize</button>
-                                <button id="listTools">List tools</button>
+                                <button id="initProtocol" class="btn-primary">Connect</button>
+                                <button id="listTools"><span class="icon icon-refresh" aria-hidden="true"></span>Refresh tools</button>
                             </div>
                         </div>
                         <div class="mcp-servers-group">
@@ -147,9 +146,12 @@
                                             <label class="field"><span class="field-label">Alias</span><span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label>
                                             <label class="field"><span class="field-label">Name</span><input type="text" id="cardServerName" disabled></label>
                                             <label class="field"><span class="field-label">Status</span><input type="text" id="cardServerStatus" disabled></label>
+                                            <label class="field"><span class="field-label">Protocol</span><input type="text" id="cardServerProtocol" disabled></label>
+                                            <label class="field"><span class="field-label">Bearer token (optional)</span><span class="autosave-input-wrap"><input type="password" id="cardServerToken" autocomplete="off" placeholder="Sent as Authorization: Bearer"><span class="autosave-checkmark" id="checkmark-cardServerToken"></span></span></label>
                                             <label class="field"><span class="field-label">Date added</span><input type="text" id="cardServerDateAdded" disabled></label>
                                             <label class="field"><span class="field-label">Date modified</span><input type="text" id="cardServerDateModified" disabled></label>
                                         </div>
+                                        <p id="cardServerError" class="server-error text-error" hidden></p>
                                         <div class="panel-actions">
                                             <!--<button id="saveServerBtn">Save</button>-->
                                             <button id="deleteServerBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete server</button>
@@ -210,14 +212,12 @@
                 this.logContainer = document.getElementById('log-container');
                 this.swStatus = document.getElementById('sw-status');
                 this.wasmStatus = document.getElementById('wasm-status');
-                this.mcpStatus = document.getElementById('mcp-status');
                 this.swUptime = document.getElementById('sw-uptime');
                 this.serviceWorker = null;
                 this.startTime = Date.now();
                 this.wasmStartTime = null;
                 this.uptimeInterval = null;
                 this.lastMcpCheck = null;
-                this.mcpCheckTimeout = null;
                 this.wasmCheckInterval = null;
                 this.checkCounter = 0;
                 this.selectedServerUrl = null;
@@ -231,7 +231,6 @@
                 // Initialize status indicators
                 this.updateSwStatus(false);
                 this.updateWasmStatus(false);
-                this.updateMcpStatus(false);
                 
                 this.setupServiceWorker();
                 this.setupEventListeners();
@@ -345,10 +344,10 @@
                             this.setupPeriodicChecks();
                         } else {
                             console.log('Waiting for service worker to activate...');
-                            // Wait for the service worker to activate
-                            registration.addEventListener('activate', () => {
+                            // Registrations don't fire 'activate'; ready resolves once a worker is active.
+                            navigator.serviceWorker.ready.then(readyRegistration => {
                                 console.log('Service worker activated');
-                                this.serviceWorker = registration.active;
+                                this.serviceWorker = readyRegistration.active;
                                 this.updateSwStatus(true);
                                 this.setupPeriodicChecks();
                             });
@@ -378,39 +377,17 @@
             setupEventListeners() {
                 const buttons = {
                     'check-wasm': () => this.checkWasm(),
-                    'check-mcp': async () => {
-                        const url = this.selectedServerUrl;
-                        if (!url) {
-                            this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
-                            return;
-                        }
-                        if (this.serviceWorker) {
-                            this.log({ level: 'INFO', message: `Checking MCP server at ${url}`, timestamp: new Date().toISOString() });
-                            await this.serviceWorker.postMessage({ type: 'health_check', url });
-                        }
-                    },
                     'unload-wasm': () => this.unloadWasm(),
                     'reload-wasm': () => this.reloadWasm(),
                     'stop-sw': () => this.stopServiceWorker(),
                     'start-sw': () => this.startServiceWorker(),
                     'listTools': async () => {
-                        // Always use the input field value if present, else selectedServerUrl
-                        let url = '';
-                        const serverUrlInput = document.getElementById('mcpServerUrl');
-                        if (serverUrlInput && serverUrlInput.value.trim()) {
-                            url = serverUrlInput.value.trim();
-                        } else {
-                            url = this.selectedServerUrl;
-                        }
-                        this.log({ level: 'DEBUG', message: `[listTools] Using URL: ${url} (selectedServerUrl: ${this.selectedServerUrl})`, timestamp: new Date().toISOString() });
+                        const url = this.selectedServerUrl;
                         if (!url) {
                             this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
                             return;
                         }
-                        if (this.serviceWorker) {
-                            this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
-                            await this.serviceWorker.postMessage({ type: 'list_tools', url });
-                        }
+                        this.requestTools(url, { refresh: true });
                     },
                     'addServerBtn': () => this.handleAddServer(),
                     'saveServerBtn': () => this.handleSaveServer(),
@@ -485,7 +462,7 @@
                 try {
                     console.log('Starting service worker...');
                     const registration = await navigator.serviceWorker.register('sw.js', { type: 'module' });
-                    this.serviceWorker = registration.active;
+                    this.serviceWorker = registration.active || (await navigator.serviceWorker.ready).active;
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
                     this.startPeriodicWasmChecks();
@@ -527,29 +504,6 @@
                         type: 'check_wasm',
                         checkId: checkId
                     });
-                }
-            }
-
-            async checkMcp() {
-                if (this.serviceWorker) {
-                    console.log('Checking MCP server...');
-                    // Set MCP status to healthy immediately
-                    this.updateMcpStatus(true);
-                    this.lastMcpCheck = Date.now();
-                    
-                    // Clear any existing timeout
-                    if (this.mcpCheckTimeout) {
-                        clearTimeout(this.mcpCheckTimeout);
-                    }
-                    
-                    // Set a timeout to mark MCP as unhealthy if no response within 5 seconds
-                    this.mcpCheckTimeout = setTimeout(() => {
-                        if (Date.now() - this.lastMcpCheck > 5000) {
-                            this.updateMcpStatus(false);
-                        }
-                    }, 5000);
-                    
-                    await this.serviceWorker.postMessage({ type: 'health_check' });
                 }
             }
 
@@ -595,15 +549,6 @@
                             message: `WASM status: ${status.healthy ? 'healthy' : 'unhealthy'} (uptime: ${formatUptime(status.uptime)})`,
                             timestamp: new Date().toISOString()
                         });
-                    } else if (message.result) {
-                        // Handle successful JSON-RPC response
-                        if (message.result.status) {
-                            this.updateMcpStatus(message.result.status === 'healthy');
-                        }
-                    } else if (message.error) {
-                        // Handle JSON-RPC error
-                        console.error('MCP error:', message.error);
-                        this.updateMcpStatus(false);
                     }
                     return;
                 }
@@ -612,9 +557,6 @@
                 switch (message.type) {
                     case 'log':
                         this.log(message.content);
-                        break;
-                    case 'mcp_status':
-                        this.updateMcpStatus(message.healthy);
                         break;
                     case 'wasm_status':
                         this.updateWasmStatus(message.healthy);
@@ -639,24 +581,11 @@
                     case 'uptime':
                         this.updateWasmUptime(message.uptime);
                         break;
-                    case 'server_info':
-                        this.updateServersList(message.info.servers);
+                    case 'mcp_server_connected':
+                        this.handleServerConnected(message.url, message.info);
                         break;
-                    case 'mcp_server_initialized':
-                        const serverName = message.server?.name || 'Unknown';
-                        this.log({ level: 'INFO', message: `Server initialized: ${serverName}`, timestamp: new Date().toISOString() });
-                        this.getServerInfo();
-                        this.updateToolsList(message.server.tools);
-                        // Update the server's name in memory and localStorage
-                        if (message.server?.url && this.servers[message.server.url]) {
-                            this.servers[message.server.url].name = message.server.name;
-                            this.servers[message.server.url].date_modified = new Date().toISOString();
-                            this.saveServers();
-                            this.updateServersList();
-                            if (this.selectedServerUrl === message.server.url) {
-                                this.showServerCard(message.server.url);
-                            }
-                        }
+                    case 'mcp_server_error':
+                        this.handleServerError(message.url, message.action, message.error);
                         break;
                     case 'wasm_initialized':
                         const initMessage = `WASM module initialized (${message.size} KB) - ${message.buildInfo}`;
@@ -670,17 +599,22 @@
                             }
                         }
                         break;
-                    case 'tools_list':
-                        this.log({ level: 'INFO', message: `Tools list received: ${JSON.stringify(message.tools)}`, timestamp: new Date().toISOString() });
-                        if (message.url && this.servers[message.url]) {
-                            this.servers[message.url].tools = message.tools;
+                    case 'tools_list': {
+                        const names = message.tools.map(tool => tool.name).join(', ') || 'none';
+                        this.log({ level: 'INFO', message: `Tools from ${message.url}: ${names}`, timestamp: new Date().toISOString() });
+                        const server = this.servers[message.url];
+                        if (server) {
+                            server.tools = message.tools;
+                            server.rejectedTools = message.rejected || [];
                             this.saveServers();
                         }
-                        // Always refresh the tools list for the selected server
-                        if (this.selectedServerUrl) {
-                            this.updateToolsList(this.servers[this.selectedServerUrl]?.tools || []);
+                        if (message.url === this.selectedServerUrl) {
+                            this.updateToolsList(message.tools);
                         }
+                        renderTapServerSelect();
+                        renderTapToolSelect();
                         break;
+                    }
                     case 'tool_result':
                         // Only show in ToolResultsCard if not for the current chat engramId (i.e., not for console/chat flow)
                         if (!message.engramId || message.engramId !== chatEngramId) {
@@ -723,14 +657,6 @@
                 const compiledInfo = document.getElementById('wasm-compiled');
                 if (compiledInfo) {
                     compiledInfo.textContent = '-';
-                }
-            }
-
-            updateMcpStatus(healthy) {
-                if (this.mcpStatus) {
-                    this.mcpStatus.classList.remove('healthy', 'unhealthy', 'unknown');
-                    this.mcpStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
-                    this.mcpStatus.textContent = '●';
                 }
             }
 
@@ -786,23 +712,64 @@
                 }
             }
 
-            async initializeMcpServer() {
+            connectMcpServer() {
                 const url = this.selectedServerUrl;
-                if (!url) {
+                const server = this.servers[url];
+                if (!server) {
                     this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
                     return;
                 }
-                this.log({ level: 'INFO', message: `Initializing MCP server at ${url}...`, timestamp: new Date().toISOString() });
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'initialize-mcp',
-                    url: url
+                this.updateServer(url, { status: 'connecting', lastError: null });
+                this.log({ level: 'INFO', message: `Connecting to ${url}...`, timestamp: new Date().toISOString() });
+                navigator.serviceWorker.controller?.postMessage({
+                    type: 'connect-mcp',
+                    url,
+                    bearerToken: server.bearerToken || undefined
                 });
             }
 
-            async getServerInfo() {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'get-server-info'
+            requestTools(url, { refresh = false } = {}) {
+                this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
+                navigator.serviceWorker.controller?.postMessage({
+                    type: 'list_tools',
+                    url,
+                    refresh,
+                    bearerToken: this.servers[url]?.bearerToken || undefined
                 });
+            }
+
+            handleServerConnected(url, info) {
+                if (!this.servers[url]) return;
+                const name = info.serverInfo?.name || this.servers[url].name;
+                this.updateServer(url, {
+                    name,
+                    status: 'connected',
+                    lastError: null,
+                    era: info.era,
+                    protocolVersion: info.protocolVersion,
+                    capabilities: info.capabilities,
+                    instructions: info.instructions || null
+                });
+                this.requestTools(url);
+            }
+
+            handleServerError(url, action, error) {
+                if (!this.servers[url]) return;
+                const changes = { lastError: error?.message || 'Unknown error' };
+                if (action === 'connect') changes.status = 'failed';
+                this.updateServer(url, changes);
+            }
+
+            // Applies changes to a stored server and refreshes whatever shows it.
+            updateServer(url, changes) {
+                const server = this.servers[url];
+                if (!server) return;
+                Object.assign(server, changes, { date_modified: new Date().toISOString() });
+                this.saveServers();
+                this.updateServersList();
+                if (this.selectedServerUrl === url) {
+                    this.showServerCard(url);
+                }
             }
 
             updateServersList() {
@@ -853,20 +820,28 @@
                 document.getElementById('cardServerAlias').value = server.alias || '';
                 document.getElementById('cardServerUrl').value = server.url;
                 document.getElementById('cardServerStatus').value = server.status;
+                document.getElementById('cardServerProtocol').value = server.protocolVersion
+                    ? `${server.protocolVersion} (${server.era})`
+                    : 'Not connected yet';
+                document.getElementById('cardServerToken').value = server.bearerToken || '';
                 document.getElementById('cardServerDateAdded').value = server.date_added;
                 document.getElementById('cardServerDateModified').value = server.date_modified;
-                // Setup autosave for alias and url
+                const errorLine = document.getElementById('cardServerError');
+                errorLine.textContent = server.lastError || '';
+                errorLine.hidden = !server.lastError;
+                // Setup autosave for alias, url and token
                 this.initAutosaveGroup(card.querySelector('.autosave-group'), (fields) => {
-                    // fields: {cardServerUrl, cardServerAlias}
                     if (!this.selectedServerUrl) return;
                     let server = this.servers[this.selectedServerUrl];
                     if (!server) return;
                     const newUrl = fields.cardServerUrl.trim();
                     const newAlias = fields.cardServerAlias.trim();
+                    const newToken = fields.cardServerToken.trim();
                     let urlChanged = false;
                     if (newUrl && newUrl !== server.url) {
-                        // Re-key the server object
-                        this.servers[newUrl] = { ...server, url: newUrl };
+                        // Re-key the server object; the new address has to be connected again.
+                        navigator.serviceWorker.controller?.postMessage({ type: 'forget-mcp', url: server.url });
+                        this.servers[newUrl] = { ...server, url: newUrl, status: 'unknown', protocolVersion: null, era: null, tools: [] };
                         delete this.servers[server.url];
                         this.selectedServerUrl = newUrl;
                         this.setServerUrl(newUrl);
@@ -874,6 +849,7 @@
                         urlChanged = true;
                     }
                     server.alias = newAlias;
+                    server.bearerToken = newToken || undefined;
                     server.date_modified = new Date().toISOString();
                     this.saveServers();
                     this.updateServersList();
@@ -1017,8 +993,15 @@
                 } else {
                     contentHtml = `<div class='tool-content-empty'><span class='text-secondary'>No content to display.</span></div>`;
                 }
+                const toolResult = result.result || result;
+                let notice = '';
+                if (toolResult.resultType === 'input_required') {
+                    notice = `<div class='tool-notice'>The tool asked for more input (for example a form to fill in), which this client doesn't support yet.</div>`;
+                } else if (toolResult.isError) {
+                    notice = `<div class='tool-notice text-error'>The tool reported an error.</div>`;
+                }
                 contentHtml = `<div class='tool-content-section'>${contentHtml}</div>`;
-                toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${rawJson}<div class="tool-content-header"> > result.content</div>${contentHtml}</div>`;
+                toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${notice}${rawJson}<div class="tool-content-header"> > result.content</div>${contentHtml}</div>`;
             }
 
             updateBuildInfo(buildInfo) {
@@ -1049,16 +1032,24 @@
 
             loadServers() {
                 const stored = localStorage.getItem('servers');
-                return stored ? JSON.parse(stored) : {};
+                const servers = stored ? JSON.parse(stored) : {};
+                // Servers added before the alias fix stored it as name_alias.
+                for (const server of Object.values(servers)) {
+                    if (server.name_alias && !server.alias) server.alias = server.name_alias;
+                    delete server.name_alias;
+                }
+                return servers;
             }
 
             saveServers() {
                 localStorage.setItem('servers', JSON.stringify(this.servers));
+                // The worker uses this list (including tokens) for tool calls it starts itself.
+                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
             }
 
             handleAddServer() {
                 const url = document.getElementById('serverUrl').value.trim();
-                const name_alias = document.getElementById('serverAlias').value.trim();
+                const alias = document.getElementById('serverAlias').value.trim();
                 if (!url) {
                     this.log({ level: 'ERROR', message: 'Server URL is required', timestamp: new Date().toISOString() });
                     return;
@@ -1066,7 +1057,7 @@
                 const now = new Date().toISOString();
                 const server = {
                     name: '',
-                    name_alias,
+                    alias,
                     url,
                     tools: [],
                     date_added: now,
@@ -1078,6 +1069,8 @@
                 this.selectedServerUrl = url;
                 this.setServerUrl(url);
                 this.updateServersList();
+                this.showServerCard(url);
+                this.updateToolsList([]);
                 // Clear inputs
                 document.getElementById('serverUrl').value = '';
                 document.getElementById('serverAlias').value = '';
@@ -1087,7 +1080,7 @@
                 if (!this.selectedServerUrl) return;
                 const server = this.servers[this.selectedServerUrl];
                 if (!server) return;
-                server.name_alias = document.getElementById('cardServerAlias').value.trim();
+                server.alias = document.getElementById('cardServerAlias').value.trim();
                 server.url = document.getElementById('cardServerUrl').value.trim();
                 server.date_modified = new Date().toISOString();
                 // If URL changed, update key
@@ -1103,6 +1096,7 @@
 
             handleDeleteServer() {
                 if (!this.selectedServerUrl) return;
+                navigator.serviceWorker.controller?.postMessage({ type: 'forget-mcp', url: this.selectedServerUrl });
                 delete this.servers[this.selectedServerUrl];
                 this.saveServers();
                 this.selectedServerUrl = null;
@@ -1177,7 +1171,8 @@
                     navigator.serviceWorker.controller?.postMessage({
                         type: 'call_tool',
                         tapConfig,
-                        engramId: mcpEngramId
+                        engramId: mcpEngramId,
+                        bearerToken: this.servers[url]?.bearerToken || undefined
                     });
                     // Optionally, show loading state
                     const resultArea = form.querySelector('.tool-result-area');
@@ -1270,7 +1265,7 @@
             return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
 
-        document.getElementById('initProtocol').addEventListener('click', () => chatShell.initializeMcpServer());
+        document.getElementById('initProtocol').addEventListener('click', () => chatShell.connectMcpServer());
 
         // Add after the initProtocol event listener:
         const serverUrlInput = document.getElementById('mcpServerUrl');

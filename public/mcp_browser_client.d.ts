@@ -5,22 +5,27 @@ declare namespace wasm_bindgen {
 	export function get_uptime(): bigint;
 	export function increment_uptime(): void;
 	export function get_version(): string;
-	export function set_server_url(url: string): void;
-	export function get_server_url(): string;
-	export function health_check(): Promise<number>;
-	export function check_mcp_server(): Promise<number>;
-	export function handle_message(message: string): Promise<any>;
+	export function get_compiled_info(): string;
+	export function set_debug_mode(enabled: boolean): void;
 	export function get_metadata(): string;
 	export function add_memory_event(text: string): void;
 	export function clear_memory_events(): void;
-	export function initialize_mcp_server(url: string): Promise<any>;
-	export function get_server_info(): any;
-	export function query_tools(): Promise<any>;
-	export function list_tools(url: string): Promise<any>;
-	export function get_compiled_info(): string;
-	export function call_tool(url: string, tool_name: string, args: any): Promise<any>;
-	export function set_debug_mode(enabled: boolean): void;
 	export function get_bootrom(): string;
+	/**
+	 * Detects the server's protocol era and returns what it reported about itself:
+	 * `{url, era, protocolVersion, serverInfo, capabilities, instructions}`.
+	 */
+	export function connect(url: string, options: string): Promise<string>;
+	/**
+	 * Returns `{tools, rejected, ttlMs, cacheScope, fromCache}`. Pass `{"refresh": true}` in
+	 * `options` to skip the cache.
+	 */
+	export function list_tools(url: string, options: string): Promise<string>;
+	/**
+	 * Calls a tool with JSON-encoded arguments and returns the JSON-RPC `result`.
+	 */
+	export function call_tool(url: string, name: string, args: string, options: string): Promise<string>;
+	export function forget_server(url: string): void;
 	
 }
 
@@ -32,32 +37,26 @@ declare interface InitOutput {
   readonly get_uptime: () => bigint;
   readonly increment_uptime: () => void;
   readonly get_version: () => [number, number];
-  readonly set_server_url: (a: number, b: number) => void;
-  readonly get_server_url: () => [number, number];
-  readonly health_check: () => any;
-  readonly check_mcp_server: () => any;
-  readonly handle_message: (a: number, b: number) => any;
+  readonly get_compiled_info: () => [number, number];
+  readonly set_debug_mode: (a: number) => void;
   readonly get_metadata: () => [number, number];
   readonly add_memory_event: (a: number, b: number) => void;
-  readonly clear_memory_events: () => [number, number];
-  readonly initialize_mcp_server: (a: number, b: number) => any;
-  readonly get_server_info: () => [number, number, number];
-  readonly query_tools: () => any;
-  readonly list_tools: (a: number, b: number) => any;
-  readonly get_compiled_info: () => [number, number];
-  readonly call_tool: (a: number, b: number, c: number, d: number, e: any) => any;
-  readonly set_debug_mode: (a: number) => void;
+  readonly clear_memory_events: () => void;
   readonly get_bootrom: () => [number, number];
+  readonly connect: (a: number, b: number, c: number, d: number) => any;
+  readonly list_tools: (a: number, b: number, c: number, d: number) => any;
+  readonly call_tool: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
+  readonly forget_server: (a: number, b: number) => void;
+  readonly __externref_table_alloc: () => number;
+  readonly __wbindgen_export_1: WebAssembly.Table;
+  readonly __wbindgen_exn_store: (a: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_export_4: WebAssembly.Table;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure70_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure92_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hc7efaec20a611c04: (a: number, b: number) => void;
+  readonly closure71_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure93_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 
