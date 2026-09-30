@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Calculate hash of all .rs files in src/
-SRC_HASH=$(find src -name "*.rs" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)
+# Calculate hash of all .rs files in src/. build_info.rs must be excluded: it
+# contains the previous hash, so including it changes the hash on every run.
+SRC_HASH=$(find src -name "*.rs" -type f ! -name build_info.rs -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)
 
 # Read existing hash if build_info.rs exists
 if [ -f src/build_info.rs ]; then
