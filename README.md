@@ -21,7 +21,10 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 │   ├── mcp_browser_client.js       # Generated JS bindings
 │   ├── sw.js              # Service worker
 │   ├── index.html         # Web interface
-│   └── styles.css         # UI styles
+│   ├── styles.css         # UI styles (Glean design language)
+│   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
+│   ├── fonts/             # Inter and DM Sans (OFL)
+│   └── icons/             # Feather icons, rendered as CSS masks (MIT)
 ├── venv/                  # Python virtual environment
 ├── node_modules/          # Node.js dependencies
 ├── .cursor/               # Cursor IDE configuration
@@ -89,6 +92,8 @@ npm run start:mock-mcp
 ### Modifying the Web Interface
 1. Edit files in the `public` directory
 2. Refresh your browser
+
+Style new UI with the `--theme-*` variables from `public/tokens.css` rather than raw colors, so light and dark mode both keep working. Dark mode is the `dark-theme` class on `<html>`; the header toggle sets it and otherwise it follows the OS setting.
 
 ## Testing
 

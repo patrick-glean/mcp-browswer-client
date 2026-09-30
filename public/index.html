@@ -3,133 +3,167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP Client Test</title>
+    <title>MCP Browser Client</title>
+    <script>
+        (function () {
+            var stored = localStorage.getItem('theme');
+            var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.classList.toggle('dark-theme', dark);
+        })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="preload" href="./fonts/Inter/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="./tokens.css">
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
     <div class="container">
-        <div class="status-bar" id="statusBar" style="cursor:pointer;">
-            <div class="status-item">
-                <span class="status-label">Service Worker:</span>
-                <span class="status-indicator" id="sw-status">●</span>
-                <span class="status-uptime" id="sw-uptime">0s</span>
+        <header class="app-header">
+            <div class="app-title">
+                <span class="app-mark"><span class="icon icon-zap" aria-hidden="true"></span></span>
+                <h1>MCP Browser Client</h1>
             </div>
-            <div class="status-item">
-                <span class="status-label">WASM Module:</span>
-                <span class="status-indicator" id="wasm-status">●</span>
-                <span class="status-uptime" id="wasm-uptime">0s</span>
+            <div class="app-header-actions">
+                <button type="button" class="status-bar" id="statusBar" title="Runtime controls">
+                    <span class="status-item">
+                        <span class="status-indicator" id="sw-status">●</span>
+                        <span class="status-label">Service worker</span>
+                        <span class="status-uptime" id="sw-uptime">0s</span>
+                    </span>
+                    <span class="status-item">
+                        <span class="status-indicator" id="wasm-status">●</span>
+                        <span class="status-label">WASM</span>
+                        <span class="status-uptime" id="wasm-uptime">0s</span>
+                    </span>
+                </button>
+                <button type="button" id="themeToggle" class="btn-icon btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <span class="icon icon-theme" aria-hidden="true"></span>
+                </button>
             </div>
-            <div class="status-item">
-                <span class="status-label">Metadata Version:</span>
-                <span id="metadataVersion">-</span>
-            </div>
-            <div class="status-item">
-                <span class="status-compiled" id="wasm-compiled">Compiled: -</span>
-            </div>
-        </div>
-        <!-- Popdown for controls -->
-        <div id="controlsPopdown" class="controls-popdown" style="display:none;">
-            <button id="closeControlsPopdown" style="float:right;margin-bottom:10px;">✕</button>
-            <div class="control-group sw-controls">
-                <div>
-                    <h3>Service Worker Controls</h3>
-                    <button id="start-sw" class="start">Start Service Worker</button>
-                    <button id="stop-sw">Stop Service Worker</button>
+            <div id="controlsPopdown" class="controls-popdown" style="display:none;">
+                <div class="popdown-header">
+                    <h2>Runtime controls</h2>
+                    <button type="button" id="closeControlsPopdown" class="btn-icon btn-tertiary" aria-label="Close">
+                        <span class="icon icon-x" aria-hidden="true"></span>
+                    </button>
+                </div>
+                <div class="control-group sw-controls">
+                    <h3>Service worker</h3>
+                    <div class="button-row">
+                        <button id="start-sw" class="start"><span class="icon icon-play" aria-hidden="true"></span>Start</button>
+                        <button id="stop-sw" class="btn-outline btn-danger"><span class="icon icon-power" aria-hidden="true"></span>Stop</button>
+                    </div>
+                </div>
+                <div class="control-group wasm-controls">
+                    <h3>WASM module</h3>
+                    <div class="button-row">
+                        <button id="check-wasm">Check</button>
+                        <button id="reload-wasm" class="reload"><span class="icon icon-refresh" aria-hidden="true"></span>Reload</button>
+                        <button id="unload-wasm" class="btn-outline btn-danger">Unload</button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <h3>Build</h3>
+                    <dl class="build-info">
+                        <dt>WASM</dt>
+                        <dd id="wasm-compiled">-</dd>
+                        <dt>Metadata</dt>
+                        <dd id="metadataVersion">-</dd>
+                    </dl>
                 </div>
             </div>
-            <div class="control-group wasm-controls">
-                <div>
-                    <h3>WASM Module Controls</h3>
-                    <button id="check-wasm">Check WASM</button>
-                    <button id="unload-wasm">Unload WASM</button>
-                    <button id="reload-wasm" class="reload">Reload WASM</button>
-                </div>
-            </div>
-        </div>
+        </header>
         <div class="main-content-tabs">
             <div class="tab-bar">
                 <button id="consoleTabBtn" class="tab-btn active">Console</button>
                 <button id="mcpTabBtn" class="tab-btn">MCP</button>
                 <button id="memoryTabBtn" class="tab-btn">Memory</button>
                 <button id="logsTabBtn" class="tab-btn">Logs</button>
-                <button id="popoutLogsBtn" class="tab-btn" title="Pop out logs">↗</button>
+                <button id="popoutLogsBtn" class="tab-btn tab-btn-icon" title="Pop out logs" aria-label="Pop out logs">
+                    <span class="icon icon-external-link" aria-hidden="true"></span>
+                </button>
             </div>
             <div id="consoleTab" class="tab-content active">
                 <div class="console-section">
                     <div class="chat-card">
-                        <div class="chat-card-left">
+                        <section class="chat-card-left panel">
                             <div id="chatMessages" class="chat-messages"></div>
                             <div class="chat-input-row">
                                 <input type="text" id="chatUserInput" placeholder="Type your message..." autocomplete="off" />
-                                <button id="chatSendBtn" type="button">Send</button>
+                                <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
                             </div>
-                            <div id="chatEngramIdDisplay"></div>
-                        </div>
-                        <div class="chat-card-right">
-                            <div class="cbus-tap-card" style="border:1px solid #444; border-radius:8px; padding:1em; margin-bottom:1em; background:#232323;">
-                                <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.5em;">LLM Target (Server/Tool)</div>
+                            <div id="chatEngramIdDisplay" class="chat-engram"></div>
+                        </section>
+                        <aside class="chat-card-right panel panel-muted">
+                            <div class="cbus-tap-card">
+                                <div class="panel-title">LLM target</div>
+                                <p class="panel-subtitle">The server and tool that receive your messages.</p>
                                 <div class="chat-server-select-row">
-                                    <label for="chatServerSelect">Server:</label>
+                                    <label for="chatServerSelect">Server</label>
                                     <select id="chatServerSelect"></select>
                                 </div>
                                 <div class="chat-tool-select-row">
-                                    <label for="chatToolSelect">Tool:</label>
+                                    <label for="chatToolSelect">Tool</label>
                                     <select id="chatToolSelect"></select>
                                 </div>
                                 <form id="chatToolConfigForm" class="chat-tool-config"></form>
                             </div>
-                        </div>
+                        </aside>
                     </div>
                 </div>
             </div>
             <div id="mcpTab" class="tab-content" style="display:none;">
                 <div class="controls-section">
-                    <!-- Service Worker and WASM controls moved to popdown -->
                     <div class="control-group">
-                        <h3>MCP Servers</h3>
+                        <div class="section-header">
+                            <div>
+                                <h2>MCP servers</h2>
+                                <p class="section-subtitle">Add a server, initialize it, then list its tools.</p>
+                            </div>
+                            <div class="mcp-controls-bar">
+                                <button id="check-mcp">Check MCP</button>
+                                <button id="initProtocol">Initialize</button>
+                                <button id="listTools">List tools</button>
+                            </div>
+                        </div>
                         <div class="mcp-servers-group">
                             <div class="mcp-controls-header">
                                 <div class="add-server-controls">
-                                    <input type="text" id="serverUrl" placeholder="Server URL">
+                                    <input type="text" id="serverUrl" placeholder="Server URL, e.g. http://localhost:8081">
                                     <input type="text" id="serverAlias" placeholder="Alias (optional)">
-                                    <button id="addServerBtn">Add</button>
-                                </div>
-                                <div class="mcp-controls-bar">
-                                    <button id="check-mcp">Check MCP</button>
-                                    <button id="initProtocol">Initialize</button>
-                                    <button id="listTools">List Tools</button>
+                                    <button id="addServerBtn" class="btn-primary"><span class="icon icon-plus" aria-hidden="true"></span>Add server</button>
                                 </div>
                             </div>
                             <div class="mcp-servers-section">
-                                <div class="servers-list-panel">
+                                <div class="servers-list-panel panel">
+                                    <div class="panel-title">Servers</div>
                                     <div id="serversList"></div>
                                 </div>
                                 <div class="server-card-panel">
-                                    <div id="serverCard" class="server-card" style="display: none; background: #232323; border-radius: 8px; padding: 1rem; border: 1px solid #444;">
-                                        <h4>Server Details</h4>
+                                    <div id="serverCard" class="server-card panel" style="display: none;">
+                                        <div class="panel-title">Server details</div>
                                         <div class="server-card-fields autosave-group">
-                                            <label>URL: <span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label><br>
-                                            <label>Alias: <span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label><br>
-                                            <label>Name: <input type="text" id="cardServerName" disabled></label><br>
-                                            <label>Status: <input type="text" id="cardServerStatus" disabled></label><br>
-                                            <label>Date Added: <input type="text" id="cardServerDateAdded" disabled></label><br>
-                                            <label>Date Modified: <input type="text" id="cardServerDateModified" disabled></label><br>
+                                            <label class="field"><span class="field-label">URL</span><span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label>
+                                            <label class="field"><span class="field-label">Alias</span><span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label>
+                                            <label class="field"><span class="field-label">Name</span><input type="text" id="cardServerName" disabled></label>
+                                            <label class="field"><span class="field-label">Status</span><input type="text" id="cardServerStatus" disabled></label>
+                                            <label class="field"><span class="field-label">Date added</span><input type="text" id="cardServerDateAdded" disabled></label>
+                                            <label class="field"><span class="field-label">Date modified</span><input type="text" id="cardServerDateModified" disabled></label>
                                         </div>
-                                        <div style="margin-top: 1rem;">
+                                        <div class="panel-actions">
                                             <!--<button id="saveServerBtn">Save</button>-->
-                                            <button id="deleteServerBtn" style="margin-left: 1rem; color: #e74c3c;">Delete</button>
+                                            <button id="deleteServerBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete server</button>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="tools-display">
-                                    <h4>Available Tools</h4>
+                                <div class="tools-display panel">
+                                    <div class="panel-title">Available tools</div>
                                     <div id="toolsList"></div>
                                 </div>
                             </div>
                             <div class="tool-cards-row">
-                                <div id="toolCard" class="tool-card"></div>
-                                <div id="toolResultCard" class="tool-result-card"></div>
+                                <div id="toolCard" class="tool-card panel"></div>
+                                <div id="toolResultCard" class="tool-result-card panel"></div>
                             </div>
                         </div>
                     </div>
@@ -137,17 +171,17 @@
             </div>
             <div id="memoryTab" class="tab-content" style="display:none;">
                 <div class="memory-section three-panel-memory">
-                    <!-- Imprints List (now leftmost) -->
-                    <div class="memory-panel memory-panel-middle" style="min-width:200px;max-width:260px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5em;">
-                            <h3 style="margin:0;">Imprints</h3>
-                            <button id="addImprintBtn" title="Add Imprint" style="font-size:1.5em;padding:0 0.5em;line-height:1;">+</button>
+                    <div class="memory-panel memory-panel-middle panel">
+                        <div class="panel-header">
+                            <div class="panel-title">Imprints</div>
+                            <button id="addImprintBtn" class="btn-icon btn-sm" title="Add imprint" aria-label="Add imprint">
+                                <span class="icon icon-plus" aria-hidden="true"></span>
+                            </button>
                         </div>
                         <div id="imprintsList" class="imprints-list"></div>
                     </div>
-                    <!-- Editor/Previewer (right) -->
-                    <div class="memory-panel memory-panel-right">
-                        <h3>Imprint Editor/Preview</h3>
+                    <div class="memory-panel memory-panel-right panel">
+                        <div class="panel-title">Imprint editor</div>
                         <div id="imprintEditor" class="imprint-editor"></div>
                     </div>
                 </div>
@@ -156,11 +190,11 @@
                 <div class="log-section">
                     <div class="control-group">
                         <div class="log-header">
-                            <h3>Logs</h3>
+                            <h2>Logs</h2>
                             <label class="debug-toggle">
                                 <input type="checkbox" id="debugModeToggle">
                                 <span class="slider"></span>
-                                Debug Mode
+                                Debug mode
                             </label>
                         </div>
                         <div class="log-container" id="log-container"></div>
@@ -688,7 +722,7 @@
                 }
                 const compiledInfo = document.getElementById('wasm-compiled');
                 if (compiledInfo) {
-                    compiledInfo.textContent = 'Compiled: -';
+                    compiledInfo.textContent = '-';
                 }
             }
 
@@ -776,7 +810,7 @@
                 serversList.innerHTML = '';
                 const serversArr = Object.values(this.servers);
                 if (serversArr.length === 0) {
-                    serversList.innerHTML = '<div style="color:#888;">No servers added.</div>';
+                    serversList.innerHTML = '<div class="empty-state">No servers added.</div>';
                 }
                 serversArr.forEach(server => {
                     const serverItem = document.createElement('div');
@@ -859,7 +893,7 @@
                 const toolsList = document.getElementById('toolsList');
                 toolsList.innerHTML = '';
                 if (!tools || tools.length === 0) {
-                    toolsList.innerHTML = '<div style="color:#888;">No tools available.</div>';
+                    toolsList.innerHTML = '<div class="empty-state">No tools available.</div>';
                     this.renderToolCard(null);
                     this.renderToolResultCard(null);
                     return;
@@ -884,18 +918,18 @@
                 const inputCard = document.createElement('div');
                 inputCard.className = 'tool-input-card';
                 let label = `<label><strong>${key}</strong> (${prop.type || 'string'})`;
-                if (isRequired) label += ' <span style="color:#f44336">*</span>';
-                label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
-                label += '</label><br>';
+                if (isRequired) label += '<span class="required-mark">*</span>';
+                label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                label += '</label>';
 
                 if (prop.type === 'object' && !prop.properties) {
-                    inputCard.innerHTML = `${label}<textarea name="${key}" placeholder="{}" rows="3" style="font-family:monospace;"></textarea>`;
+                    inputCard.innerHTML = `${label}<textarea name="${key}" placeholder="{}" rows="3" class="mono"></textarea>`;
                 } else if (prop.type === 'string') {
                     inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
                 } else if (prop.type === 'integer' || prop.type === 'number') {
                     inputCard.innerHTML = `${label}<input type="number" name="${key}" />`;
                 } else if (prop.type === 'array' && prop.items) {
-                    inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item">Add</button>`;
+                    inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item btn-sm"><span class="icon icon-plus" aria-hidden="true"></span>Add item</button>`;
                     const arrayInputs = inputCard.querySelector('.array-inputs');
                     inputCard.querySelector('.add-array-item').onclick = () => {
                         arrayInputs.appendChild(this.renderInputField(key + '[]', prop.items, false));
@@ -916,7 +950,7 @@
                 const toolCard = document.getElementById('toolCard');
                 toolCard.innerHTML = '';
                 if (!tool) {
-                    toolCard.innerHTML = '<div class="tool-card-inner"><span style="color:#888;">Select a tool to view details and call it.</span></div>';
+                    toolCard.innerHTML = '<div class="tool-card-inner"><span class="text-secondary">Select a tool to view details and call it.</span></div>';
                     return;
                 }
                 toolCard.style.display = 'block';
@@ -930,7 +964,7 @@
                     <h3>${tool.name}</h3>
                     <div class="tool-description">${tool.description || ''}</div>
                     <div class="tool-input-schema"></div>
-                    <button type="submit" class="call-tool-btn">Call Tool</button>
+                    <button type="submit" class="call-tool-btn btn-primary">Call tool</button>
                 `;
                 toolCard.appendChild(card);
                 // Render input schema if present
@@ -948,11 +982,11 @@
             renderToolResultCard(result) {
                 const toolResultCard = document.getElementById('toolResultCard');
                 if (!result) {
-                    toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span style="color:#888;">Tool output will appear here.</span></div>';
+                    toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span class="text-secondary">Tool output will appear here.</span></div>';
                     return;
                 }
                 if (result.error) {
-                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span style='color:#f44336;'>${result.error}</span></div>`;
+                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span class='text-error'>${result.error}</span></div>`;
                     return;
                 }
                 // Collapsible raw JSON (collapsed by default)
@@ -979,9 +1013,9 @@
                             return `<div class='tool-content-text'>${safeText}</div>`;
                         }
                         return `<div class='tool-content-unknown'>[Unknown content type: ${escapeHtml(JSON.stringify(item))}]</div>`;
-                    }).join('<hr style="border:none;border-top:1px solid #444;margin:1em 0;">');
+                    }).join('<hr class="divider">');
                 } else {
-                    contentHtml = `<div class='tool-content-empty'><span style='color:#888;'>No content to display.</span></div>`;
+                    contentHtml = `<div class='tool-content-empty'><span class='text-secondary'>No content to display.</span></div>`;
                 }
                 contentHtml = `<div class='tool-content-section'>${contentHtml}</div>`;
                 toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${rawJson}<div class="tool-content-header"> > result.content</div>${contentHtml}</div>`;
@@ -990,7 +1024,7 @@
             updateBuildInfo(buildInfo) {
                 const compiledInfo = document.getElementById('wasm-compiled');
                 if (compiledInfo) {
-                    compiledInfo.textContent = `Compiled: ${buildInfo}`;
+                    compiledInfo.textContent = buildInfo;
                 }
             }
 
@@ -1092,7 +1126,7 @@
                 const showCheckmark = (inputId) => {
                     const check = document.getElementById('checkmark-' + inputId);
                     if (check) {
-                        check.innerHTML = `<svg width='18' height='18' viewBox='0 0 20 20' style='display:inline;vertical-align:middle;'><polyline points='4,11 9,16 16,5' style='fill:none;stroke:#4CAF50;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;'/></svg>`;
+                        check.innerHTML = `<svg width='16' height='16' viewBox='0 0 20 20' aria-hidden='true'><polyline points='4,11 9,16 16,5' style='fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;'/></svg>`;
                         check.style.display = 'inline-block';
                         setTimeout(() => { check.style.display = 'none'; }, 1500);
                     }
@@ -1148,7 +1182,7 @@
                     // Optionally, show loading state
                     const resultArea = form.querySelector('.tool-result-area');
                     if (resultArea) {
-                        resultArea.innerHTML = '<span style="color:#aaa;">Calling tool...</span>';
+                        resultArea.innerHTML = '<span class="text-secondary">Calling tool...</span>';
                     }
                 } 
             }
@@ -1173,7 +1207,7 @@
                                 input.style.borderColor = '';
                                 input.title = '';
                             } catch (e) {
-                                input.style.borderColor = '#f44336';
+                                input.style.borderColor = 'var(--theme-error)';
                                 input.title = 'Invalid JSON';
                                 throw new Error(`Invalid JSON for ${key}`);
                             }
@@ -1392,6 +1426,19 @@
             });
         }
 
+        // Theme: an explicit choice is saved; otherwise follow the OS setting.
+        const systemDarkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            const dark = !document.documentElement.classList.contains('dark-theme');
+            document.documentElement.classList.toggle('dark-theme', dark);
+            localStorage.setItem('theme', dark ? 'dark' : 'light');
+        });
+        systemDarkQuery.addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                document.documentElement.classList.toggle('dark-theme', e.matches);
+            }
+        });
+
         // --- Chat Card Logic ---
         let chatSelectedTool = null;
         let chatToolConfig = {};
@@ -1425,13 +1472,11 @@
             if (!engramDiv) {
                 engramDiv = document.createElement('div');
                 engramDiv.id = 'chatEngramIdDisplay';
-                engramDiv.style.fontSize = '0.85em';
-                engramDiv.style.color = '#888';
-                engramDiv.style.marginTop = '0.25em';
+                engramDiv.className = 'chat-engram';
                 const inputRow = document.querySelector('.chat-input-row');
                 inputRow.parentNode.insertBefore(engramDiv, inputRow.nextSibling);
             }
-            engramDiv.innerHTML = `<span>engramId:</span> <span style=\"font-family:monospace;\">${chatEngramId}</span> <button id=\"newEngramBtn\" title=\"Start new engram\">New</button>`;
+            engramDiv.innerHTML = `<span>Engram</span> <span class="mono">${chatEngramId}</span> <button id="newEngramBtn" class="btn-sm btn-outline" title="Start new engram">New</button>`;
             // Attach handler for New button
             const newBtn = document.getElementById('newEngramBtn');
             if (newBtn) {
@@ -1515,21 +1560,6 @@
         }
         updateSendBtnState();
         chatUserInput.addEventListener('input', updateSendBtnState);
-        // Add style for disabled send button if not present
-        if (!document.getElementById('sendBtnDisabledStyle')) {
-            const style = document.createElement('style');
-            style.id = 'sendBtnDisabledStyle';
-            style.textContent = `
-            #chatSendBtn:disabled {
-                background: #333 !important;
-                color: #888 !important;
-                border-color: #222 !important;
-                cursor: not-allowed !important;
-                opacity: 0.7;
-            }
-            `;
-            document.head.appendChild(style);
-        }
         // In chatRequestHandlers[requestId], only add the tool message once
         chatSendBtn.addEventListener('click', async function() {
             const userInput = document.getElementById('chatUserInput').value.trim();
@@ -1563,50 +1593,6 @@
         renderMcpServerSelect();      // For MCP page
         renderChatMessages();
         renderEngramId();
-
-        // Add this style block for solid-checkbox and disabled input greying if not present
-        if (!document.getElementById('solidCheckboxStyle')) {
-            const style = document.createElement('style');
-            style.id = 'solidCheckboxStyle';
-            style.textContent = `
-            .solid-checkbox {
-              appearance: none;
-              -webkit-appearance: none;
-              width: 1.1em;
-              height: 1.1em;
-              background: #444;
-              border-radius: 3px;
-              margin-right: 0.2em;
-              vertical-align: middle;
-              text-align: center;
-              line-height: 1.1em;
-              font-size: 1.1em;
-              color: #fff;
-              cursor: pointer;
-              border: none;
-              outline: none;
-              display: inline-block;
-              position: relative;
-            }
-            .solid-checkbox:checked {
-              background: #2196f3;
-            }
-            .solid-checkbox:after {
-              content: '';
-              display: block;
-              width: 100%;
-              height: 100%;
-            }
-            .tool-input-card input:disabled {
-              background: #2a2a2a !important;
-              color: #888 !important;
-              border-color: #333 !important;
-              opacity: 0.7;
-              cursor: not-allowed;
-            }
-            `;
-            document.head.appendChild(style);
-        }
 
         // --- Imprint (Memory Event) Two-Panel Logic ---
         function generateImprintId() {
@@ -1670,7 +1656,7 @@
             const listDiv = document.getElementById('imprintsList');
             listDiv.innerHTML = '';
             if (!imprints.length) {
-                listDiv.innerHTML = '<div style="color:#888;">No imprints yet.</div>';
+                listDiv.innerHTML = '<div class="empty-state">No imprints yet.</div>';
                 return;
             }
             imprints.forEach((imprint, idx) => {
@@ -1693,7 +1679,7 @@
             const editorDiv = document.getElementById('imprintEditor');
             editorDiv.innerHTML = '';
             if (selectedImprintIdx === null || !imprints[selectedImprintIdx]) {
-                editorDiv.innerHTML = '<div style="color:#888;">Select an imprint to edit or preview.</div>';
+                editorDiv.innerHTML = '<div class="text-secondary">Select an imprint to edit or preview.</div>';
                 return;
             }
             const imprint = imprints[selectedImprintIdx];
@@ -1705,7 +1691,7 @@
                     <textarea rows="12" disabled>${imprint.text || ''}</textarea>
                     <label>Timestamp</label>
                     <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
-                    <div style="color:#888;margin-top:1em;">This imprint is read-only (bootrom instructions).</div>
+                    <div class="field-help">This imprint is read-only (bootrom instructions).</div>
                 `;
                 return;
             }
@@ -1719,8 +1705,8 @@
                 <label>Timestamp</label>
                 <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
                 <div class="editor-actions">
-                    <button type="submit">Save</button>
-                    <button type="button" id="deleteImprintBtn" style="color:#e74c3c;">Delete</button>
+                    <button type="submit" class="btn-primary">Save</button>
+                    <button type="button" id="deleteImprintBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete</button>
                 </div>
             `;
             form.onsubmit = (e) => {
@@ -1861,16 +1847,16 @@
                         inputCard = document.createElement('div');
                         inputCard.className = 'tool-input-card';
                         let label = `<label><strong>${key}</strong> (string)`;
-                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
-                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
-                        label += '</label><br>';
+                        if (isRequired) label += '<span class="required-mark">*</span>';
+                        label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                        label += '</label>';
                         inputCard.innerHTML = `${label}
                             <input type="text" name="${key}" />
-                            <span class="cbus-checkbox-label" style="margin-left:0.5em;">
+                            <label class="cbus-checkbox-label">
                                 <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" />
-                                <span class="cbus-checkbox-text">Target For message</span>
-                            </span>
-                            <div class="cbus-message-warning" style="color:#f44336;font-size:0.9em;display:none;margin-top:0.3em;"></div>`;
+                                <span class="cbus-checkbox-text">Target for message</span>
+                            </label>
+                            <div class="cbus-message-warning" style="display:none;"></div>`;
                         setTimeout(() => {
                             const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
                             const cb = inputCard.querySelector('.assign-cbus-string[data-field="' + key + '"]');
@@ -1948,15 +1934,15 @@
                         inputCard = document.createElement('div');
                         inputCard.className = 'tool-input-card';
                         let label = `<label><strong>${key}</strong> (array)`;
-                        if (isRequired) label += ' <span style="color:#f44336">*</span>';
-                        label += prop.description ? `<br><span style="color:#aaa;font-size:0.95em">${prop.description}</span>` : '';
-                        label += '</label><br>';
+                        if (isRequired) label += '<span class="required-mark">*</span>';
+                        label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                        label += '</label>';
                         inputCard.innerHTML = `${label}
-                            <span class="cbus-checkbox-label">
+                            <label class="cbus-checkbox-label">
                                 <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" />
-                                <span class="cbus-checkbox-text">Target For [context]</span>
-                            </span>
-                            <div style="font-size:0.9em;color:#aaa;margin-top:0.3em;">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
+                                <span class="cbus-checkbox-text">Target for [context]</span>
+                            </label>
+                            <div class="field-help">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
                         setTimeout(() => {
                             const cb = inputCard.querySelector('.assign-cbus-array[data-field="' + key + '"]');
                             if (tapConfig.connectedArrayArg === key) {
