@@ -3,7 +3,7 @@ import { debugLog } from './logger.js';
 let wasmInstance = null;
 let wasmModule = null;
 let isDebugMode = true;
-let isInitializing = false;
+let initPromise = null;
 let uptimeInterval = null;
 
 let broadcastToClients = () => {};
@@ -47,16 +47,26 @@ export async function checkWasm() {
 // MOVED FROM sw.js
 // Initialize WASM module
 export async function initializeWasm() {
-    if (isInitializing) {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM initialization already in progress, skipping...' });
-        return false;
-    }
     if (wasmInstance) {
         debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'WASM module already initialized, skipping...' });
         return true;
     }
-    
-    isInitializing = true;
+    if (!initPromise) {
+        initPromise = loadWasm().finally(() => { initPromise = null; });
+    }
+    return initPromise;
+}
+
+// Browsers stop idle service workers and restart them for the next event,
+// discarding module state, so handlers cannot rely on install-time loading.
+export async function ensureWasm() {
+    if (!wasmInstance) {
+        await initializeWasm();
+    }
+    return wasmInstance;
+}
+
+async function loadWasm() {
     try {
         debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Initializing WASM module...' });
         
@@ -143,16 +153,6 @@ export async function initializeWasm() {
             wasmInstance.set_debug_mode(isDebugMode);
         }
         
-        let url = 'http://localhost:8081';
-        try {
-            url = (await self.clients.matchAll({type: 'window'}))[0]?.url;
-        } catch (e) {
-            // fallback to default
-        }
-        if (wasmInstance && typeof wasmInstance.set_server_url === 'function') {
-            wasmInstance.set_server_url(url);
-        }
-        
         return true;
     } catch (error) {
         const errorMessage = `WASM initialization failed: ${error.message}`;
@@ -170,8 +170,6 @@ export async function initializeWasm() {
         // broadcastWasmStatus(false);
         
         return false;
-    } finally {
-        isInitializing = false;
     }
 }
 

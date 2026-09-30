@@ -24,6 +24,7 @@ import { handleOp, initDB, openDB } from './chatStorage.js';
 import { debugLog } from './logger.js';
 import {
     checkWasm,
+    ensureWasm,
     initializeWasm,
     reloadWasm,
     unloadWasm,
@@ -79,7 +80,7 @@ class MCPMessageHandler {
 
     async handleMessage(message) {
         try {
-            wasmInstance = getWasmInstance();
+            wasmInstance = await ensureWasm();
             if (!wasmInstance) {
                 throw new Error('WASM module not initialized');
             }
@@ -213,7 +214,8 @@ self.addEventListener('message', async (event) => {
         return;
     }
 
-    wasmInstance = getWasmInstance();
+    const managesWasmLifecycle = ['unload_wasm', 'reload_wasm', 'stop'].includes(message.type);
+    wasmInstance = managesWasmLifecycle ? getWasmInstance() : await ensureWasm();
 
     // Handle legacy messages
     switch (message.type) {
@@ -374,7 +376,7 @@ self.addEventListener('message', async (event) => {
                 throw new Error('WASM module not initialized');
             }
             try {
-                const url = message.url || get_server_url();
+                const url = message.url || wasmInstance.get_server_url();
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] [list_tools] Received URL:', data: url });
                 debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Listing tools from', data: url });
                 // Let the WASM module handle the MCP protocol
