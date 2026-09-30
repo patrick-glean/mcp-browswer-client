@@ -1,257 +1,414 @@
 #!/usr/bin/env python3
+"""Mock MCP server for local development and the browser smoke test (standard library only).
 
-import asyncio
-import logging
+Modes:
+  modern  MCP 2026-07-28 only: per-request _meta, server/discover, mirrored-header validation.
+  legacy  A 2025-era Streamable HTTP server: initialize handshake and Mcp-Session-Id.
+  dual    Both (the default): modern requests are stateless, initialize opens a legacy session.
+
+Examples:
+  python3 test_mcp_server.py                      # dual mode on http://127.0.0.1:8081
+  python3 test_mcp_server.py --mode legacy --sse  # a 2025-era server that streams replies
+  python3 test_mcp_server.py --allow-origin https://example.github.io
+"""
+
+import argparse
+import base64
 import json
-from datetime import datetime
-from aiohttp import web
-from aiohttp_cors import setup as cors_setup, ResourceOptions, CorsViewMixin
+import threading
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('mcp_server.log'),
-        logging.StreamHandler()
-    ]
-)
+MODERN_VERSION = "2026-07-28"
+LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"]
+SERVER_INFO = {"name": "Mock MCP Server", "version": "2.0.0"}
+DEFAULT_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*"]
+PAGE_SIZE = 2
 
-# MCP Protocol Constants
-JSONRPC_VERSION = "2.0"
-PROTOCOL_VERSION = "2025-03-26"
-
-# JSON-RPC Error Codes
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
-INTERNAL_ERROR = -32603
+HEADER_MISMATCH = -32020
+UNSUPPORTED_PROTOCOL_VERSION = -32022
 
-class MCPServer:
-    def __init__(self, host='localhost', port=8081):
-        self.host = host
-        self.port = port
-        self.app = web.Application()
-        self.setup_routes()
-        self.setup_cors()
-        self.tools = {
-            "echo": {
-                "name": "echo",
-                "description": "Echoes back the input text",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string"}
-                    },
-                    "required": ["text"]
-                }
-            }
-        }
-        logging.info(f"MCPServer initialized on {host}:{port}")
-
-    def setup_cors(self):
-        cors = cors_setup(self.app, defaults={
-            "*": ResourceOptions(
-                allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*",
-                allow_methods="*"
-            )
-        })
-        
-        for route in list(self.app.router.routes()):
-            cors.add(route)
-        logging.info("CORS configured for all routes")
-
-    def setup_routes(self):
-        self.app.router.add_post('/', self.handle_mcp_message)
-        logging.info("Routes configured: POST on /")
-
-    def create_response(self, id, result=None):
-        response = {
-            "jsonrpc": JSONRPC_VERSION,
-            "id": id
-        }
-        if result is not None:
-            response["result"] = result
-        return response
-
-    def create_error_response(self, id, code, message, data=None):
-        response = {
-            "jsonrpc": JSONRPC_VERSION,
-            "id": id,
-            "error": {
-                "code": code,
-                "message": message
-            }
-        }
-        if data is not None:
-            response["error"]["data"] = data
-        return response
-
-    async def handle_initialize(self, params, id):
-        return self.create_response(id, {
-            "protocolVersion": PROTOCOL_VERSION,
-            "serverInfo": {
-                "name": "Mock MCP Server",
-                "version": "1.0.0"
+TOOLS = [
+    {
+        "name": "echo",
+        "description": "Echoes back the input text.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Text to echo back."}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "echo_region",
+        "description": "Echoes the text and the region, which also travels in the Mcp-Param-Region header.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "region": {"type": "string", "description": "Region name, mirrored into a header.", "x-mcp-header": "Region"},
+                "text": {"type": "string", "description": "Text to echo back."},
             },
-            "capabilities": {
-                "tools": {
-                    "listChanged": True
-                }
-            },
-            "tools": [
-                {
-                    "name": "echo",
-                    "description": "Echo test tool for MCP server.",
-                    "version": "1.0.0",
-                    "parameters": [
-                        {
-                            "name": "message",
-                            "description": "Message to echo back.",
-                            "required": True,
-                            "type": "string"
-                        }
-                    ]
-                }
-            ]
-        })
+            "required": ["region", "text"],
+        },
+    },
+    {
+        "name": "count",
+        "description": "Counts to n (1-10). With --sse the reply streams in while it counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"n": {"type": "integer", "description": "How far to count."}},
+            "required": ["n"],
+        },
+    },
+    {
+        "name": "broken_header",
+        "description": "Has an invalid x-mcp-header annotation (inside array items), so clients must hide it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string", "x-mcp-header": "Tag"}}},
+        },
+    },
+]
+TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
+# x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
+LEGACY_TOOLS = [TOOLS_BY_NAME["echo"], TOOLS_BY_NAME["count"]]
 
-    async def handle_tools_list(self, params, id):
-        # Return tools in MCP spec-compliant format
-        return self.create_response(id, {
-            "tools": [
-                {
-                    "name": "echo",
-                    "description": "Echoes back the input text",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "text": {"type": "string", "description": "Text to echo back."}
-                        },
-                        "required": ["text"],
-                        "additionalProperties": False
-                    }
-                }
-            ]
-        })
 
-    async def handle_echo_tool(self, params, id):
-        if "text" not in params:
-            return self.create_error_response(id, INVALID_PARAMS, "Missing required parameter: text")
-        
-        return self.create_response(id, {
-            "text": f"Echo: {params['text']}"
-        })
+def rpc_error(request_id, code, message, data=None):
+    error = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
-    async def handle_health_check(self, params, id):
-        return self.create_response(id, {
-            "status": "healthy",
-            "uptime": 0,  # TODO: Add actual uptime tracking
-            "version": "1.0.0"
-        })
 
-    async def handle_tools_call(self, params, id):
-        # For the echo tool, just echo back the text argument
-        tool_name = params.get("name")
-        arguments = params.get("arguments", {})
-        if tool_name == "echo":
-            text = arguments.get("text", "")
-            return self.create_response(id, {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Echo: {text}"
-                    }
-                ]
-            })
+def text_content(text):
+    return {"type": "text", "text": text}
+
+
+def decode_header(value):
+    if value and value.startswith("=?base64?") and value.endswith("?="):
+        return base64.b64decode(value[len("=?base64?"):-2]).decode("utf-8")
+    return value
+
+
+def header_string(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def header_params(schema, path=()):
+    """(header name, property path) for every x-mcp-header reachable through properties."""
+    for name, prop in (schema.get("properties") or {}).items():
+        if "x-mcp-header" in prop:
+            yield prop["x-mcp-header"], path + (name,)
+        yield from header_params(prop, path + (name,))
+
+
+def lookup(args, path):
+    for key in path:
+        if not isinstance(args, dict) or key not in args:
+            return None
+        args = args[key]
+    return args
+
+
+def origin_matches(pattern, origin):
+    if pattern == "*":
+        return True
+    if pattern.endswith(":*"):
+        base = pattern[:-2]
+        port = origin[len(base) + 1:]
+        return origin == base or (origin.startswith(base + ":") and port.isdigit())
+    return origin == pattern
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "MockMCP/2.0"
+    label = ""
+
+    def log_message(self, format, *args):
+        if self.server.verbose:
+            super().log_message(format, *args)
+
+    def do_OPTIONS(self):
+        if not self.origin_allowed():
+            return self.send_json(403, rpc_error(None, INVALID_REQUEST, "Forbidden: origin not allowed"))
+        self.send_response(204)
+        self.send_cors_headers(preflight=True)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):
+        # Neither era serves the standalone GET stream here; 405 is the specified answer.
+        self.label = "GET"
+        self.send_json(405, rpc_error(None, INVALID_REQUEST, "Method not allowed"))
+
+    def do_DELETE(self):
+        session_id = self.headers.get("Mcp-Session-Id")
+        self.label = "DELETE session"
+        with self.server.lock:
+            ended = self.server.mode != "modern" and self.server.sessions.pop(session_id, None) is not None
+        if ended:
+            self.send_json(200, {})
         else:
-            return self.create_error_response(id, METHOD_NOT_FOUND, f"Tool '{tool_name}' not found")
+            self.send_json(405, rpc_error(None, INVALID_REQUEST, "Method not allowed"))
 
-    async def handle_mcp_message(self, request):
+    def do_POST(self):
+        if not self.origin_allowed():
+            return self.send_json(403, rpc_error(None, INVALID_REQUEST, "Forbidden: origin not allowed"))
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.server.verbose:
+            print(f"--> {dict(self.headers)}\n    {body.decode('utf-8', 'replace')}", flush=True)
         try:
-            # Log request headers and body
-            headers = dict(request.headers)
-            body = await request.text()
-            logging.info(f"Incoming request headers: {json.dumps(headers, indent=2)}")
-            logging.info(f"Incoming request body: {body}")
-            print("\n--- Incoming Request ---")
-            print("Headers:", json.dumps(headers, indent=2))
-            print("Body:", body)
-            # Handle JSON-RPC messages
-            try:
-                message = json.loads(body)
-            except json.JSONDecodeError:
-                return web.json_response(
-                    self.create_error_response(None, PARSE_ERROR, "Invalid JSON")
-                )
-            if not isinstance(message, dict):
-                return web.json_response(
-                    self.create_error_response(None, INVALID_REQUEST, "Invalid message format")
-                )
-            if message.get("jsonrpc") != JSONRPC_VERSION:
-                return web.json_response(
-                    self.create_error_response(message.get("id"), INVALID_REQUEST, "Invalid JSON-RPC version")
-                )
-            method = message.get("method")
-            params = message.get("params", {})
-            id = message.get("id")
-            if not method:
-                return web.json_response(
-                    self.create_error_response(id, INVALID_REQUEST, "Method is required")
-                )
-            # Route the message to the appropriate handler
-            if method == "initialize":
-                response = await self.handle_initialize(params, id)
-            elif method == "tools/list":
-                response = await self.handle_tools_list(params, id)
-            elif method == "tools/call":
-                response = await self.handle_tools_call(params, id)
-            elif method == "tool/echo":
-                response = await self.handle_echo_tool(params, id)
-            elif method == "health_check":
-                response = await self.handle_health_check(params, id)
+            message = json.loads(body or b"null")
+        except json.JSONDecodeError:
+            return self.send_json(400, rpc_error(None, PARSE_ERROR, "Parse error"))
+        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or "method" not in message:
+            return self.send_json(400, rpc_error(None, INVALID_REQUEST, "Invalid JSON-RPC request"))
+
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+        self.label = message["method"]
+        if "id" not in message:
+            return self.send_json(202, None)
+        if message["method"] == "initialize":
+            return self.handle_initialize(message, params)
+        if "io.modelcontextprotocol/protocolVersion" in meta:
+            return self.handle_modern(message, params, meta)
+        return self.handle_legacy(message, params)
+
+    # --- Modern (2026-07-28) ---
+
+    def handle_modern(self, message, params, meta):
+        if self.server.mode == "legacy":
+            # What a 2025-era server says to any request that skipped initialize.
+            return self.send_json(400, rpc_error(None, -32000, "Bad Request: No valid session ID provided"))
+        self.label += " (modern)"
+        version = meta.get("io.modelcontextprotocol/protocolVersion")
+        problem = self.header_problem(message["method"], params, version)
+        if problem:
+            return self.send_json(400, rpc_error(message["id"], HEADER_MISMATCH, f"Header mismatch: {problem}"))
+        if version != MODERN_VERSION:
+            return self.send_json(400, rpc_error(
+                message["id"], UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version",
+                {"supported": self.supported_versions(), "requested": version},
+            ))
+        if "io.modelcontextprotocol/clientCapabilities" not in meta:
+            return self.send_json(400, rpc_error(message["id"], INVALID_PARAMS, "_meta is missing io.modelcontextprotocol/clientCapabilities"))
+        return self.dispatch(message, params, modern=True)
+
+    def header_problem(self, method, params, version):
+        if self.headers.get("MCP-Protocol-Version") != version:
+            return f"MCP-Protocol-Version is {self.headers.get('MCP-Protocol-Version')!r} but _meta says {version!r}"
+        if self.headers.get("Mcp-Method") != method:
+            return f"Mcp-Method is {self.headers.get('Mcp-Method')!r} but the body calls {method!r}"
+        name_field = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}.get(method)
+        if name_field and decode_header(self.headers.get("Mcp-Name")) != params.get(name_field):
+            return f"Mcp-Name is {self.headers.get('Mcp-Name')!r} but params.{name_field} is {params.get(name_field)!r}"
+        tool = TOOLS_BY_NAME.get(params.get("name")) if method == "tools/call" else None
+        for header, path in header_params(tool["inputSchema"]) if tool else ():
+            value = lookup(params.get("arguments") or {}, path)
+            if value is None:
+                continue
+            sent = self.headers.get(f"Mcp-Param-{header}")
+            if sent is None:
+                return f"Mcp-Param-{header} is missing"
+            if decode_header(sent) != header_string(value):
+                return f"Mcp-Param-{header} is {sent!r} but the argument is {value!r}"
+        return None
+
+    def supported_versions(self):
+        return [MODERN_VERSION] + (LEGACY_VERSIONS if self.server.mode == "dual" else [])
+
+    # --- Legacy (2025-03-26 through 2025-11-25) ---
+
+    def handle_initialize(self, message, params):
+        requested = params.get("protocolVersion")
+        if self.server.mode == "modern":
+            return self.send_json(400, rpc_error(
+                message["id"], UNSUPPORTED_PROTOCOL_VERSION,
+                f"This server only supports MCP {MODERN_VERSION}, which has no initialize handshake.",
+                {"supported": [MODERN_VERSION], "requested": requested},
+            ))
+        version = requested if requested in LEGACY_VERSIONS else LEGACY_VERSIONS[0]
+        session_id = uuid.uuid4().hex
+        with self.server.lock:
+            self.server.sessions[session_id] = version
+        self.label += f" (legacy {version})"
+        self.respond(message["id"], {
+            "protocolVersion": version,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": SERVER_INFO,
+            "instructions": "A mock server for testing MCP clients.",
+        }, headers={"Mcp-Session-Id": session_id})
+
+    def handle_legacy(self, message, params):
+        if self.server.mode == "modern":
+            return self.send_json(400, rpc_error(message["id"], HEADER_MISMATCH, "Requests need MCP 2026-07-28 _meta and headers"))
+        session_id = self.headers.get("Mcp-Session-Id")
+        if not session_id:
+            return self.send_json(400, rpc_error(None, -32000, "Bad Request: No valid session ID provided"))
+        with self.server.lock:
+            version = self.server.sessions.get(session_id)
+        if version is None:
+            return self.send_json(404, rpc_error(None, -32001, "Session not found"))
+        sent_version = self.headers.get("MCP-Protocol-Version")
+        if sent_version and sent_version != version:
+            return self.send_json(400, rpc_error(message["id"], INVALID_REQUEST, f"MCP-Protocol-Version {sent_version} doesn't match the session's {version}"))
+        self.label += " (legacy)"
+        return self.dispatch(message, params, modern=False)
+
+    # --- Methods ---
+
+    def dispatch(self, message, params, modern):
+        method, request_id = message["method"], message["id"]
+        if method == "server/discover" and modern:
+            return self.respond(request_id, {
+                "resultType": "complete",
+                "supportedVersions": self.supported_versions(),
+                "capabilities": {"tools": {}},
+                "_meta": {"io.modelcontextprotocol/serverInfo": SERVER_INFO},
+                "instructions": "A mock server for testing MCP clients.",
+                "ttlMs": 60000,
+                "cacheScope": "public",
+            })
+        if method == "tools/list":
+            return self.list_tools(request_id, params, modern)
+        if method == "tools/call":
+            return self.call_tool(request_id, params, modern)
+        return self.send_json(404 if modern else 200, rpc_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}"))
+
+    def list_tools(self, request_id, params, modern):
+        if not modern:
+            return self.respond(request_id, {"tools": LEGACY_TOOLS})
+        try:
+            start = int(params.get("cursor") or 0)
+        except ValueError:
+            return self.send_json(400, rpc_error(request_id, INVALID_PARAMS, "Invalid cursor"))
+        result = {"resultType": "complete", "tools": TOOLS[start:start + PAGE_SIZE], "ttlMs": 30000, "cacheScope": "public"}
+        if start + PAGE_SIZE < len(TOOLS):
+            result["nextCursor"] = str(start + PAGE_SIZE)
+        return self.respond(request_id, result)
+
+    def call_tool(self, request_id, params, modern):
+        name, args = params.get("name"), params.get("arguments") or {}
+        available = TOOLS if modern else LEGACY_TOOLS
+        if name not in {tool["name"] for tool in available}:
+            return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"Unknown tool: {name}"))
+        complete = {"resultType": "complete"} if modern else {}
+        steps = 0
+        if name == "echo":
+            text = f"Echo: {args.get('text', '')}"
+        elif name == "echo_region":
+            text = f"Echo from {args.get('region')}: {args.get('text', '')}"
+        elif name == "count":
+            steps = max(1, min(int(args.get("n", 3)), 10))
+            text = f"Counted to {steps}"
+        else:
+            return self.respond(request_id, {**complete, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
+        progress_token = (params.get("_meta") or {}).get("progressToken")
+        self.respond(request_id, {**complete, "content": [text_content(text)]}, steps=steps, progress_token=progress_token)
+
+    # --- Responses ---
+
+    def respond(self, request_id, result, headers=None, steps=0, progress_token=None):
+        reply = {"jsonrpc": "2.0", "id": request_id, "result": result}
+        if not self.server.sse:
+            return self.send_json(200, reply, headers)
+        self.send_response(200)
+        self.send_cors_headers()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        # CRLF line endings and keep-alive comments exercise the client's SSE parser.
+        self.write_event(": stream opened")
+        for step in range(1, steps + 1):
+            time.sleep(0.05)
+            if progress_token is None:
+                self.write_event(f": working {step}/{steps}")
             else:
-                response = self.create_error_response(id, METHOD_NOT_FOUND, f"Method '{method}' not found")
-            # Log outgoing response
-            logging.info(f"Outgoing response: {json.dumps(response, indent=2)}")
-            print("--- Outgoing Response ---")
-            print(json.dumps(response, indent=2))
-            return web.json_response(response)
-        except Exception as e:
-            logging.error(f"Error handling request: {str(e)}", exc_info=True)
-            return web.json_response(
-                self.create_error_response(None, INTERNAL_ERROR, str(e))
-            )
+                self.write_event(self.sse_data({
+                    "jsonrpc": "2.0", "method": "notifications/progress",
+                    "params": {"progressToken": progress_token, "progress": step, "total": steps},
+                }))
+        self.write_event(f"id: {request_id}\r\nevent: message\r\n" + self.sse_data(reply))
+        print(f"POST {self.label} -> 200 (SSE)", flush=True)
 
-    async def start(self):
-        runner = web.AppRunner(self.app)
-        await runner.setup()
-        site = web.TCPSite(runner, self.host, self.port)
-        await site.start()
+    @staticmethod
+    def sse_data(message):
+        return f"data: {json.dumps(message)}"
 
-        logging.info(f"MCP Server running on {self.host}:{self.port}")
-        print(f"\nMCP Server running on {self.host}:{self.port}")
-        print("Press Ctrl+C to stop the server")
-        print("Messages will be logged to mcp_server.log\n")
+    def write_event(self, text):
+        self.wfile.write((text + "\r\n\r\n").encode("utf-8"))
+        self.wfile.flush()
 
-        try:
-            while True:
-                await asyncio.sleep(3600)
-        except KeyboardInterrupt:
-            logging.info("Server stopped by user")
-            print("\nServer stopped by user")
-            await runner.cleanup()
+    def send_json(self, status, body, headers=None):
+        data = b"" if body is None else json.dumps(body).encode("utf-8")
+        self.send_response(status)
+        self.send_cors_headers()
+        if body is not None:
+            self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
+        print(f"{self.command} {self.label or self.path} -> {status}", flush=True)
+
+    def send_cors_headers(self, preflight=False):
+        origin = self.headers.get("Origin")
+        if origin and self.origin_allowed():
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
+        if preflight:
+            self.send_header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
+            # Echo the request's list: it covers every Mcp-Param-* header and Authorization.
+            self.send_header("Access-Control-Allow-Headers", self.headers.get("Access-Control-Request-Headers") or "Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+
+    def origin_allowed(self):
+        origin = self.headers.get("Origin")
+        return origin is None or any(origin_matches(p, origin) for p in self.server.allowed_origins)
+
 
 def main():
-    server = MCPServer()
+    parser = argparse.ArgumentParser(description="Mock MCP server for local testing.")
+    parser.add_argument("--mode", choices=["modern", "legacy", "dual"], default="dual")
+    parser.add_argument("--sse", action="store_true", help="answer requests with SSE streams instead of JSON")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8081)
+    parser.add_argument(
+        "--allow-origin", action="append", dest="allowed_origins", metavar="ORIGIN",
+        help="browser origin to accept; repeatable, ':*' matches any port, '*' allows all "
+             "(default: http://localhost:* and http://127.0.0.1:*)",
+    )
+    parser.add_argument("--verbose", action="store_true", help="print request headers and bodies")
+    args = parser.parse_args()
+
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server.mode = args.mode
+    server.sse = args.sse
+    server.verbose = args.verbose
+    server.allowed_origins = args.allowed_origins or DEFAULT_ORIGINS
+    server.sessions = {}
+    server.lock = threading.Lock()
+    print(f"Mock MCP server ({args.mode}{', SSE' if args.sse else ''}) on http://{args.host}:{args.port}", flush=True)
     try:
-        asyncio.run(server.start())
+        server.serve_forever()
     except KeyboardInterrupt:
-        logging.info("Server stopped by user")
-        print("\nServer stopped by user")
+        pass
+    finally:
+        server.server_close()
+
 
 if __name__ == "__main__":
-    main() 
+    main()

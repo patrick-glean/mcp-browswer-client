@@ -1,4 +1,3 @@
-# These are built-in Python modules, no need to specify versions
-# asyncio and logging are part of Python's standard library 
-aiohttp==3.14.3
-aiohttp_cors==0.8.1
+# The official MCP Python SDK, used only by tests/reference_server.py.
+# test_mcp_server.py (the mock server) needs nothing beyond the standard library.
+mcp>=2,<3

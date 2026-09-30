@@ -5,12 +5,13 @@
   "scripts": {
     "start": "http-server public",
     "build": "./wasm-build.sh",
-    "setup:python": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
-    "start:mock-mcp": "source venv/bin/activate && python3 test_mcp_server.py",
-    "test:wasm": "node test-wasm.js"
+    "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
+    "start:mock-mcp": "python3 test_mcp_server.py",
+    "start:reference-mcp": "venv/bin/python tests/reference_server.py",
+    "test:rust": "cargo test --lib",
+    "test:browser": "node tests/browser-smoke.mjs"
   },
   "devDependencies": {
-    "http-server": "^14.1.1",
-    "puppeteer": "^21.0.0"
+    "http-server": "^14.1.1"
   }
-} 
+}
