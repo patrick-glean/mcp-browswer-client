@@ -1,11 +1,12 @@
 # MCP Browser Client
 
-A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that runs as a service worker, enabling multi-tab communication capabilities.
+A browser client for MCP (the Model Context Protocol). Its protocol logic is Rust compiled to WebAssembly and runs in a service worker that every open tab shares. It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions.
 
 ## Prerequisites
 
-- Python 3.x
-- Node.js
+- Python 3.x (the mock MCP server uses only the standard library)
+- Node.js 22+ (for the browser smoke test)
+- Google Chrome (for the browser smoke test)
 - Rust (latest stable version)
   - Install via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
@@ -14,7 +15,8 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 ```
 .
 ├── src/                    # Rust source code
-│   ├── lib.rs             # Main Rust implementation and MCP protocol
+│   ├── lib.rs             # WASM exports used by the service worker
+│   ├── mcp/               # MCP client: transport, SSE parser, headers, modern and legacy eras
 │   └── build_info.rs      # Generated build metadata
 ├── public/                # Web assets and service worker
 │   ├── mcp_browser_client_bg.wasm  # Compiled WASM module
@@ -25,14 +27,19 @@ A Rust WebAssembly-based browser client for MCP (Message Control Protocol) that 
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
 │   ├── fonts/             # Inter and DM Sans (OFL)
 │   └── icons/             # Feather icons, rendered as CSS masks (MIT)
-├── venv/                  # Python virtual environment
+├── tests/
+│   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers
+│   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
+├── test_mcp_server.py     # Mock MCP server (modern, legacy or dual-era; JSON or SSE replies)
+├── venv/                  # Python virtual environment (only for the reference server)
 ├── node_modules/          # Node.js dependencies
 ├── .cursor/               # Cursor IDE configuration
 ├── Cargo.toml             # Rust project configuration
 ├── package.json           # Node.js configuration
-├── requirements.txt       # Python dependencies
+├── requirements.txt       # Python dependencies (the official MCP SDK, for the reference server)
 ├── wasm-build.sh          # WASM build script
 ├── generate-build-info.sh # Build metadata generator
+├── deploy-gh-pages.sh     # Publishes public/ to the gh-pages branch
 └── setup.sh              # Project setup script
 ```
 
@@ -79,10 +86,13 @@ npm run start:mock-mcp
 
 - `npm start`: Start the web server
 - `npm run build`: Build the WASM module
-- `npm run start:mock-mcp`: Start the mock MCP server for testing
+- `npm run start:mock-mcp`: Start the mock MCP server on port 8081
+- `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
+- `npm run test:rust`: Run the Rust unit tests
+- `npm run test:browser`: Run the browser smoke test (add `-- --reference` to include the SDK server)
 
 ### Modifying the Rust Code
-1. Edit `src/lib.rs` for MCP protocol implementation
+1. Edit the MCP client in `src/mcp/` (exports live in `src/lib.rs`)
 2. Rebuild WASM:
 ```bash
 ./wasm-build.sh
@@ -95,21 +105,46 @@ npm run start:mock-mcp
 
 Style new UI with the `--theme-*` variables from `public/tokens.css` rather than raw colors, so light and dark mode both keep working. Dark mode is the `dark-theme` class on `<html>`; the header toggle sets it and otherwise it follows the OS setting.
 
+## MCP Support
+
+Connecting to a server works out which protocol era it speaks:
+
+1. The client sends `server/discover` as a 2026-07-28 request. Every modern request carries `_meta` with the protocol version, client info and capabilities, plus the `MCP-Protocol-Version`, `Mcp-Method` and (for `tools/call`, `resources/read`, `prompts/get`) `Mcp-Name` headers.
+2. If the server answers, it's modern. If it rejects the version with `-32022`, the client retries with one the server lists.
+3. Any other `4xx`, or a JSON-RPC error that isn't one of the modern codes, means a legacy server. The client then runs the `initialize` handshake (offering 2025-11-25) and sends `Mcp-Session-Id` and the negotiated version from then on.
+
+The result is remembered per server URL. After the browser restarts the service worker, the first request reconnects automatically. Replies can be plain JSON or an SSE stream. Tool lists are paginated and cached for the server's `ttlMs`. Parameters a tool marks with `x-mcp-header` are also sent as `Mcp-Param-*` headers, and tools with invalid annotations are hidden.
+
+Known constraints:
+
+- **CORS**: the server must allow this site's origin and the headers above (`Authorization` too, if you use a token). Legacy servers that use sessions must also list `Mcp-Session-Id` in `Access-Control-Expose-Headers`, or the browser can't read it.
+- **Local servers**: from a public site such as GitHub Pages, Chrome 142+ asks the user before it lets the page reach `localhost` ("Apps on device").
+- **Auth**: OAuth isn't supported yet. For servers that accept a static token, add a bearer token in the server details; it's stored in this browser's `localStorage`.
+- **Not yet supported**: `input_required` results (elicitation), `subscriptions/listen`, resources and prompts in the UI, and the deprecated 2024-11-05 HTTP+SSE transport.
+
 ## Testing
 
-The included mock MCP server provides:
-- Echo service on port 8081
-- Message logging to `mcp_server.log`
-- Terminal output for debugging
+`test_mcp_server.py` is a mock MCP server that needs nothing beyond Python's standard library:
 
-Test the system by:
-1. Starting the mock MCP server: `npm run start:mock-mcp`
-2. Opening multiple browser tabs to `http://localhost:8080`
-3. Using the web interface to:
-   - Check WASM status
-   - Initialize MCP connection
-   - List available tools
-   - Send test messages
+```bash
+python3 test_mcp_server.py                      # dual-era on http://127.0.0.1:8081
+python3 test_mcp_server.py --mode modern        # 2026-07-28 only
+python3 test_mcp_server.py --mode legacy --sse  # a 2025-era server that streams its replies
+python3 test_mcp_server.py --allow-origin https://example.github.io  # accept another origin
+```
+
+It validates the mirrored headers and protocol versions, paginates `tools/list`, and offers `echo`, `echo_region` (with an `x-mcp-header` parameter), `count` and `broken_header` (an invalid tool clients must hide).
+
+`tests/reference_server.py` runs a server on the official MCP Python SDK (`npm run setup:python` installs it), so you can check interoperability with a real implementation.
+
+To test everything at once:
+
+```bash
+npm run test:rust                   # protocol logic: SSE parsing, header encoding, era detection
+npm run test:browser -- --reference # the real UI in headless Chrome against every server type
+```
+
+The browser test starts its own servers on ports 18080-18086 and exits non-zero if a check fails.
 
 ## Troubleshooting
 
@@ -119,10 +154,10 @@ Test the system by:
    - Clear browser cache if needed
 
 2. **MCP Connection Problems**
-   - Verify MCP server is running
-   - Check `mcp_server.log`
-   - Ensure port 8081 is available
-   - Verify connection settings in `src/lib.rs`
+   - The server details card shows why the last connection failed
+   - Verify the MCP server is running and the URL points at its MCP endpoint (often `/mcp`)
+   - Check the server's CORS settings (see [MCP Support](#mcp-support))
+   - Turn on Debug mode in the Logs tab and check the service worker console for `[WASM]` entries
 
 3. **WASM Loading Failures**
    - Check `public/` for correct WASM files
@@ -157,8 +192,8 @@ flowchart TD
     Browser -- Message --> SW
     SW -- Call/Response --> WASM
     SW -- JSON-RPC, Tools, Status --> Browser
-    SW -- HTTP/WebSocket --> MCP1
-    SW -- HTTP/WebSocket --> MCP2
+    SW -- Streamable HTTP --> MCP1
+    SW -- Streamable HTTP --> MCP2
     MCP2 -- (optional) --> Model
 ```
 
@@ -167,7 +202,7 @@ flowchart TD
 1. **User** interacts with the **UI (Web Interface)**, providing input and receiving output.
 2. The **UI** sends requests (e.g., tool calls, status checks) to the **Service Worker**.
 3. The **Service Worker** acts as the interface layer, loading and using the **WASM Module (Rust MCP Client)** for protocol logic and message processing.
-4. The **Service Worker** communicates with one or more **MCP Servers** over HTTP or WebSocket.
+4. The **Service Worker** communicates with one or more **MCP Servers** over Streamable HTTP, through the WASM module.
 5. An **MCP Server** may itself act as a **Model Provider** or proxy requests to a model provider.
 6. Responses and status updates flow back through the service worker and WASM to the UI, and are presented to the user.
 
@@ -206,7 +241,7 @@ A: You can! This project is designed so that the UI can be written in JS/TS, whi
 
 **Q: Is this project open to contributions?**
 
-A: Yes! We welcome contributions and feedback. Please see CONTRIBUTING.md for guidelines.
+A: Yes! We welcome contributions and feedback.
 
 ## License
 

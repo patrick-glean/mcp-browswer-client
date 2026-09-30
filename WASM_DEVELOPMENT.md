@@ -4,7 +4,7 @@
 
 When adding new functionality to the WASM module, follow these steps in order:
 
-1. **Rust Implementation** (`src/lib.rs`):
+1. **Rust Implementation** (`src/lib.rs` for exports; protocol code belongs in `src/mcp/`):
    ```rust
    #[wasm_bindgen]
    pub fn my_new_function() -> Result<String, JsValue> {
@@ -46,6 +46,30 @@ When adding new functionality to the WASM module, follow these steps in order:
        this.updateUIWithResult(message.result);
        break;
    ```
+
+## MCP Client API
+
+The MCP client lives in `src/mcp/` and is exported from `src/lib.rs`. Every call takes and returns JSON strings. On failure the promise rejects with a JSON `McpError`: `{kind, message, status?, code?, data?}`, where `kind` is one of `network`, `timeout`, `auth_required`, `http`, `protocol`, `unsupported_version`, `invalid_response` or `internal`. `mcpError()` in `sw.js` parses it.
+
+| Export | Returns |
+| --- | --- |
+| `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions}` |
+| `list_tools(url, options)` | `{tools, rejected, ttlMs, cacheScope, fromCache}` |
+| `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
+| `forget_server(url)` | nothing; drops the remembered connection |
+
+`options` is `{"bearerToken"?: string, "refresh"?: boolean}`. `list_tools` and `call_tool` connect on their own if needed, so they keep working after the browser restarts the service worker.
+
+Page-to-worker messages and the replies the worker broadcasts:
+
+| Message | Reply |
+| --- | --- |
+| `{type: 'connect-mcp', url, bearerToken?}` (`initialize-mcp` still works) | `mcp_server_connected {url, info}` or `mcp_server_error {url, action, error}` |
+| `{type: 'list_tools', url, refresh?, bearerToken?}` | `tools_list {url, tools, rejected, ttlMs, fromCache}` or `mcp_server_error` |
+| `{type: 'call_tool', tapConfig, engramId, bearerToken?}` | `tool_result {result}` or `tool_result {error, errorKind}` |
+| `{type: 'forget-mcp', url}` | none |
+
+The worker handles every message inside `event.waitUntil()` so a long call keeps it alive, and it redacts `bearerToken` values before logging messages.
 
 ## Message Flow Pattern
 
@@ -153,6 +177,8 @@ When adding new functionality to the WASM module, follow these steps in order:
 1. **Build and Test**:
    ```bash
    ./wasm-build.sh
+   npm run test:rust      # unit tests for the protocol logic
+   npm run test:browser   # the real UI in headless Chrome against the mock servers
    ```
 
 2. **Clear Service Worker**:
