@@ -36,6 +36,9 @@
                         <span class="status-uptime" id="wasm-uptime">0s</span>
                     </span>
                 </button>
+                <button type="button" id="guideBtn" class="btn-tertiary" title="How to try this client" aria-controls="guide">
+                    <span class="icon icon-help" aria-hidden="true"></span>Guide
+                </button>
                 <button type="button" id="themeToggle" class="btn-icon btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
                     <span class="icon icon-theme" aria-hidden="true"></span>
                 </button>
@@ -78,7 +81,7 @@
                 <button id="consoleTabBtn" class="tab-btn active">Console</button>
                 <button id="mcpTabBtn" class="tab-btn">MCP</button>
                 <button id="memoryTabBtn" class="tab-btn">Memory</button>
-                <button id="logsTabBtn" class="tab-btn">Logs</button>
+                <button id="logsTabBtn" class="tab-btn">Logs<span id="logsBadge" class="tab-badge" hidden></span></button>
                 <button id="popoutLogsBtn" class="tab-btn tab-btn-icon" title="Pop out logs" aria-label="Pop out logs">
                     <span class="icon icon-external-link" aria-hidden="true"></span>
                 </button>
@@ -97,7 +100,7 @@
                         <aside class="chat-card-right panel panel-muted">
                             <div class="cbus-tap-card">
                                 <div class="panel-title">LLM target</div>
-                                <p class="panel-subtitle">The server and tool that receive your messages.</p>
+                                <p class="panel-subtitle">Pick a tool, then tick Target for message on the field that should receive what you type. Its reply joins the conversation.</p>
                                 <div class="chat-server-select-row">
                                     <label for="chatServerSelect">Server</label>
                                     <select id="chatServerSelect"></select>
@@ -118,7 +121,7 @@
                         <div class="section-header">
                             <div>
                                 <h2>MCP servers</h2>
-                                <p class="section-subtitle">Add a server and connect to see its tools. Servers on MCP 2026-07-28 and older revisions both work.</p>
+                                <p class="section-subtitle">Adding a server connects to it and lists its tools. Servers on MCP 2026-07-28 and older revisions both work. <button type="button" class="link-button" data-open-guide>Need a server to try?</button></p>
                             </div>
                             <div class="mcp-controls-bar">
                                 <button id="initProtocol" class="btn-primary">Connect</button>
@@ -128,7 +131,7 @@
                         <div class="mcp-servers-group">
                             <div class="mcp-controls-header">
                                 <div class="add-server-controls">
-                                    <input type="text" id="serverUrl" placeholder="Server URL, e.g. http://localhost:8081">
+                                    <input type="text" id="serverUrl" placeholder="Server URL, e.g. http://127.0.0.1:8081 or https://huggingface.co/mcp">
                                     <input type="text" id="serverAlias" placeholder="Alias (optional)">
                                     <button id="addServerBtn" class="btn-primary"><span class="icon icon-plus" aria-hidden="true"></span>Add server</button>
                                 </div>
@@ -192,24 +195,363 @@
                 <div class="log-section">
                     <div class="control-group">
                         <div class="log-header">
-                            <h2>Logs</h2>
-                            <label class="debug-toggle">
-                                <input type="checkbox" id="debugModeToggle">
-                                <span class="slider"></span>
-                                Debug mode
-                            </label>
+                            <div>
+                                <h2>Logs</h2>
+                                <p class="section-subtitle">Every connect, tool listing and tool call with its timing, from this page, the service worker and the WASM client. Choose Everything to add each HTTP request and response. Bearer tokens are never logged.</p>
+                            </div>
+                            <div class="log-toolbar">
+                                <select id="logLevel" aria-label="Which entries to show">
+                                    <option value="error">Errors</option>
+                                    <option value="warn">Warnings and errors</option>
+                                    <option value="info">Info</option>
+                                    <option value="debug">Everything</option>
+                                </select>
+                                <input type="search" id="logSearch" placeholder="Filter by text or server" aria-label="Filter log entries">
+                                <button type="button" id="copyLogsBtn" title="Copy the entries shown"><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy</span></button>
+                                <button type="button" id="downloadLogsBtn" title="Download every entry as JSON Lines"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
+                                <button type="button" id="clearLogsBtn" class="btn-outline">Clear</button>
+                            </div>
                         </div>
-                        <div class="log-container" id="log-container"></div>
+                        <div class="log-container" id="log-container" role="log"></div>
+                        <p class="log-count" id="logCount"></p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <aside id="guide" class="guide-drawer" aria-labelledby="guideTitle" hidden>
+        <div class="guide-header">
+            <h2 id="guideTitle" tabindex="-1">Try it out</h2>
+            <button type="button" id="closeGuide" class="btn-icon btn-tertiary" aria-label="Close the guide">
+                <span class="icon icon-x" aria-hidden="true"></span>
+            </button>
+        </div>
+        <p class="guide-intro">This page is the whole MCP client: Rust compiled to WebAssembly, running in a service worker. Pick a server, then follow the steps. The guide stays open while you work.</p>
+
+        <section class="guide-section">
+            <h3>1. Pick a server</h3>
+            <p class="guide-label">Public servers, nothing to install</p>
+            <ul class="guide-servers">
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Hugging Face</strong> <span class="guide-meta">MCP 2026-07-28</span>
+                        <p>Try <code>hub_repo_search</code> with query <code>whisper</code>.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://huggingface.co/mcp" data-alias="Hugging Face">Add and connect</button>
+                </li>
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Context7</strong> <span class="guide-meta">MCP 2026-07-28</span>
+                        <p>Try <code>resolve-library-id</code> with libraryName <code>react</code> and query <code>hooks</code>.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://mcp.context7.com/mcp" data-alias="Context7">Add and connect</button>
+                </li>
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Microsoft Learn</strong> <span class="guide-meta">2025-06-18, sessions, streamed replies</span>
+                        <p>Try <code>microsoft_docs_search</code> with query <code>service worker</code>.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://learn.microsoft.com/api/mcp" data-alias="Microsoft Learn">Add and connect</button>
+                </li>
+                <li>
+                    <div class="guide-server-text">
+                        <strong>DeepWiki</strong> <span class="guide-meta">2025-11-25, no sessions</span>
+                        <p>Try <code>read_wiki_structure</code> with repoName <code>modelcontextprotocol/<wbr>modelcontextprotocol</code>.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://mcp.deepwiki.com/mcp" data-alias="DeepWiki">Add and connect</button>
+                </li>
+            </ul>
+            <p class="guide-note">These are third-party services. They only get requests when you connect or call a tool.</p>
+
+            <p class="guide-label">The mock server from <a href="https://github.com/patrick-glean/mcp-browswer-client" target="_blank" rel="noopener">the repo</a></p>
+            <p>It exercises every protocol path: modern and legacy servers, streamed replies, header parameters and a tool clients must hide. Run it from a clone:</p>
+            <div class="guide-command">
+                <code id="mockCommand">python3 test_mcp_server.py</code>
+                <button type="button" class="btn-sm" data-copy="mockCommand"><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy</span></button>
+            </div>
+            <p id="mockRemoteNote" class="guide-note" hidden>The command lets this site's origin through the mock's CORS check. Chrome will ask whether this site may access apps on your device; allow it so the page can reach localhost.</p>
+            <div class="guide-actions">
+                <button type="button" class="btn-sm" data-add-server="http://127.0.0.1:8081" data-alias="Mock server">Add and connect to 127.0.0.1:8081</button>
+            </div>
+            <p class="guide-note">Add <code>--mode legacy</code> for a 2025-era server, <code>--sse</code> for streamed replies or <code>--token secret</code> for one that needs a bearer token.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>2. Check the connection</h3>
+            <p>The server details show its status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code> and <code>count</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the Logs tab says why.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>3. Call a tool</h3>
+            <p>Click a tool under Available tools, fill in its fields and choose Call tool. The reply appears beside it, and Raw JSON shows the whole result. Optional fields left empty aren't sent.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>4. Chat through a tool</h3>
+            <p>On the Console tab, choose a server and tool under LLM target and tick Target for message on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>5. Read the logs</h3>
+            <p>The Logs tab lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Choose Everything to see every HTTP request and response. Copy or Download them to share a problem.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>If something goes wrong</h3>
+            <dl class="guide-faq">
+                <dt>Couldn't reach the server</dt>
+                <dd>It isn't running, or it doesn't allow this site through CORS. A local server reached from a public site also needs the browser's local network permission.</dd>
+                <dt>HTTP 404 or 405</dt>
+                <dd>The URL isn't the MCP endpoint, which often ends in <code>/mcp</code>.</dd>
+                <dt>HTTP 401</dt>
+                <dd>The server wants a token. Paste it into Bearer token in the server details, then choose Connect.</dd>
+                <dt>Old behavior after a rebuild</dt>
+                <dd>Reload the page; the Logs tab should show "Loaded the WASM module" with the new build time. If it doesn't, open the runtime controls from the status pill and reload the WASM module.</dd>
+            </dl>
+        </section>
+    </aside>
+
     <script>
+        // The logs pop-out (?logs=1) only listens: registering the worker again from a second
+        // window would restart it and drop every open tab's connections.
+        const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
+
+        // The Logs tab: entries from this page, the service worker and the WASM client, kept in
+        // a capped buffer and filtered by level and text.
+        class LogPanel {
+            static LEVELS = ['debug', 'info', 'warn', 'error'];
+            static MAX_ENTRIES = 1000;
+
+            constructor() {
+                this.container = document.getElementById('log-container');
+                this.levelSelect = document.getElementById('logLevel');
+                this.searchInput = document.getElementById('logSearch');
+                this.countLabel = document.getElementById('logCount');
+                this.badge = document.getElementById('logsBadge');
+                this.entries = [];
+                this.nodes = new WeakMap();
+                this.searchText = new WeakMap();
+                this.unseenErrors = 0;
+                this.query = '';
+                // Debug mode used to be a switch; it maps onto showing everything.
+                this.level = localStorage.getItem('logLevel') || (localStorage.getItem('debugMode') === 'true' ? 'debug' : 'info');
+                localStorage.removeItem('debugMode');
+                this.levelSelect.value = this.level;
+                this.levelSelect.addEventListener('change', () => {
+                    this.level = this.levelSelect.value;
+                    localStorage.setItem('logLevel', this.level);
+                    this.render();
+                });
+                this.searchInput.addEventListener('input', () => {
+                    this.query = this.searchInput.value.trim().toLowerCase();
+                    this.render();
+                });
+                document.getElementById('copyLogsBtn').addEventListener('click', event => this.copy(event.currentTarget));
+                document.getElementById('downloadLogsBtn').addEventListener('click', () => this.download());
+                document.getElementById('clearLogsBtn').addEventListener('click', () => this.clear());
+                this.updateCount();
+            }
+
+            // Takes a string, an entry from the worker, or the older {level: 'INFO', message, timestamp}.
+            static normalize(raw) {
+                if (typeof raw !== 'object' || raw === null) {
+                    return { time: new Date().toISOString(), level: 'info', source: 'page', message: String(raw) };
+                }
+                let level = String(raw.level || 'info').toLowerCase();
+                if (level === 'warning') level = 'warn';
+                if (!LogPanel.LEVELS.includes(level)) level = 'info';
+                const entry = {
+                    time: raw.time || raw.timestamp || new Date().toISOString(),
+                    level,
+                    source: raw.source || 'page',
+                    message: String(raw.message ?? '')
+                };
+                if (raw.server) entry.server = raw.server;
+                if (raw.detail !== undefined) entry.detail = raw.detail;
+                return entry;
+            }
+
+            add(raw) {
+                const entry = LogPanel.normalize(raw);
+                this.entries.push(entry);
+                if (this.entries.length > LogPanel.MAX_ENTRIES) {
+                    this.nodes.get(this.entries.shift())?.remove();
+                }
+                if (entry.level === 'error' && !this.isVisible()) {
+                    this.unseenErrors++;
+                    this.updateBadge();
+                }
+                if (this.matches(entry)) {
+                    const stick = this.isScrolledToBottom();
+                    this.container.appendChild(this.nodeFor(entry));
+                    if (stick) this.scrollToBottom();
+                }
+                this.updateCount();
+                return entry;
+            }
+
+            matches(entry) {
+                if (LogPanel.LEVELS.indexOf(entry.level) < LogPanel.LEVELS.indexOf(this.level)) return false;
+                if (!this.query) return true;
+                if (!this.searchText.has(entry)) {
+                    const detail = entry.detail === undefined ? '' : JSON.stringify(entry.detail);
+                    this.searchText.set(entry, `${entry.message} ${entry.server || ''} ${entry.source} ${detail}`.toLowerCase());
+                }
+                return this.searchText.get(entry).includes(this.query);
+            }
+
+            nodeFor(entry) {
+                if (this.nodes.has(entry)) return this.nodes.get(entry);
+                const row = document.createElement('div');
+                row.className = `log-entry level-${entry.level}`;
+                const time = document.createElement('time');
+                time.className = 'log-time';
+                time.dateTime = entry.time;
+                time.textContent = LogPanel.clock(entry.time);
+                const body = document.createElement('div');
+                body.className = 'log-body';
+                body.append(LogPanel.span('log-message', entry.message));
+                if (entry.server) {
+                    const server = LogPanel.span('log-server', LogPanel.shortUrl(entry.server));
+                    server.title = entry.server;
+                    body.append(' ', server);
+                }
+                if (entry.detail !== undefined) {
+                    const details = document.createElement('details');
+                    details.className = 'log-detail';
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Details';
+                    const pre = document.createElement('pre');
+                    // Rendered on first open; bodies can be several KB each.
+                    details.addEventListener('toggle', () => {
+                        if (details.open && !pre.textContent) pre.textContent = JSON.stringify(entry.detail, null, 2);
+                    });
+                    details.append(summary, pre);
+                    body.append(details);
+                }
+                row.append(time, LogPanel.span('log-level', entry.level.toUpperCase()), LogPanel.span('log-source', entry.source), body);
+                this.nodes.set(entry, row);
+                return row;
+            }
+
+            render() {
+                this.container.replaceChildren(...this.entries.filter(entry => this.matches(entry)).map(entry => this.nodeFor(entry)));
+                this.scrollToBottom();
+                this.updateCount();
+            }
+
+            updateCount() {
+                const shown = this.container.childElementCount;
+                const total = this.entries.length;
+                this.container.dataset.empty = total ? 'No entries match these filters.' : 'Nothing logged yet.';
+                this.countLabel.textContent = shown === total
+                    ? `${total} ${total === 1 ? 'entry' : 'entries'}`
+                    : `Showing ${shown} of ${total} entries`;
+            }
+
+            isVisible() {
+                return this.container.offsetParent !== null;
+            }
+
+            isScrolledToBottom() {
+                const c = this.container;
+                return c.scrollHeight - c.scrollTop - c.clientHeight < 24;
+            }
+
+            scrollToBottom() {
+                this.container.scrollTop = this.container.scrollHeight;
+            }
+
+            markSeen() {
+                this.unseenErrors = 0;
+                this.updateBadge();
+                this.scrollToBottom();
+            }
+
+            updateBadge() {
+                this.badge.hidden = this.unseenErrors === 0;
+                this.badge.textContent = this.unseenErrors > 99 ? '99+' : String(this.unseenErrors);
+                this.badge.title = `${this.unseenErrors} new error${this.unseenErrors === 1 ? '' : 's'}`;
+            }
+
+            async copy(button) {
+                const text = this.entries.filter(entry => this.matches(entry)).map(LogPanel.toText).join('\n');
+                try {
+                    await navigator.clipboard.writeText(text);
+                    flashLabel(button, 'Copied');
+                } catch (error) {
+                    this.add({ level: 'error', message: `Couldn't copy the logs: ${error.message}` });
+                }
+            }
+
+            download() {
+                const about = {
+                    app: 'mcp-browser-client',
+                    build: document.getElementById('wasm-compiled')?.textContent,
+                    page: location.href,
+                    userAgent: navigator.userAgent,
+                    savedAt: new Date().toISOString()
+                };
+                const lines = [about, ...this.entries].map(line => JSON.stringify(line));
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'application/x-ndjson' }));
+                link.download = `mcp-browser-client-logs-${about.savedAt.replace(/[:.]/g, '-')}.jsonl`;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+            }
+
+            clear() {
+                this.entries = [];
+                this.container.replaceChildren();
+                this.unseenErrors = 0;
+                this.updateBadge();
+                this.updateCount();
+            }
+
+            static toText(entry) {
+                const server = entry.server ? ` (${entry.server})` : '';
+                const detail = entry.detail === undefined ? '' : `\n    ${JSON.stringify(entry.detail)}`;
+                return `${entry.time} ${entry.level.toUpperCase().padEnd(5)} [${entry.source}] ${entry.message}${server}${detail}`;
+            }
+
+            static clock(time) {
+                const date = new Date(time);
+                return Number.isNaN(date.getTime())
+                    ? String(time)
+                    : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, fractionalSecondDigits: 3 });
+            }
+
+            static shortUrl(url) {
+                try {
+                    const { host, pathname } = new URL(url);
+                    return pathname === '/' ? host : host + pathname;
+                } catch {
+                    return url;
+                }
+            }
+
+            static span(className, text) {
+                const span = document.createElement('span');
+                span.className = className;
+                span.textContent = text;
+                return span;
+            }
+        }
+
+        // Swaps a button's label for a moment, e.g. "Copied".
+        function flashLabel(button, text) {
+            const label = button.querySelector('.btn-label') || button;
+            label.dataset.label ??= label.textContent;
+            label.textContent = text;
+            clearTimeout(label._flashTimer);
+            label._flashTimer = setTimeout(() => { label.textContent = label.dataset.label; }, 1500);
+        }
+
         class ChatShell {
             constructor() {
-                this.logContainer = document.getElementById('log-container');
+                this.logPanel = new LogPanel();
                 this.swStatus = document.getElementById('sw-status');
                 this.wasmStatus = document.getElementById('wasm-status');
                 this.swUptime = document.getElementById('sw-uptime');
@@ -222,8 +564,9 @@
                 this.checkCounter = 0;
                 this.selectedServerUrl = null;
                 this.isInitialized = false;
-                this.isDebugMode = false;
                 this.servers = this.loadServers();
+                this.pendingConnects = new Map();
+                this.pendingCall = null;
                 
                 // Store the bound message handler
                 this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
@@ -232,19 +575,13 @@
                 this.updateSwStatus(false);
                 this.updateWasmStatus(false);
                 
-                this.setupServiceWorker();
+                if (LOGS_ONLY) {
+                    navigator.serviceWorker.addEventListener('message', this.boundMessageHandler);
+                } else {
+                    this.setupServiceWorker();
+                }
                 this.setupEventListeners();
                 this.startUptimeCounter();
-                
-                // Initialize debug mode from localStorage
-                const debugMode = localStorage.getItem('debugMode') === 'true';
-                this.setDebugMode(debugMode);
-                
-                // Update the toggle switch to match
-                const debugToggle = document.getElementById('debugModeToggle');
-                if (debugToggle) {
-                    debugToggle.checked = debugMode;
-                }
 
                 // Initialize MCP Server URL from localStorage
                 const serverUrl = localStorage.getItem('mcpServerUrl') || 'http://localhost:8081';
@@ -323,46 +660,45 @@
 
             setupServiceWorker() {
                 if ('serviceWorker' in navigator) {
-                    console.log('Setting up service worker...');
-                    
-                    // First unregister any existing service workers
-                    navigator.serviceWorker.getRegistrations().then(registrations => {
-                        console.log('Unregistering existing service workers:', registrations.length);
-                        return Promise.all(registrations.map(registration => registration.unregister()));
-                    }).then(() => {
-                        console.log('Registering new service worker...');
-                        // Now register the new service worker as a module
-                        return navigator.serviceWorker.register('sw.js', { type: 'module' });
-                    }).then(registration => {
-                        console.log('ServiceWorker registration successful');
-                        
+                    // One registration serves every tab. Each load checks sw.js and its imports for
+                    // changes, fetched fresh with updateViaCache 'none'; build.js changes with every
+                    // WASM build, and a changed worker takes over as soon as it installs.
+                    let hadWorker = !!navigator.serviceWorker.controller;
+                    navigator.serviceWorker.addEventListener('controllerchange', () => {
+                        this.serviceWorker = navigator.serviceWorker.controller;
+                        this.log(hadWorker
+                            ? 'A new version of the service worker took over'
+                            : { level: 'debug', message: 'The service worker now controls this page' });
+                        hadWorker = true;
+                        this.syncWorker();
+                    });
+                    navigator.serviceWorker.register('sw.js', { type: 'module', updateViaCache: 'none' }).then(registration => {
+                        if (registration.active) registration.update().catch(() => {});
                         // Wait for the service worker to be ready
                         if (registration.active) {
-                            console.log('Service worker is active');
                             this.serviceWorker = registration.active;
                             this.updateSwStatus(true);
                             this.setupPeriodicChecks();
                         } else {
-                            console.log('Waiting for service worker to activate...');
                             // Registrations don't fire 'activate'; ready resolves once a worker is active.
                             navigator.serviceWorker.ready.then(readyRegistration => {
-                                console.log('Service worker activated');
+                                this.log({ level: 'debug', message: 'The service worker is active' });
                                 this.serviceWorker = readyRegistration.active;
                                 this.updateSwStatus(true);
                                 this.setupPeriodicChecks();
                             });
                         }
                     }).catch(error => {
-                        console.error('ServiceWorker registration failed:', error);
+                        this.log({ level: 'error', message: `Couldn't register the service worker: ${error.message}` });
                         this.updateSwStatus(false);
                     });
 
-                    console.log('Removing existing message listener...');
                     // Remove any existing message listeners
                     navigator.serviceWorker.removeEventListener('message', this.boundMessageHandler);
-                    console.log('Adding new message listener...');
                     // Add the message listener
                     navigator.serviceWorker.addEventListener('message', this.boundMessageHandler);
+                } else {
+                    this.log({ level: 'error', message: "This browser doesn't support service workers, which the client runs in. Use a current Chrome, Edge, Firefox or Safari over http://localhost or https." });
                 }
             }
 
@@ -400,7 +736,6 @@
                         button.addEventListener('click', async () => {
                             if (button.disabled) return;
                             
-                            console.log(`Button clicked: ${id}`);
                             button.disabled = true;
                             button.classList.add('loading');
                             
@@ -440,7 +775,6 @@
             async stopServiceWorker() {
                 if (this.serviceWorker) {
                     try {
-                        console.log('Stopping service worker...');
                         this.stopPeriodicWasmChecks();
                         this.stopWasmUptimeCounter();
                         await this.serviceWorker.postMessage({ type: 'stop' });
@@ -450,56 +784,48 @@
                         this.serviceWorker = null;
                         this.updateSwStatus(false);
                         this.stopUptimeCounter();
-                        this.log('Service worker stopped');
+                        this.log('Stopped the service worker');
                     } catch (error) {
-                        console.error('Error stopping service worker:', error);
-                        this.log(`Error stopping service worker: ${error.message}`);
+                        this.log({ level: 'error', message: `Couldn't stop the service worker: ${error.message}` });
                     }
                 }
             }
 
             async startServiceWorker() {
                 try {
-                    console.log('Starting service worker...');
-                    const registration = await navigator.serviceWorker.register('sw.js', { type: 'module' });
+                    const registration = await navigator.serviceWorker.register('sw.js', { type: 'module', updateViaCache: 'none' });
                     this.serviceWorker = registration.active || (await navigator.serviceWorker.ready).active;
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
                     this.startPeriodicWasmChecks();
                     this.startWasmUptimeCounter();
-                    this.log('Service worker started');
+                    this.log({ level: 'debug', message: 'Started the service worker' });
                 } catch (error) {
-                    console.error('Error starting service worker:', error);
-                    this.log(`Error starting service worker: ${error.message}`);
+                    this.log({ level: 'error', message: `Couldn't start the service worker: ${error.message}` });
                     this.updateSwStatus(false);
                 }
             }
 
             async unloadWasm() {
                 if (this.serviceWorker) {
-                    console.log('Unloading WASM module...');
                     await this.serviceWorker.postMessage({ type: 'unload_wasm' });
                     this.wasmStatus.classList.remove('healthy', 'unhealthy');
                     this.wasmStatus.classList.add('unknown');
                     this.stopWasmUptimeCounter();
-                    this.log('WASM module unloaded');
                 }
             }
 
             async reloadWasm() {
                 if (this.serviceWorker) {
-                    console.log('Reloading WASM module...');
                     this.stopWasmUptimeCounter();
                     await this.serviceWorker.postMessage({ type: 'reload_wasm' });
                     this.startWasmUptimeCounter();
-                    this.log('Reloading WASM module...');
                 }
             }
 
             async checkWasm() {
                 if (this.serviceWorker) {
                     const checkId = ++this.checkCounter;
-                    console.log(`10 min heartbeat: WASM module (check #${checkId})...`);
                     await this.serviceWorker.postMessage({ 
                         type: 'check_wasm',
                         checkId: checkId
@@ -509,15 +835,11 @@
 
             handleServiceWorkerMessage(event) {
                 const message = event.data;
-                const isDebugMode = localStorage.getItem('debugMode') === 'true';
-                
-                // Always log non-DEBUG messages to console
-                if (message.type !== 'log' || message.content.level !== 'DEBUG') {
-                    console.log('Received message from service worker:', message);
-                } else if (isDebugMode) {
-                    // Only log DEBUG messages if debug mode is enabled
-                    console.log('Received message from service worker:', message);
+                if (LOGS_ONLY) {
+                    if (message.type === 'log') this.logPanel.add(message.content);
+                    return;
                 }
+                if (message.type !== 'log') console.debug('[page] from the service worker:', message);
                 
                 // Handle JSON-RPC messages
                 if (message.jsonrpc === '2.0') {
@@ -543,11 +865,9 @@
                                 this.updateBuildInfo(metadata.buildInfo);
                             }
                         }
-                        // Log the status update
                         this.log({
-                            level: 'INFO',
-                            message: `WASM status: ${status.healthy ? 'healthy' : 'unhealthy'} (uptime: ${formatUptime(status.uptime)})`,
-                            timestamp: new Date().toISOString()
+                            level: status.healthy ? 'debug' : 'error',
+                            message: `WASM health check: ${status.healthy ? 'healthy' : 'not loaded'} (uptime ${formatUptime(status.uptime)})`
                         });
                     }
                     return;
@@ -556,7 +876,7 @@
                 // Handle legacy messages
                 switch (message.type) {
                     case 'log':
-                        this.log(message.content);
+                        this.logPanel.add(message.content);
                         break;
                     case 'wasm_status':
                         this.updateWasmStatus(message.healthy);
@@ -588,9 +908,8 @@
                         this.handleServerError(message.url, message.action, message.error);
                         break;
                     case 'wasm_initialized':
-                        const initMessage = `WASM module initialized (${message.size} KB) - ${message.buildInfo}`;
-                        this.log({ level: 'INFO', message: initMessage, timestamp: new Date().toISOString() });
                         this.updateBuildInfo(message.buildInfo);
+                        this.syncWorker();
                         // Update version if available
                         if (message.version) {
                             const versionElement = document.getElementById('metadataVersion');
@@ -600,8 +919,6 @@
                         }
                         break;
                     case 'tools_list': {
-                        const names = message.tools.map(tool => tool.name).join(', ') || 'none';
-                        this.log({ level: 'INFO', message: `Tools from ${message.url}: ${names}`, timestamp: new Date().toISOString() });
                         const server = this.servers[message.url];
                         if (server) {
                             server.tools = message.tools;
@@ -618,6 +935,7 @@
                     case 'tool_result':
                         // Only show in ToolResultsCard if not for the current chat engramId (i.e., not for console/chat flow)
                         if (!message.engramId || message.engramId !== chatEngramId) {
+                            this.pendingCall = null;
                             this.renderToolResultCard(message);
                         }
                         // Otherwise, ignore (it will show in chat via cbus_message)
@@ -681,28 +999,31 @@
                 }
             }
 
+            // Logs something that happened in this page; the worker's entries arrive as 'log' messages.
             log(message) {
-                const entry = document.createElement('div');
-                entry.className = 'log-entry';
-                
-                if (typeof message === 'object') {
-                    if (message.level) {
-                        entry.classList.add(message.level);
-                        const timestamp = new Date(message.timestamp).toLocaleTimeString();
-                        entry.innerHTML = `
-                            <span class="log-timestamp">${timestamp}</span>
-                            <span class="log-level">${message.level}</span>
-                            <span class="log-message">${message.message}</span>
-                        `;
-                    } else {
-                        entry.textContent = JSON.stringify(message);
-                    }
-                } else {
-                    entry.textContent = message;
+                const entry = this.logPanel.add(message);
+                const print = console[entry.level] || console.log;
+                print(`[page] ${entry.message}`, ...(entry.detail === undefined ? [] : [entry.detail]));
+                return entry;
+            }
+
+            // A worker that just started (first visit, restart after idling, or a new version) has
+            // none of the page's state: the server list with its tokens, and the chat's tool target.
+            syncWorker() {
+                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
+                sendTapConfigToServiceWorker();
+            }
+
+            // Posts to the worker even before it controls this page (on the very first visit it
+            // only takes control once it activates). Returns false when there's no worker yet.
+            postToWorker(message) {
+                const worker = navigator.serviceWorker.controller || this.serviceWorker;
+                if (!worker) {
+                    this.log({ level: 'error', message: `The service worker isn't running yet, so ${message.type} wasn't sent. Try again in a moment.` });
+                    return false;
                 }
-                
-                this.logContainer.appendChild(entry);
-                this.logContainer.scrollTop = this.logContainer.scrollHeight;
+                worker.postMessage(message);
+                return true;
             }
 
             updateWasmUptime(uptime) {
@@ -716,21 +1037,37 @@
                 const url = this.selectedServerUrl;
                 const server = this.servers[url];
                 if (!server) {
-                    this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
+                    this.log({ level: 'error', message: 'Select a server to connect to first' });
                     return;
                 }
-                this.updateServer(url, { status: 'connecting', lastError: null });
-                this.log({ level: 'INFO', message: `Connecting to ${url}...`, timestamp: new Date().toISOString() });
-                navigator.serviceWorker.controller?.postMessage({
+                const sent = this.postToWorker({
                     type: 'connect-mcp',
                     url,
                     bearerToken: server.bearerToken || undefined
                 });
+                this.updateServer(url, sent
+                    ? { status: 'connecting', lastError: null }
+                    : { status: 'failed', lastError: "The service worker isn't running yet. Try again in a moment." });
+                if (sent) this.watchConnect(url);
+            }
+
+            // The worker answers every request, but not if the browser stops it mid-request.
+            // A connect takes at most 40 s (the probe, then the older handshake).
+            watchConnect(url) {
+                const attempt = Symbol(url);
+                this.pendingConnects.set(url, attempt);
+                setTimeout(() => {
+                    if (this.pendingConnects.get(url) !== attempt) return;
+                    this.pendingConnects.delete(url);
+                    if (this.servers[url]?.status !== 'connecting') return;
+                    const lastError = 'No answer from the service worker within 50 seconds; the browser may have stopped it. Choose Connect to try again.';
+                    this.updateServer(url, { status: 'failed', lastError });
+                    this.log({ level: 'error', message: lastError, server: url });
+                }, 50_000);
             }
 
             requestTools(url, { refresh = false } = {}) {
-                this.log({ level: 'INFO', message: `Listing tools from ${url}`, timestamp: new Date().toISOString() });
-                navigator.serviceWorker.controller?.postMessage({
+                this.postToWorker({
                     type: 'list_tools',
                     url,
                     refresh,
@@ -739,6 +1076,7 @@
             }
 
             handleServerConnected(url, info) {
+                this.pendingConnects.delete(url);
                 if (!this.servers[url]) return;
                 const name = info.serverInfo?.name || this.servers[url].name;
                 this.updateServer(url, {
@@ -754,6 +1092,7 @@
             }
 
             handleServerError(url, action, error) {
+                if (action === 'connect') this.pendingConnects.delete(url);
                 if (!this.servers[url]) return;
                 const changes = { lastError: error?.message || 'Unknown error' };
                 if (action === 'connect') changes.status = 'failed';
@@ -777,7 +1116,7 @@
                 serversList.innerHTML = '';
                 const serversArr = Object.values(this.servers);
                 if (serversArr.length === 0) {
-                    serversList.innerHTML = '<div class="empty-state">No servers added.</div>';
+                    serversList.innerHTML = '<div class="empty-state">No servers yet. <button type="button" class="link-button" data-open-guide>Try one from the guide</button></div>';
                 }
                 serversArr.forEach(server => {
                     const serverItem = document.createElement('div');
@@ -793,8 +1132,12 @@
                     if (server.alias && server.alias.trim()) {
                         displayName = server.alias;
                     }
+                    const state = { connected: 'healthy', failed: 'unhealthy' }[server.status] || 'unknown';
                     serverItem.innerHTML = `
-                        <div class="server-name" title="${server.url}">${displayName}</div>
+                        <div class="server-row">
+                            <span class="status-indicator ${state}" title="${escapeHtml(server.status || 'not connected')}"></span>
+                            <div class="server-name" title="${escapeHtml(server.url)}">${escapeHtml(displayName)}</div>
+                        </div>
                     `;
                     serverItem.addEventListener('click', () => {
                         this.selectedServerUrl = server.url;
@@ -893,17 +1236,25 @@
             renderInputField(key, prop, isRequired) {
                 const inputCard = document.createElement('div');
                 inputCard.className = 'tool-input-card';
-                let label = `<label><strong>${key}</strong> (${prop.type || 'string'})`;
+                // Names, types and descriptions come from the server, so they're escaped.
+                const name = escapeHtml(key);
+                let label = `<label><strong>${name}</strong> (${escapeHtml(prop.type || 'string')})`;
                 if (isRequired) label += '<span class="required-mark">*</span>';
-                label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
                 label += '</label>';
+                const unset = `<option value="">${isRequired ? 'Choose…' : '(not set)'}</option>`;
 
-                if (prop.type === 'object' && !prop.properties) {
-                    inputCard.innerHTML = `${label}<textarea name="${key}" placeholder="{}" rows="3" class="mono"></textarea>`;
+                if (Array.isArray(prop.enum)) {
+                    const options = prop.enum.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+                    inputCard.innerHTML = `${label}<select name="${name}">${unset}${options}</select>`;
+                } else if (prop.type === 'boolean') {
+                    inputCard.innerHTML = `${label}<select name="${name}">${unset}<option value="true">true</option><option value="false">false</option></select>`;
+                } else if (prop.type === 'object' && !prop.properties) {
+                    inputCard.innerHTML = `${label}<textarea name="${name}" placeholder="{}" rows="3" class="mono"></textarea>`;
                 } else if (prop.type === 'string') {
-                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                    inputCard.innerHTML = `${label}<input type="text" name="${name}" />`;
                 } else if (prop.type === 'integer' || prop.type === 'number') {
-                    inputCard.innerHTML = `${label}<input type="number" name="${key}" />`;
+                    inputCard.innerHTML = `${label}<input type="number" name="${name}" ${prop.type === 'number' ? 'step="any"' : ''} />`;
                 } else if (prop.type === 'array' && prop.items) {
                     inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item btn-sm"><span class="icon icon-plus" aria-hidden="true"></span>Add item</button>`;
                     const arrayInputs = inputCard.querySelector('.array-inputs');
@@ -917,7 +1268,7 @@
                         objectInputs.appendChild(this.renderInputField(subKey, subProp, (prop.required || []).includes(subKey)));
                     });
                 } else {
-                    inputCard.innerHTML = `${label}<input type="text" name="${key}" />`;
+                    inputCard.innerHTML = `${label}<input type="text" name="${name}" />`;
                 }
                 return inputCard;
             }
@@ -937,8 +1288,8 @@
                     this.handleCallTool(tool, card);
                 };
                 card.innerHTML = `
-                    <h3>${tool.name}</h3>
-                    <div class="tool-description">${tool.description || ''}</div>
+                    <h3>${escapeHtml(tool.name)}</h3>
+                    <div class="tool-description">${escapeHtml(tool.description || '')}</div>
                     <div class="tool-input-schema"></div>
                     <button type="submit" class="call-tool-btn btn-primary">Call tool</button>
                 `;
@@ -961,8 +1312,12 @@
                     toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span class="text-secondary">Tool output will appear here.</span></div>';
                     return;
                 }
+                if (result.pending) {
+                    toolResultCard.innerHTML = `<div class="tool-result-card-inner" data-pending><span class="text-secondary">Calling ${escapeHtml(result.pending)}…</span></div>`;
+                    return;
+                }
                 if (result.error) {
-                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span class='text-error'>${result.error}</span></div>`;
+                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span class='text-error'>${escapeHtml(result.error)}</span></div>`;
                     return;
                 }
                 // Collapsible raw JSON (collapsed by default)
@@ -972,15 +1327,10 @@
                 let contentArr = [];
                 if (result.result && result.result.result && Array.isArray(result.result.result.content)) {
                     contentArr = result.result.result.content;
-                    console.log('Tool content (result.result.result.content):', contentArr);
                 } else if (result.result && Array.isArray(result.result.content)) {
                     contentArr = result.result.content;
-                    console.log('Tool content (result.result.content):', contentArr);
                 } else if (Array.isArray(result.content)) {
                     contentArr = result.content;
-                    console.log('Tool content (result.content):', contentArr);
-                } else {
-                    console.log('Tool content: [] (no content found)');
                 }
                 if (contentArr.length > 0) {
                     contentHtml = contentArr.map((item, idx) => {
@@ -1011,17 +1361,6 @@
                 }
             }
 
-            setDebugMode(enabled) {
-                this.isDebugMode = enabled;
-                localStorage.setItem('debugMode', enabled.toString());
-                if (this.serviceWorker) {
-                    this.serviceWorker.postMessage({ 
-                        type: 'set-debug-mode',
-                        enabled: enabled
-                    });
-                }
-            }
-
             setServerUrl(url) {
                 localStorage.setItem('mcpServerUrl', url);
                 const serverUrlInput = document.getElementById('mcpServerUrl');
@@ -1037,6 +1376,8 @@
                 for (const server of Object.values(servers)) {
                     if (server.name_alias && !server.alias) server.alias = server.name_alias;
                     delete server.name_alias;
+                    // A connect that was under way when the page closed never finished.
+                    if (server.status === 'connecting') server.status = 'unknown';
                 }
                 return servers;
             }
@@ -1051,29 +1392,37 @@
                 const url = document.getElementById('serverUrl').value.trim();
                 const alias = document.getElementById('serverAlias').value.trim();
                 if (!url) {
-                    this.log({ level: 'ERROR', message: 'Server URL is required', timestamp: new Date().toISOString() });
+                    this.log({ level: 'error', message: 'Enter a server URL to add' });
                     return;
                 }
-                const now = new Date().toISOString();
-                const server = {
-                    name: '',
-                    alias,
-                    url,
-                    tools: [],
-                    date_added: now,
-                    date_modified: now,
-                    status: 'unknown'
-                };
-                this.servers[url] = server;
-                this.saveServers();
+                this.addServer(url, alias);
+                // Clear inputs
+                document.getElementById('serverUrl').value = '';
+                document.getElementById('serverAlias').value = '';
+            }
+
+            // Adds a server (or picks it if it's already listed), shows it on the MCP tab and connects.
+            addServer(url, alias = '') {
+                if (!this.servers[url]) {
+                    const now = new Date().toISOString();
+                    this.servers[url] = {
+                        name: '',
+                        alias,
+                        url,
+                        tools: [],
+                        date_added: now,
+                        date_modified: now,
+                        status: 'unknown'
+                    };
+                    this.saveServers();
+                }
                 this.selectedServerUrl = url;
                 this.setServerUrl(url);
                 this.updateServersList();
                 this.showServerCard(url);
-                this.updateToolsList([]);
-                // Clear inputs
-                document.getElementById('serverUrl').value = '';
-                document.getElementById('serverAlias').value = '';
+                this.updateToolsList(this.servers[url].tools || []);
+                showTab('mcp');
+                this.connectMcpServer();
             }
 
             handleSaveServer() {
@@ -1146,12 +1495,18 @@
             handleCallTool(tool, form) {
                 const url = this.selectedServerUrl;
                 if (!url) {
-                    this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
+                    this.log({ level: 'error', message: 'Select a server before calling a tool' });
                     return;
                 }
                 // Serialize form data
                 const schema = tool.inputSchema || tool.input_schema;
-                const args = this.serializeToolForm(form, schema);
+                let args;
+                try {
+                    args = this.serializeToolForm(form, schema);
+                } catch (error) {
+                    this.renderToolResultCard({ error: error.message });
+                    return;
+                }
                 // Build tapConfig for this tool call
                 let tapConfig = {
                     serverUrl: url,
@@ -1166,57 +1521,71 @@
                     mcpEngramId = crypto.randomUUID();
                     sessionStorage.setItem('mcpEngramId', mcpEngramId);
                 }
-                // Send to service worker
-                if (this.serviceWorker) {
-                    navigator.serviceWorker.controller?.postMessage({
-                        type: 'call_tool',
-                        tapConfig,
-                        engramId: mcpEngramId,
-                        bearerToken: this.servers[url]?.bearerToken || undefined
-                    });
-                    // Optionally, show loading state
-                    const resultArea = form.querySelector('.tool-result-area');
-                    if (resultArea) {
-                        resultArea.innerHTML = '<span class="text-secondary">Calling tool...</span>';
-                    }
-                } 
+                const sent = this.postToWorker({
+                    type: 'call_tool',
+                    tapConfig,
+                    engramId: mcpEngramId,
+                    bearerToken: this.servers[url]?.bearerToken || undefined
+                });
+                this.renderToolResultCard(sent
+                    ? { pending: tool.name }
+                    : { error: "The service worker isn't running yet. Try again in a moment." });
+                if (!sent) return;
+                // Calls time out after 120 s in the client; past that, the worker is gone.
+                const call = Symbol(tool.name);
+                this.pendingCall = call;
+                setTimeout(() => {
+                    if (this.pendingCall !== call) return;
+                    this.pendingCall = null;
+                    const error = `No answer from the service worker within 130 seconds for ${tool.name}; the browser may have stopped it. Call the tool again.`;
+                    this.renderToolResultCard({ error });
+                    this.log({ level: 'error', message: error, server: url });
+                }, 130_000);
             }
 
+            // Builds tool arguments from the form. Optional fields left empty are left out:
+            // servers often reject "" or [] where they'd accept a missing value.
             serializeToolForm(form, schema) {
                 const result = {};
                 if (!schema || !schema.properties) return result;
+                const required = new Set(schema.required || []);
+                const isNumeric = type => type === 'integer' || type === 'number';
                 Object.entries(schema.properties).forEach(([key, prop]) => {
+                    let value;
                     if (prop.type === 'array') {
-                        const values = Array.from(form.querySelectorAll(`[name='${key}[]']`)).map(input => input.value);
-                        result[key] = values;
+                        value = Array.from(form.querySelectorAll(`[name='${CSS.escape(key)}[]']`))
+                            .map(input => input.value)
+                            .filter(text => text !== '')
+                            .map(text => (isNumeric(prop.items?.type) ? Number(text) : text));
                     } else if (prop.type === 'object' && prop.properties) {
-                        // Recursively serialize object
-                        const subSchema = { properties: prop.properties, required: prop.required };
-                        result[key] = this.serializeToolForm(form, subSchema);
-                    } else if (prop.type === 'object' && !prop.properties) {
-                        // Try to parse textarea as JSON
-                        const input = form.querySelector(`[name='${key}']`);
-                        if (input) {
+                        value = this.serializeToolForm(form, { properties: prop.properties, required: prop.required });
+                    } else {
+                        const input = form.querySelector(`[name='${CSS.escape(key)}']`);
+                        if (!input) return;
+                        const text = input.value.trim();
+                        if (prop.type === 'object') {
                             try {
-                                result[key] = input.value ? JSON.parse(input.value) : {};
+                                value = text ? JSON.parse(text) : undefined;
                                 input.style.borderColor = '';
                                 input.title = '';
                             } catch (e) {
                                 input.style.borderColor = 'var(--theme-error)';
                                 input.title = 'Invalid JSON';
-                                throw new Error(`Invalid JSON for ${key}`);
+                                throw new Error(`${key} isn't valid JSON`);
                             }
-                        }
-                    } else {
-                        const input = form.querySelector(`[name='${key}']`);
-                        if (input) {
-                            if (prop.type === 'integer' || prop.type === 'number') {
-                                result[key] = input.value ? Number(input.value) : undefined;
-                            } else {
-                                result[key] = input.value;
-                            }
+                        } else if (isNumeric(prop.type)) {
+                            value = text === '' ? undefined : Number(text);
+                        } else if (prop.type === 'boolean') {
+                            value = text === '' ? undefined : text === 'true';
+                        } else {
+                            value = input.value;
                         }
                     }
+                    const blank = value === undefined || value === ''
+                        || (Array.isArray(value) && value.length === 0)
+                        || (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
+                    if (blank && !required.has(key)) return;
+                    result[key] = value;
                 });
                 return result;
             }
@@ -1224,8 +1593,21 @@
 
         // Initialize the chat shell
         const chatShell = new ChatShell();
+        // The logs pop-out reads the opener's entries from here.
+        window.logPanel = chatShell.logPanel;
 
-        chatShell.startServiceWorker();
+        if (LOGS_ONLY) {
+            for (const entry of window.opener?.logPanel?.entries || []) chatShell.logPanel.add(entry);
+        } else {
+            chatShell.startServiceWorker();
+        }
+
+        window.addEventListener('error', event => {
+            chatShell.log({ level: 'error', message: `Uncaught error in the page: ${event.message}`, detail: { file: event.filename, line: event.lineno } });
+        });
+        window.addEventListener('unhandledrejection', event => {
+            chatShell.log({ level: 'error', message: `Unhandled promise rejection in the page: ${event.reason?.message || event.reason}` });
+        });
 
         // Add memory event
         document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
@@ -1245,14 +1627,6 @@
                 type: 'clear_memory_events'
             });
         });
-
-        // Debug mode toggle
-        const debugModeToggle = document.getElementById('debugModeToggle');
-        if (debugModeToggle) {
-            debugModeToggle.addEventListener('change', function() {
-                chatShell.setDebugMode(this.checked);
-            });
-        }
 
         // Format uptime for display
         function formatUptime(uptime) {
@@ -1331,70 +1705,69 @@
             });
         }
 
-        document.getElementById('consoleTabBtn').onclick = function() {
-            document.getElementById('consoleTab').classList.add('active');
-            document.getElementById('mcpTab').classList.remove('active');
-            document.getElementById('memoryTab').classList.remove('active');
-            document.getElementById('logsTab').classList.remove('active');
-            this.classList.add('active');
-            document.getElementById('mcpTabBtn').classList.remove('active');
-            document.getElementById('memoryTabBtn').classList.remove('active');
-            document.getElementById('logsTabBtn').classList.remove('active');
-            document.getElementById('consoleTab').style.display = 'block';
-            document.getElementById('mcpTab').style.display = 'none';
-            document.getElementById('memoryTab').style.display = 'none';
-            document.getElementById('logsTab').style.display = 'none';
-        };
-        document.getElementById('mcpTabBtn').onclick = function() {
-            document.getElementById('consoleTab').classList.remove('active');
-            document.getElementById('mcpTab').classList.add('active');
-            document.getElementById('memoryTab').classList.remove('active');
-            document.getElementById('logsTab').classList.remove('active');
-            this.classList.add('active');
-            document.getElementById('consoleTabBtn').classList.remove('active');
-            document.getElementById('mcpTabBtn').classList.remove('active');
-            document.getElementById('memoryTabBtn').classList.remove('active');
-            document.getElementById('consoleTab').style.display = 'none';
-            document.getElementById('mcpTab').style.display = 'block';
-            document.getElementById('memoryTab').style.display = 'none';
-            document.getElementById('logsTab').style.display = 'none';
-        };
-        document.getElementById('memoryTabBtn').onclick = function() {
-            document.getElementById('consoleTab').classList.remove('active');
-            document.getElementById('mcpTab').classList.remove('active');
-            document.getElementById('memoryTab').classList.add('active');
-            document.getElementById('logsTab').classList.remove('active');
-            this.classList.add('active');
-            document.getElementById('consoleTabBtn').classList.remove('active');
-            document.getElementById('mcpTabBtn').classList.remove('active');
-            document.getElementById('logsTabBtn').classList.remove('active');
-            document.getElementById('consoleTab').style.display = 'none';
-            document.getElementById('mcpTab').style.display = 'none';
-            document.getElementById('memoryTab').style.display = 'block';
-            document.getElementById('logsTab').style.display = 'none';
-        };
-        document.getElementById('logsTabBtn').onclick = function() {
-            document.getElementById('consoleTab').classList.remove('active');
-            document.getElementById('mcpTab').classList.remove('active');
-            document.getElementById('memoryTab').classList.remove('active');
-            document.getElementById('logsTab').classList.add('active');
-            this.classList.add('active');
-            document.getElementById('consoleTabBtn').classList.remove('active');
-            document.getElementById('mcpTabBtn').classList.remove('active');
-            document.getElementById('memoryTabBtn').classList.remove('active');
-            document.getElementById('consoleTab').style.display = 'none';
-            document.getElementById('mcpTab').style.display = 'none';
-            document.getElementById('memoryTab').style.display = 'none';
-            document.getElementById('logsTab').style.display = 'block';
-        };
+        const TABS = ['console', 'mcp', 'memory', 'logs'];
+        function showTab(name) {
+            for (const tab of TABS) {
+                const active = tab === name;
+                const panel = document.getElementById(`${tab}Tab`);
+                panel.classList.toggle('active', active);
+                panel.style.display = active ? 'block' : 'none';
+                document.getElementById(`${tab}TabBtn`).classList.toggle('active', active);
+            }
+            if (name === 'logs') chatShell.logPanel.markSeen();
+        }
+        for (const tab of TABS) {
+            document.getElementById(`${tab}TabBtn`).addEventListener('click', () => showTab(tab));
+        }
         document.getElementById('popoutLogsBtn').onclick = function() {
-            window.open(window.location.pathname + '?logs=1', '_blank', 'width=600,height=800');
+            window.open(window.location.pathname + '?logs=1', '_blank', 'width=720,height=800');
         };
-        if (window.location.search.includes('logs=1')) {
-            document.getElementById('consoleTab').style.display = 'none';
-            document.getElementById('mcpTab').style.display = 'none';
-            document.getElementById('logsTab').style.display = 'block';
-            document.querySelector('.tab-bar').style.display = 'none';
+        if (LOGS_ONLY) {
+            document.body.classList.add('logs-only');
+            document.title = 'Logs - MCP Browser Client';
+            showTab('logs');
+        }
+
+        // --- Getting started guide ---
+        const guide = document.getElementById('guide');
+        function openGuide() {
+            guide.hidden = false;
+            document.body.classList.add('guide-open');
+            localStorage.setItem('guideSeen', 'true');
+            document.getElementById('guideTitle').focus();
+        }
+        function closeGuide() {
+            guide.hidden = true;
+            document.body.classList.remove('guide-open');
+        }
+        document.getElementById('guideBtn').addEventListener('click', () => (guide.hidden ? openGuide() : closeGuide()));
+        document.getElementById('closeGuide').addEventListener('click', closeGuide);
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !guide.hidden) closeGuide();
+        });
+        // Quick-add, copy and "open the guide" buttons, wherever they appear.
+        document.addEventListener('click', async event => {
+            const add = event.target.closest('[data-add-server]');
+            if (add) chatShell.addServer(add.dataset.addServer, add.dataset.alias || '');
+            if (event.target.closest('[data-open-guide]')) openGuide();
+            const copy = event.target.closest('[data-copy]');
+            if (copy) {
+                try {
+                    await navigator.clipboard.writeText(document.getElementById(copy.dataset.copy).textContent);
+                    flashLabel(copy, 'Copied');
+                } catch (error) {
+                    chatShell.log({ level: 'error', message: `Couldn't copy: ${error.message}` });
+                }
+            }
+        });
+        // A page served from elsewhere (GitHub Pages, say) has to be let through the mock's CORS check.
+        const pageIsLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+        document.getElementById('mockCommand').textContent = pageIsLocal
+            ? 'python3 test_mcp_server.py'
+            : `python3 test_mcp_server.py --allow-origin ${location.origin}`;
+        document.getElementById('mockRemoteNote').hidden = pageIsLocal;
+        if (!LOGS_ONLY && !localStorage.getItem('guideSeen') && Object.keys(chatShell.servers).length === 0) {
+            openGuide();
         }
 
         // Add a helper for HTML escaping
@@ -1502,7 +1875,7 @@
         navigator.serviceWorker.addEventListener('message', (event) => {
             const msg = event.data;
             if (msg.type === 'cbus_message') {
-                console.log('[Client] cbus_message:', msg.message); // Debug: show all cbus messages
+                console.debug('[page] chat message:', msg.message);
                 chatMessages.push(msg.message);
                 renderChatMessages();
 
@@ -1658,7 +2031,7 @@
                 const item = document.createElement('div');
                 item.className = 'imprint-list-item' + (selectedImprintIdx === idx ? ' selected' : '');
                 item.innerHTML = `
-                    <span class="imprint-name">${imprint.name || '(no name)'}</span>
+                    <span class="imprint-name">${escapeHtml(imprint.name || '(no name)')}</span>
                     <span class="imprint-timestamp">${new Date(imprint.timestamp).toLocaleString()}</span>
                 `;
                 item.onclick = () => {
@@ -1681,9 +2054,9 @@
             if (imprint.id === 'bootrom') {
                 editorDiv.innerHTML = `
                     <label>Name</label>
-                    <input type="text" value="${imprint.name || ''}" disabled />
+                    <input type="text" value="${escapeHtml(imprint.name || '')}" disabled />
                     <label>Text</label>
-                    <textarea rows="12" disabled>${imprint.text || ''}</textarea>
+                    <textarea rows="12" disabled>${escapeHtml(imprint.text || '')}</textarea>
                     <label>Timestamp</label>
                     <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
                     <div class="field-help">This imprint is read-only (bootrom instructions).</div>
@@ -1694,9 +2067,9 @@
             const form = document.createElement('form');
             form.innerHTML = `
                 <label>Name</label>
-                <input type="text" value="${imprint.name || ''}" required id="editImprintName" />
+                <input type="text" value="${escapeHtml(imprint.name || '')}" required id="editImprintName" />
                 <label>Text</label>
-                <textarea rows="8" id="editImprintText">${imprint.text || ''}</textarea>
+                <textarea rows="8" id="editImprintText">${escapeHtml(imprint.text || '')}</textarea>
                 <label>Timestamp</label>
                 <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
                 <div class="editor-actions">
@@ -1782,12 +2155,20 @@
         }
         function saveCbusTapConfig(config) {
             localStorage.setItem('cbusTapConfig', JSON.stringify(config));
+            // The worker routes chat messages with its own copy.
+            sendTapConfigToServiceWorker();
         }
         function saveCurrentTapConfig() {
+            let args;
+            try {
+                args = chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema);
+            } catch {
+                return; // A JSON field that's still being typed.
+            }
             saveCbusTapConfig({
                 serverUrl: chatSelectedServerUrl,
                 toolName: chatSelectedTool?.name,
-                args: chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema),
+                args,
                 connectedStringArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'string') || null,
                 connectedArrayArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'array') || null
             });
@@ -1841,20 +2222,21 @@
                     if (prop.type === 'string') {
                         inputCard = document.createElement('div');
                         inputCard.className = 'tool-input-card';
-                        let label = `<label><strong>${key}</strong> (string)`;
+                        const name = escapeHtml(key);
+                        let label = `<label><strong>${name}</strong> (string)`;
                         if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
                         label += '</label>';
                         inputCard.innerHTML = `${label}
-                            <input type="text" name="${key}" />
+                            <input type="text" name="${name}" />
                             <label class="cbus-checkbox-label">
-                                <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${key}" />
+                                <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${name}" />
                                 <span class="cbus-checkbox-text">Target for message</span>
                             </label>
                             <div class="cbus-message-warning" style="display:none;"></div>`;
                         setTimeout(() => {
-                            const input = inputCard.querySelector(`input[type='text'][name='${key}']`);
-                            const cb = inputCard.querySelector('.assign-cbus-string[data-field="' + key + '"]');
+                            const input = inputCard.querySelector(`input[type='text'][name='${CSS.escape(key)}']`);
+                            const cb = inputCard.querySelector(`.assign-cbus-string[data-field='${CSS.escape(key)}']`);
                             const warn = inputCard.querySelector('.cbus-message-warning');
                             // Restore value from config if present
                             let value = (tapConfig.args && tapConfig.args[key]) || '';
@@ -1928,18 +2310,19 @@
                     } else if (prop.type === 'array') {
                         inputCard = document.createElement('div');
                         inputCard.className = 'tool-input-card';
-                        let label = `<label><strong>${key}</strong> (array)`;
+                        const name = escapeHtml(key);
+                        let label = `<label><strong>${name}</strong> (array)`;
                         if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${prop.description}</span>` : '';
+                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
                         label += '</label>';
                         inputCard.innerHTML = `${label}
                             <label class="cbus-checkbox-label">
-                                <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${key}" />
+                                <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${name}" />
                                 <span class="cbus-checkbox-text">Target for [context]</span>
                             </label>
                             <div class="field-help">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
                         setTimeout(() => {
-                            const cb = inputCard.querySelector('.assign-cbus-array[data-field="' + key + '"]');
+                            const cb = inputCard.querySelector(`.assign-cbus-array[data-field='${CSS.escape(key)}']`);
                             if (tapConfig.connectedArrayArg === key) {
                                 cb.checked = true;
                                 chatToolAssignUserMessage[key] = true;
@@ -1968,10 +2351,18 @@
                 });
             }
             form.oninput = () => {
-                chatToolConfig = chatShell.serializeToolForm(form, schema);
-                saveCurrentTapConfig();
+                try {
+                    chatToolConfig = chatShell.serializeToolForm(form, schema);
+                    saveCurrentTapConfig();
+                } catch {
+                    // A JSON field that's still being typed; the field is marked invalid.
+                }
             };
-            chatToolConfig = chatShell.serializeToolForm(form, schema);
+            try {
+                chatToolConfig = chatShell.serializeToolForm(form, schema);
+            } catch {
+                chatToolConfig = {};
+            }
         }
         // --- Event listeners for Tap card ---
         const chatServerSelect = document.getElementById('chatServerSelect');
@@ -2014,7 +2405,7 @@
         }
 
         function onConnectToCbusChanged(field, checked) {
-            console.log("onConnectToCbusChanged: " + field + " " + checked);
+            console.debug(`[page] ${field} ${checked ? 'now receives' : 'no longer receives'} chat messages`);
         }
 
         function renderServerSelect(selectElement, selectedServerUrl, servers) {

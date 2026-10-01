@@ -1,9 +1,5 @@
 let wasmInstance = null;
-let wasmModule = null;
 let isRunning = true;
-let uptimeInterval = null;
-let isDebugMode = true;
-let isInitializing = false;
 
 // --- TAP Config Storage ---
 let currentTapConfig = {};
@@ -17,26 +13,30 @@ const mcpServersIndex = {};
 // --- Tool Call Circuit Breaker ---
 const toolCallHistory = {}; // { engramId: [timestamps] }
 
-const VERSION = '1.0.0';
-const BUILD_TIME = new Date().toISOString();
-
+import { WASM_SHA256 } from './build.js';
 import { handleOp, initDB, openDB } from './chatStorage.js';
-import { debugLog } from './logger.js';
+import { formatDuration, logger, setLogSink } from './logger.js';
 import {
     checkWasm,
     ensureWasm,
     initializeWasm,
     reloadWasm,
     unloadWasm,
-    startUptimeCounter,
     stopUptimeCounter,
     getWasmInstance,
-    setDebugMode as setWasmDebugMode,
     setBroadcast as setWasmBroadcast
 } from './wasm.js';
 
 // Set up broadcast for wasm.js
 setWasmBroadcast(broadcastToClients);
+setLogSink(entry => broadcastToClients({ type: 'log', content: entry }));
+
+self.addEventListener('error', event => {
+    logger.error(`Uncaught error in the service worker: ${event.message}`, { detail: { file: event.filename, line: event.lineno } });
+});
+self.addEventListener('unhandledrejection', event => {
+    logger.error(`Unhandled promise rejection in the service worker: ${event.reason?.message || event.reason}`);
+});
 
 
 // Add this near the top of sw.js
@@ -89,22 +89,42 @@ function mcpError(error) {
     return { kind: 'internal', message: error?.message || String(error) };
 }
 
-function broadcastLog(level, message) {
-    broadcastToClients({
-        type: 'log',
-        content: { level, message, timestamp: new Date().toISOString() }
-    });
-}
-
-function broadcastMcpError(url, action, error) {
+function broadcastMcpError(url, action, error, started) {
     broadcastToClients({ type: 'mcp_server_error', url, action, error });
-    const what = action === 'list_tools' ? 'Listing tools from' : 'Connecting to';
-    broadcastLog('ERROR', `${what} ${url} failed: ${error.message}`);
+    const what = action === 'list_tools' ? 'Listing tools' : 'Connecting';
+    const after = started === undefined ? '' : ` after ${formatDuration(performance.now() - started)}`;
+    logger.error(`${what} failed${after}: ${error.message}`, { server: url, detail: errorDetail(error) });
 }
 
-// Messages can carry bearer tokens; keep them out of the logs the page displays.
-function redactSecrets(message) {
-    return JSON.parse(JSON.stringify(message, (key, value) => (key === 'bearerToken' && value ? '[redacted]' : value)));
+// An McpError's fields other than the message, which the log line already shows.
+function errorDetail({ kind, status, code, data }) {
+    const detail = Object.fromEntries(Object.entries({ kind, status, code, data }).filter(([, value]) => value !== undefined));
+    return Object.keys(detail).length ? detail : undefined;
+}
+
+function describeServer(url, info) {
+    const name = info?.serverInfo?.name;
+    if (!name) return url;
+    return info.serverInfo.version ? `${name} ${info.serverInfo.version}` : name;
+}
+
+// Where a tool call came from, as the trace describes it.
+const CALL_ORIGINS = { console: 'the page', tap: 'a chat message', extracted: 'tool output' };
+
+function listNames(names, max = 8) {
+    if (names.length <= max) return names.join(', ');
+    return `${names.slice(0, max).join(', ')} and ${names.length - max} more`;
+}
+
+// What a page message is about, for the trace. Payloads stay out of the log: they can be large
+// (the server list) or carry bearer tokens.
+function describeMessage({ url, refresh, tapConfig }) {
+    const detail = {};
+    if (url) detail.url = url;
+    if (tapConfig?.serverUrl) detail.server = tapConfig.serverUrl;
+    if (tapConfig?.toolName) detail.tool = tapConfig.toolName;
+    if (refresh) detail.refresh = true;
+    return Object.keys(detail).length ? detail : undefined;
 }
 
 // --- Engram NAT Table ---
@@ -179,16 +199,7 @@ self.addEventListener('message', (event) => {
 
 async function handleClientMessage(event) {
     const message = event.data;
-    // --- TOP LEVEL EVENT LOGGING ---
-    const logObj = debugLog({
-        source: 'ServiceWorker',
-        type: 'log',
-        level: 'DEBUG',
-        message: '[SW] Top-level event received',
-        data: redactSecrets(message)
-    });
-    // Broadcast log to clients
-    broadcastToClients(logObj);
+    logger.debug(`Page sent ${message.type}`, { detail: describeMessage(message) });
 
     const managesWasmLifecycle = ['unload_wasm', 'reload_wasm', 'stop'].includes(message.type);
     wasmInstance = managesWasmLifecycle ? getWasmInstance() : await ensureWasm();
@@ -212,13 +223,17 @@ async function handleClientMessage(event) {
                 broadcastMcpError(url, 'connect', { kind: 'internal', message: 'The WASM module is not loaded.' });
                 break;
             }
+            logger.info('Connecting', { server: url });
+            const started = performance.now();
             try {
                 const info = JSON.parse(await wasmInstance.connect(url, mcpOptions(url, message)));
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Connected to MCP server', data: info });
                 broadcastToClients({ type: 'mcp_server_connected', url, info });
-                broadcastLog('INFO', `Connected to ${url} (MCP ${info.protocolVersion}, ${info.era})`);
+                logger.info(
+                    `Connected to ${describeServer(url, info)} in ${formatDuration(performance.now() - started)}: MCP ${info.protocolVersion} (${info.era})`,
+                    { server: url, detail: { serverInfo: info.serverInfo, capabilities: info.capabilities, instructions: info.instructions } }
+                );
             } catch (error) {
-                broadcastMcpError(url, 'connect', mcpError(error));
+                broadcastMcpError(url, 'connect', mcpError(error), started);
             }
             break;
         }
@@ -226,12 +241,7 @@ async function handleClientMessage(event) {
             if (message.url) {
                 wasmInstance?.forget_server(message.url);
                 delete mcpServersIndex[message.url];
-            }
-            break;
-        case 'set-debug-mode':
-            isDebugMode = message.enabled;
-            if (wasmInstance && typeof wasmInstance.set_debug_mode === 'function') {
-                wasmInstance.set_debug_mode(isDebugMode);
+                logger.debug('Forgot the connection', { server: message.url });
             }
             break;
         case 'unload_wasm':
@@ -241,7 +251,7 @@ async function handleClientMessage(event) {
             await reloadWasm();
             break;
         case 'stop':
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Stopping service worker..." });
+            logger.info('Stopping the service worker');
             isRunning = false;
             stopUptimeCounter();
             unloadWasm();
@@ -250,12 +260,8 @@ async function handleClientMessage(event) {
             if (wasmInstance && message && message.text) {
                 try {
                     await wasmInstance.add_memory_event(message.text);
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Memory event added", data: { text: message.text } });
                 } catch (error) {
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "Failed to add memory event", data: { 
-                        error: error.message,
-                        stack: error.stack
-                    } });
+                    logger.error(`Couldn't add a memory event: ${error.message}`);
                 }
             }
             break;
@@ -263,12 +269,8 @@ async function handleClientMessage(event) {
             if (wasmInstance) {
                 try {
                     await wasmInstance.clear_memory_events();
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Memory events cleared" });
                 } catch (error) {
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: "Failed to clear memory events", data: { 
-                        error: error.message,
-                        stack: error.stack
-                    } });
+                    logger.error(`Couldn't clear memory events: ${error.message}`);
                 }
             }
             break;
@@ -278,8 +280,8 @@ async function handleClientMessage(event) {
                 broadcastMcpError(url, 'list_tools', { kind: 'internal', message: 'The WASM module is not loaded.' });
                 break;
             }
+            const started = performance.now();
             try {
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Listing tools from', data: url });
                 const options = mcpOptions(url, message, { refresh: !!message.refresh });
                 const listing = JSON.parse(await wasmInstance.list_tools(url, options));
                 if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
@@ -292,11 +294,15 @@ async function handleClientMessage(event) {
                     ttlMs: listing.ttlMs,
                     fromCache: listing.fromCache
                 });
-                for (const tool of listing.rejected) {
-                    broadcastLog('WARN', `Hid tool ${tool.name} from ${url}: ${tool.reason}`);
-                }
+                const names = listing.tools.map(tool => tool.name);
+                const count = `${names.length} tool${names.length === 1 ? '' : 's'}`;
+                const how = listing.fromCache ? 'from the cache' : `in ${formatDuration(performance.now() - started)}`;
+                logger.info(`Listed ${count} ${how}${names.length ? `: ${listNames(names)}` : ''}`, {
+                    server: url,
+                    detail: { ttlMs: listing.ttlMs, cacheScope: listing.cacheScope, hidden: listing.rejected }
+                });
             } catch (error) {
-                broadcastMcpError(url, 'list_tools', mcpError(error));
+                broadcastMcpError(url, 'list_tools', mcpError(error), started);
             }
             break;
         }
@@ -346,7 +352,7 @@ async function handleClientMessage(event) {
             }
             break;
         case 'cbus_message':
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'This should not happen in service worker: cbus_message', data: message });
+            logger.error('Pages send cbus_send_message; cbus_message only goes from the worker to pages');
             break;
         case 'cbus_send_message':
             if (message && message.text) {
@@ -372,10 +378,10 @@ async function handleClientMessage(event) {
                         await handleToolCall({ source: 'tap', tapConfig, message: msg, engramMessages, memory: currentImprints });
                     }
                 } catch (err) {
-                    debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: 'CBus Tap tool call failed', data: { error: err.message } });
+                    logger.error(`The chat's tool call failed: ${err.message}`, { server: currentTapConfig?.serverUrl });
                 }
             } else {
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'REMOVE ---- CBus Tap: No text in cbus_send_message' });
+                logger.debug('Ignored a chat message without text');
             }
             break;
         case 'cbus_subscribe':
@@ -403,18 +409,21 @@ async function handleClientMessage(event) {
             break;
         case 'set_tap_config':
             currentTapConfig = message.tapConfig || {};
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: 'Received TAP config from client', data: currentTapConfig });
+            logger.debug('The chat now sends messages to a tool', {
+                server: currentTapConfig.serverUrl,
+                detail: { tool: currentTapConfig.toolName, messageField: currentTapConfig.connectedStringArg, historyField: currentTapConfig.connectedArrayArg }
+            });
             return;
         case 'update_memory':
             if (Array.isArray(message.imprints)) {
                 currentImprints = message.imprints;
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Updated memory/imprints', data: { count: currentImprints.length, imprints: currentImprints } });
+                logger.debug(`Updated memory: ${currentImprints.length} imprint${currentImprints.length === 1 ? '' : 's'}`);
             }
             break;
         case 'init_mcp_servers_index':
             if (message.servers && typeof message.servers === 'object') {
                 Object.assign(mcpServersIndex, message.servers);
-                debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Initialized mcpServersIndex from client', data: { keys: Object.keys(mcpServersIndex) } });
+                logger.debug(`The page registered ${Object.keys(message.servers).length} server(s)`);
             }
             break;
         case 'extracted_tool_call': {
@@ -425,7 +434,7 @@ async function handleClientMessage(event) {
             break;
         }
         default:
-            console.warn('Unknown message type:', message.type);
+            logger.warn(`Ignored a message of unknown type ${message.type}`);
     }
 }
 
@@ -444,26 +453,29 @@ function sendToEngramClient(engramId, message) {
     }
 }
 
-// Initialize on install
+// Initialize on install. A new version takes over as soon as it's installed instead of waiting
+// for every tab to close.
 self.addEventListener('install', event => {
-    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Service worker installing..." });
+    logger.info(`Installing the service worker for WASM build ${WASM_SHA256.slice(0, 12)}`);
+    self.skipWaiting();
     event.waitUntil(initializeWasm());
     event.waitUntil(initDB());
 });
 
 // Handle activation
 self.addEventListener('activate', event => {
-    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: "Service worker activating..." });
+    logger.debug('Activating');
     event.waitUntil(clients.claim());
     event.waitUntil(initialWasmBroadcast());
 });
 
 
-// Broadcast message to all clients
+// Broadcast message to all clients. Uncontrolled pages count too: a page isn't controlled until
+// the worker activates, and it should still see what happened while the worker installed.
 function broadcastToClients(message) {
     if (!isRunning) return;
     
-    self.clients.matchAll().then(clients => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
         clients.forEach(client => {
             client.postMessage(message);
         });
@@ -535,7 +547,7 @@ function extractJsonRpcCalls(text) {
 async function maybeCallExtractedTool(toolCall, engramId) {
     // Circuit breaker: prevent rapid-fire loops
     if (shouldBreakCircuit(engramId)) {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'WARN', message: '[SW] Circuit breaker: too many tool calls, skipping', data: { engramId } });
+        logger.warn('Skipped a tool call from tool output: more than 3 in 10 seconds', { detail: { engramId } });
         broadcastToClients({
             type: 'tool_result',
             error: 'Circuit breaker: too many tool calls in a short period',
@@ -548,7 +560,7 @@ async function maybeCallExtractedTool(toolCall, engramId) {
         // Find the tool and server
         const found = findToolAndServerByMethod(toolCall.method);
         if (!found) {
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] Tool not found for extracted tool call', data: { method: toolCall.method } });
+            logger.error(`Tool output asked for ${toolCall.method}, which no connected server offers`);
             broadcastToClients({
                 type: 'tool_result',
                 error: `Tool not found: ${toolCall.method}`,
@@ -563,7 +575,7 @@ async function maybeCallExtractedTool(toolCall, engramId) {
         const tapConfig = { ...buildTapConfigForTool(serverUrl, tool), args };
 
         try {
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] About to execute tool call', data: { toolCall, tapConfig } });
+            logger.info(`Tool output asked for ${tool.name}; calling it`, { server: serverUrl });
             await handleToolCall({
                 source: 'extracted',
                 tapConfig,
@@ -572,9 +584,8 @@ async function maybeCallExtractedTool(toolCall, engramId) {
                 engramMessages: null,
                 memory: null
             });
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[SW] Tool call executed', data: { toolCall, tapConfig } });
         } catch (err) {
-            debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] Error dispatching extracted tool call', data: { error: err.message, toolCall } });
+            logger.error(`Couldn't run the tool call from tool output: ${err.message}`, { server: serverUrl, detail: { toolCall } });
             broadcastToClients({
                 type: 'tool_result',
                 error: err.message,
@@ -583,7 +594,7 @@ async function maybeCallExtractedTool(toolCall, engramId) {
             });
         }
     } else {
-        debugLog({ source: 'ServiceWorker', type: 'log', level: 'ERROR', message: '[SW] No tool call found in extracted_tool_call', data: { toolCall } });
+        logger.error('extracted_tool_call carried no JSON-RPC tool call', { detail: { toolCall } });
     }
 }
 
@@ -647,19 +658,23 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
             if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1).map(msg => msg.text);
         }
     }
-    debugLog({ source: 'ServiceWorker', type: 'log', level: 'DEBUG', message: '[handleToolCall] Calling tool', data: { tapConfig, toolArgs, requestId: message.requestId, source } });
+    const server = tapConfig.serverUrl;
+    const tool = tapConfig.toolName;
+    logger.debug(`Calling ${tool}`, { server, detail: { from: CALL_ORIGINS[source] || source, arguments: Object.keys(toolArgs) } });
+    const started = performance.now();
     let result;
     try {
         // Only calls the page asked for directly may bring a token; calls started from chat or
         // from tool output use the one the page registered for the server.
         result = await wasmInstance.call_tool(
-            tapConfig.serverUrl,
-            tapConfig.toolName,
+            server,
+            tool,
             JSON.stringify(toolArgs),
-            mcpOptions(tapConfig.serverUrl, source === 'console' ? message : {})
+            mcpOptions(server, source === 'console' ? message : {})
         );
     } catch (err) {
         const error = mcpError(err);
+        logger.error(`${tool} failed after ${formatDuration(performance.now() - started)}: ${error.message}`, { server, detail: errorDetail(error) });
         const errorMsg = {
             type: 'tool_result',
             error: error.message,
@@ -684,6 +699,14 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
         parsedResult = { text: '[Tool returned invalid JSON]' };
     }
     let toolText = extractToolResponseText(parsedResult);
+    const took = formatDuration(performance.now() - started);
+    if (parsedResult?.resultType === 'input_required') {
+        logger.warn(`${tool} asked for more input after ${took} (input_required), which this client can't provide yet`, { server });
+    } else if (parsedResult?.isError) {
+        logger.warn(`${tool} reported an error after ${took}: ${toolText.slice(0, 200)}`, { server });
+    } else {
+        logger.info(`${tool} returned in ${took}`, { server });
+    }
     // For tap/auto, also create a cbus_message and persist
     if (source === 'tap' || source === 'extracted') {
         const toolMsg = {

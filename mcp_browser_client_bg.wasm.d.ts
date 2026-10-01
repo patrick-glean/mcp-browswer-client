@@ -6,7 +6,7 @@ export const get_uptime: () => bigint;
 export const increment_uptime: () => void;
 export const get_version: () => [number, number];
 export const get_compiled_info: () => [number, number];
-export const set_debug_mode: (a: number) => void;
+export const set_logger: (a: any) => void;
 export const get_metadata: () => [number, number];
 export const add_memory_event: (a: number, b: number) => void;
 export const clear_memory_events: () => void;
@@ -23,6 +23,6 @@ export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) =>
 export const __wbindgen_export_5: WebAssembly.Table;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hc7efaec20a611c04: (a: number, b: number) => void;
-export const closure71_externref_shim: (a: number, b: number, c: any) => void;
-export const closure93_externref_shim: (a: number, b: number, c: any, d: any) => void;
+export const closure74_externref_shim: (a: number, b: number, c: any) => void;
+export const closure96_externref_shim: (a: number, b: number, c: any, d: any) => void;
 export const __wbindgen_start: () => void;
