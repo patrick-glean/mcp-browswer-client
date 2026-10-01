@@ -32,7 +32,8 @@ else
 fi
 
 find "$worktree" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-cp -R public/. "$worktree/"
+# Only what's committed: ignored files in public/, such as .DS_Store, stay off the site.
+git archive HEAD:public | tar -x -C "$worktree"
 # Serve the files as-is; without this GitHub Pages runs Jekyll, which drops names starting with _.
 touch "$worktree/.nojekyll"
 

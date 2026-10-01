@@ -31,7 +31,11 @@ if ! command -v wasm-bindgen >/dev/null 2>&1 || \
     "$CARGO_BIN" install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
 fi
 
-RUSTC="$RUSTC_BIN" "$CARGO_BIN" build --target "$TARGET" --release
+# Panic messages carry source paths, which would otherwise put this machine's home directory (and
+# username) into the published module for every dependency.
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+RUSTC="$RUSTC_BIN" "$CARGO_BIN" build --target "$TARGET" --release \
+    --config "target.$TARGET.rustflags=['--remap-path-prefix=$CARGO_HOME_DIR=/cargo', '--remap-path-prefix=$PWD=/build']"
 
 # Respect CARGO_TARGET_DIR when set (e.g. sandboxed/CI builds redirect it).
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"

@@ -2024,7 +2024,7 @@
             return `<span class="badge-row">${badges.map(([label, kind, help]) => `<span class="badge ${kind}" title="${escapeHtml(help)}">${label}</span>`).join('')}</span>`;
         }
 
-        // "Signed in with scio-prod-be.glean.com · mcp offline_access · expires in 59 min · renews automatically"
+        // "Signed in with your-company-be.glean.com · mcp offline_access · expires in 59 min · renews automatically"
         function describeSignIn(status) {
             let host = status.issuer;
             try { host = new URL(status.issuer).host; } catch { /* show the issuer as is */ }
