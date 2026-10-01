@@ -9,7 +9,10 @@ Modes:
 Examples:
   python3 test_mcp_server.py                      # dual mode on http://127.0.0.1:8081
   python3 test_mcp_server.py --mode legacy --sse  # a 2025-era server that streams replies
+  python3 test_mcp_server.py --token s3cret       # requires Authorization: Bearer s3cret
   python3 test_mcp_server.py --allow-origin https://example.github.io
+  python3 test_mcp_server.py --mode legacy --allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"
+                                                  # a CORS policy written before 2026-07-28
 """
 
 import argparse
@@ -162,6 +165,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.origin_allowed():
             return self.send_json(403, rpc_error(None, INVALID_REQUEST, "Forbidden: origin not allowed"))
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.server.token and self.headers.get("Authorization") != f"Bearer {self.server.token}":
+            self.label = "unauthorized request"
+            return self.send_json(
+                401, rpc_error(None, -32001, "Unauthorized: send Authorization: Bearer <token>"),
+                headers={"WWW-Authenticate": 'Bearer realm="mock-mcp"'},
+            )
         if self.server.verbose:
             print(f"--> {dict(self.headers)}\n    {body.decode('utf-8', 'replace')}", flush=True)
         try:
@@ -371,8 +380,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
         if preflight:
             self.send_header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
-            # Echo the request's list: it covers every Mcp-Param-* header and Authorization.
-            self.send_header("Access-Control-Allow-Headers", self.headers.get("Access-Control-Request-Headers") or "Content-Type")
+            # By default, echo the request's list: it covers every Mcp-Param-* header and Authorization.
+            allowed = self.server.allowed_headers or self.headers.get("Access-Control-Request-Headers") or "Content-Type"
+            self.send_header("Access-Control-Allow-Headers", allowed)
             self.send_header("Access-Control-Max-Age", "600")
 
     def origin_allowed(self):
@@ -391,6 +401,12 @@ def main():
         help="browser origin to accept; repeatable, ':*' matches any port, '*' allows all "
              "(default: http://localhost:* and http://127.0.0.1:*)",
     )
+    parser.add_argument("--token", help="require Authorization: Bearer TOKEN on every request")
+    parser.add_argument(
+        "--allow-headers", metavar="LIST",
+        help="headers CORS preflights allow, e.g. 'Content-Type, Mcp-Session-Id' "
+             "(default: whatever the browser asks for)",
+    )
     parser.add_argument("--verbose", action="store_true", help="print request headers and bodies")
     args = parser.parse_args()
 
@@ -399,9 +415,17 @@ def main():
     server.sse = args.sse
     server.verbose = args.verbose
     server.allowed_origins = args.allowed_origins or DEFAULT_ORIGINS
+    server.allowed_headers = args.allow_headers
+    server.token = args.token
     server.sessions = {}
     server.lock = threading.Lock()
-    print(f"Mock MCP server ({args.mode}{', SSE' if args.sse else ''}) on http://{args.host}:{args.port}", flush=True)
+    url = f"http://{args.host}:{args.port}"
+    features = [args.mode] + (["SSE replies"] if args.sse else []) + (["bearer token required"] if args.token else [])
+    print(f"Mock MCP server ({', '.join(features)}) on {url}", flush=True)
+    print(f"  Browser origins allowed: {', '.join(server.allowed_origins)}", flush=True)
+    if args.allow_headers:
+        print(f"  CORS preflights allow only: {args.allow_headers}", flush=True)
+    print(f"  In the client, add {url} on the MCP tab (the Guide has a button for it). Ctrl+C stops the server.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

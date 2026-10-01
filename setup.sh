@@ -29,8 +29,10 @@ venv/bin/pip install -r requirements.txt
 echo "Building the WASM module..."
 ./wasm-build.sh
 
-echo "Setup complete!"
+echo "Setup complete! To try it:"
 echo ""
-echo "To start the web server:        npm start"
-echo "To start the mock MCP server:   npm run start:mock-mcp"
-echo "To run the tests:               npm run test:rust && npm run test:browser"
+echo "  npm start                 # the app on http://localhost:8080"
+echo "  npm run start:mock-mcp    # in a second terminal: a mock MCP server on http://127.0.0.1:8081"
+echo ""
+echo "Then open http://localhost:8080. The Guide (top right) walks through connecting and calling a tool."
+echo "Tests: npm run test:rust && npm run test:browser (README.md has the full testing guide)"

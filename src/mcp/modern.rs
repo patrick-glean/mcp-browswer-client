@@ -1,8 +1,9 @@
 //! The 2026-07-28 ("modern") protocol: per-request `_meta`, mirrored headers and `server/discover`.
 
 use super::headers::encode_header_value;
-use super::transport::{self, http_error, HttpReply};
+use super::transport::{self, describe_reply, http_error, HttpReply};
 use super::types::*;
+use crate::logging;
 use serde_json::{json, Map, Value};
 
 /// Adds the per-request protocol fields to `params`, keeping any `_meta` entries already there.
@@ -135,7 +136,19 @@ pub async fn discover(url: &str, version: &str, auth: &[(String, String)]) -> Re
     headers.extend(request_headers("server/discover", version, &params));
     let body = request_body(next_request_id(), "server/discover", params);
     let reply = transport::post(url, &headers, &body, CONNECT_TIMEOUT_MS).await?;
-    Ok(classify_probe(&reply, version))
+    let probe = classify_probe(&reply, version);
+    match &probe {
+        Probe::Legacy => logging::info(
+            url,
+            &format!(
+                "server/discover got {}, so this looks like a 2025-era server; falling back to the initialize handshake",
+                describe_reply(&reply)
+            ),
+        ),
+        Probe::Retry(next) => logging::info(url, &format!("The server doesn't accept MCP {version}; retrying with {next}")),
+        Probe::Modern(_) | Probe::Failed(_) => {}
+    }
+    Ok(probe)
 }
 
 #[cfg(test)]

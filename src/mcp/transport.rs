@@ -3,12 +3,15 @@
 
 use super::sse::{SseEvent, SseParser};
 use super::types::{rpc_error, ErrorKind, McpError};
-use crate::logging;
+use crate::logging::{self, Level};
 use js_sys::{Promise, Reflect, Uint8Array};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+
+/// Longer bodies are cut short in the debug trace.
+const MAX_LOGGED_BODY: usize = 4_000;
 
 #[wasm_bindgen]
 extern "C" {
@@ -30,11 +33,41 @@ pub struct HttpReply {
     pub message: Option<Value>,
     /// The start of a body that wasn't JSON, for error messages.
     pub body_excerpt: Option<String>,
+    /// The reply was an SSE stream rather than a JSON body.
+    pub streamed: bool,
 }
 
 /// POSTs one JSON-RPC message. Transport failures (unreachable, CORS, timeout) are errors;
-/// every HTTP status comes back as a reply for the caller to interpret.
+/// every HTTP status comes back as a reply for the caller to interpret. Each exchange is
+/// logged at debug level, without the bearer token.
 pub async fn post(url: &str, headers: &[(String, String)], body: &Value, timeout_ms: i32) -> Result<HttpReply, McpError> {
+    let body_text = body.to_string();
+    let request = describe_request(body);
+    let detail = json!({ "headers": loggable_headers(headers), "body": loggable_body(body, &body_text) });
+    logging::emit(Level::Debug, url, &format!("→ {request}"), Some(&detail));
+
+    let started = js_sys::Date::now();
+    let result = exchange(url, headers, &body_text, body.get("id"), timeout_ms).await;
+    let elapsed = (js_sys::Date::now() - started).round();
+    match &result {
+        Ok(reply) => logging::emit(
+            Level::Debug,
+            url,
+            &format!("← {} for {request} in {elapsed} ms", describe_reply(reply)),
+            reply_detail(reply).as_ref(),
+        ),
+        Err(err) => logging::debug(url, &format!("✕ {request} after {elapsed} ms: {}", err.message)),
+    }
+    result
+}
+
+async fn exchange(
+    url: &str,
+    headers: &[(String, String)],
+    body: &str,
+    request_id: Option<&Value>,
+    timeout_ms: i32,
+) -> Result<HttpReply, McpError> {
     let js_headers = web_sys::Headers::new().map_err(js_internal)?;
     js_headers.set("Content-Type", "application/json").map_err(js_internal)?;
     js_headers.set("Accept", "application/json, text/event-stream").map_err(js_internal)?;
@@ -48,12 +81,9 @@ pub async fn post(url: &str, headers: &[(String, String)], body: &Value, timeout
     let options = js_sys::Object::new();
     set(&options, "method", &JsValue::from_str("POST"))?;
     set(&options, "headers", &js_headers)?;
-    set(&options, "body", &JsValue::from_str(&body.to_string()))?;
+    set(&options, "body", &JsValue::from_str(body))?;
     set(&options, "signal", &controller.signal())?;
 
-    if logging::debug_enabled() {
-        logging::debug(&format!("POST {url} {body}"));
-    }
     // Held until the body is fully read, so a stalled SSE stream is aborted as well.
     let _timeout = Timeout::start(&controller, timeout_ms);
     let response = JsFuture::from(fetch_with_options(url, &options))
@@ -78,7 +108,8 @@ pub async fn post(url: &str, headers: &[(String, String)], body: &Value, timeout
         return Ok(reply);
     }
     if content_type.starts_with("text/event-stream") {
-        reply.message = read_sse(&response, body.get("id"), url, timeout_ms).await?;
+        reply.streamed = true;
+        reply.message = read_sse(&response, request_id, url, timeout_ms).await?;
     } else {
         let text = read_text(&response, url, timeout_ms).await?;
         match serde_json::from_str::<Value>(&text) {
@@ -86,10 +117,81 @@ pub async fn post(url: &str, headers: &[(String, String)], body: &Value, timeout
             Err(_) => reply.body_excerpt = excerpt(&text),
         }
     }
-    if logging::debug_enabled() {
-        logging::debug(&format!("{status} from {url}: {:?}", reply.message));
-    }
     Ok(reply)
+}
+
+/// "tools/call echo (id 7)": the method, what it addresses and the request id.
+fn describe_request(body: &Value) -> String {
+    let mut text = body.get("method").and_then(Value::as_str).unwrap_or("message").to_string();
+    let target = body.pointer("/params/name").or_else(|| body.pointer("/params/uri"));
+    if let Some(target) = target.and_then(Value::as_str) {
+        text.push_str(&format!(" {target}"));
+    }
+    if let Some(cursor) = body.pointer("/params/cursor").and_then(Value::as_str) {
+        text.push_str(&format!(" from cursor {cursor}"));
+    }
+    if let Some(id) = body.get("id") {
+        text.push_str(&format!(" (id {id})"));
+    }
+    text
+}
+
+/// "HTTP 400, JSON-RPC error -32000: Bad Request": enough to see why a reply was handled the
+/// way it was.
+pub fn describe_reply(reply: &HttpReply) -> String {
+    let mut text = format!("HTTP {}", reply.status);
+    if reply.streamed {
+        text.push_str(" (SSE)");
+    }
+    if let Some(error) = reply.message.as_ref().and_then(rpc_error) {
+        text.push_str(&format!(", JSON-RPC error {}", error.code));
+        if !error.message.is_empty() {
+            text.push_str(&format!(": {}", shorten(&error.message, 160)));
+        }
+    } else if let Some(body) = &reply.body_excerpt {
+        text.push_str(&format!(": {}", shorten(body, 160)));
+    }
+    text
+}
+
+/// Request headers as the trace shows them: the bearer token never appears, and session IDs,
+/// which can stand in for credentials, are shortened.
+fn loggable_headers(headers: &[(String, String)]) -> Value {
+    let mut shown = Map::new();
+    for (name, value) in headers {
+        let value = if name.eq_ignore_ascii_case("authorization") {
+            "[redacted]".to_string()
+        } else if name.eq_ignore_ascii_case("mcp-session-id") {
+            shorten(value, 8)
+        } else {
+            value.clone()
+        };
+        shown.insert(name.clone(), Value::String(value));
+    }
+    Value::Object(shown)
+}
+
+/// The message itself when it's small enough to pretty-print in the Logs tab, otherwise the
+/// start of its text.
+fn loggable_body(message: &Value, text: &str) -> Value {
+    if text.len() <= MAX_LOGGED_BODY {
+        message.clone()
+    } else {
+        Value::String(shorten(text, MAX_LOGGED_BODY))
+    }
+}
+
+fn reply_detail(reply: &HttpReply) -> Option<Value> {
+    let mut detail = Map::new();
+    if let Some(id) = &reply.session_id {
+        detail.insert("sessionId".into(), Value::String(shorten(id, 8)));
+    }
+    if let Some(message) = &reply.message {
+        detail.insert("body".into(), loggable_body(message, &message.to_string()));
+    } else if let Some(body) = &reply.body_excerpt {
+        detail.insert("body".into(), Value::String(body.clone()));
+    }
+    (!detail.is_empty()).then_some(Value::Object(detail))
 }
 
 /// Turns a reply into the JSON-RPC `result`, or an error the UI can explain.
@@ -171,7 +273,7 @@ async fn read_sse(response: &web_sys::Response, request_id: Option<&Value>, url:
             parser.push(&Uint8Array::new(&value).to_vec())
         };
         for event in events {
-            let Some(message) = sse_message(&event) else { continue };
+            let Some(message) = sse_message(url, &event) else { continue };
             if is_response_to(&message, request_id) {
                 // The request is answered; drop the rest of the stream.
                 let _ = reader.cancel();
@@ -180,7 +282,7 @@ async fn read_sse(response: &web_sys::Response, request_id: Option<&Value>, url:
             if message.get("method").is_none() {
                 unmatched_response = Some(message);
             } else {
-                log_server_message(&message);
+                log_server_message(url, &message);
             }
         }
         if done {
@@ -189,29 +291,49 @@ async fn read_sse(response: &web_sys::Response, request_id: Option<&Value>, url:
     }
 }
 
-fn sse_message(event: &SseEvent) -> Option<Value> {
+fn sse_message(url: &str, event: &SseEvent) -> Option<Value> {
     if event.event != "message" || event.data.trim().is_empty() {
         return None;
     }
     match serde_json::from_str(&event.data) {
         Ok(message) => Some(message),
         Err(e) => {
-            logging::warn(&format!("Ignoring an SSE event that isn't JSON: {e}"));
+            logging::warn(url, &format!("Ignoring an SSE event that isn't JSON: {e}"));
             None
         }
     }
 }
 
-fn log_server_message(message: &Value) {
+/// Requests and notifications the server sends while a reply streams in. Its log messages
+/// keep their level; everything else is traced.
+fn log_server_message(url: &str, message: &Value) {
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     if message.get("id").is_some() {
-        logging::warn(&format!("The server sent a {method} request, which this client can't answer yet"));
+        logging::warn(url, &format!("The server sent a {method} request, which this client can't answer yet"));
     } else if method == "notifications/message" {
-        logging::info(&format!("Server log: {params}"));
+        let (level, text) = server_log_entry(&params);
+        logging::emit(level, url, &text, None);
     } else {
-        logging::debug(&format!("{method}: {params}"));
+        logging::emit(Level::Debug, url, &format!("The server sent {method}"), Some(&params));
     }
+}
+
+/// Maps an MCP `notifications/message` (syslog levels, any JSON `data`) to a log entry.
+fn server_log_entry(params: &Value) -> (Level, String) {
+    let level = match params.get("level").and_then(Value::as_str) {
+        Some("debug") => Level::Debug,
+        Some("info" | "notice") | None => Level::Info,
+        Some("warning") => Level::Warn,
+        Some(_) => Level::Error,
+    };
+    let data = match params.get("data") {
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    let logger = params.get("logger").and_then(Value::as_str).map(|name| format!(" ({name})")).unwrap_or_default();
+    (level, format!("Server log{logger}: {data}"))
 }
 
 async fn read_text(response: &web_sys::Response, url: &str, timeout_ms: i32) -> Result<String, McpError> {
@@ -222,14 +344,14 @@ async fn read_text(response: &web_sys::Response, url: &str, timeout_ms: i32) -> 
 
 fn excerpt(text: &str) -> Option<String> {
     let text = text.trim();
-    if text.is_empty() {
-        return None;
+    (!text.is_empty()).then(|| shorten(text, 300))
+}
+
+fn shorten(text: &str, max_chars: usize) -> String {
+    match text.char_indices().nth(max_chars) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_string(),
     }
-    let mut short: String = text.chars().take(300).collect();
-    if short.len() < text.len() {
-        short.push('…');
-    }
-    Some(short)
 }
 
 fn fetch_error(error: &JsValue, url: &str, timeout_ms: i32) -> McpError {
@@ -346,5 +468,63 @@ mod tests {
         let short = excerpt(&long).unwrap();
         assert_eq!(short.chars().count(), 301);
         assert!(short.ends_with('…'));
+        assert_eq!(shorten("Zürich", 3), "Zür…");
+        assert_eq!(shorten("Zürich", 6), "Zürich");
+    }
+
+    #[test]
+    fn describes_requests_by_method_target_and_id() {
+        let call = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "echo", "arguments": {} } });
+        assert_eq!(describe_request(&call), "tools/call echo (id 7)");
+        let read = json!({ "jsonrpc": "2.0", "id": 8, "method": "resources/read", "params": { "uri": "file:///a.txt" } });
+        assert_eq!(describe_request(&read), "resources/read file:///a.txt (id 8)");
+        let page = json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": { "cursor": "2" } });
+        assert_eq!(describe_request(&page), "tools/list from cursor 2 (id 9)");
+        let initialized = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+        assert_eq!(describe_request(&initialized), "notifications/initialized");
+    }
+
+    #[test]
+    fn describes_replies_with_their_status_and_error() {
+        let mut no_session = reply(400, Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32000, "message": "Bad Request: No valid session ID provided" } })));
+        assert_eq!(describe_reply(&no_session), "HTTP 400, JSON-RPC error -32000: Bad Request: No valid session ID provided");
+        no_session.streamed = true;
+        assert!(describe_reply(&no_session).starts_with("HTTP 400 (SSE), JSON-RPC error"));
+        let mut html = reply(404, None);
+        html.body_excerpt = Some("<h1>Not Found</h1>".into());
+        assert_eq!(describe_reply(&html), "HTTP 404: <h1>Not Found</h1>");
+        assert_eq!(describe_reply(&reply(202, None)), "HTTP 202");
+    }
+
+    #[test]
+    fn the_trace_never_shows_the_bearer_token() {
+        let headers = vec![
+            ("Authorization".to_string(), "Bearer s3cret-token".to_string()),
+            ("Mcp-Session-Id".to_string(), "0123456789abcdef".to_string()),
+            ("Mcp-Method".to_string(), "tools/call".to_string()),
+        ];
+        let shown = loggable_headers(&headers);
+        assert_eq!(shown["Authorization"], "[redacted]");
+        assert_eq!(shown["Mcp-Session-Id"], "01234567…");
+        assert_eq!(shown["Mcp-Method"], "tools/call");
+        assert!(!shown.to_string().contains("s3cret"));
+    }
+
+    #[test]
+    fn logs_small_bodies_whole_and_cuts_large_ones() {
+        let small = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
+        assert_eq!(loggable_body(&small, &small.to_string()), small);
+        let large = json!({ "text": "x".repeat(MAX_LOGGED_BODY) });
+        let cut = loggable_body(&large, &large.to_string());
+        assert!(cut.as_str().is_some_and(|text| text.ends_with('…') && text.chars().count() == MAX_LOGGED_BODY + 1));
+    }
+
+    #[test]
+    fn keeps_the_level_of_server_log_messages() {
+        let (level, text) = server_log_entry(&json!({ "level": "warning", "logger": "db", "data": "Slow query" }));
+        assert_eq!((level, text.as_str()), (Level::Warn, "Server log (db): Slow query"));
+        assert_eq!(server_log_entry(&json!({ "level": "critical", "data": { "code": 5 } })), (Level::Error, "Server log: {\"code\":5}".to_string()));
+        assert_eq!(server_log_entry(&json!({ "level": "notice", "data": "hi" })).0, Level::Info);
+        assert_eq!(server_log_entry(&json!({ "level": "debug", "data": "hi" })).0, Level::Debug);
     }
 }

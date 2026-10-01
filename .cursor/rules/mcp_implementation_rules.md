@@ -12,6 +12,8 @@ This file tracks the Model Context Protocol (MCP) client that runs in our servic
 ## Rules
 - All MCP wire logic stays in `src/mcp/`; `src/lib.rs` only exposes it. The service worker never builds JSON-RPC itself.
 - Era detection follows the spec: try a modern request first. A recognized modern error (`-32020`, `-32021`, `-32022`, or `-32601` with HTTP 404) means "modern, fix the request or retry with a supported version"; any other `4xx` or non-modern JSON-RPC error means legacy.
+- A probe the browser can't read at all (a network error) also gets the legacy handshake: browsers report a CORS preflight that rejects `Mcp-Method` and friends exactly like an unreachable server. If the handshake reaches a server that wants 2026-07-28, report the CORS headers it must allow; if it can't be reached either, keep the probe's error.
+- Log every protocol decision at info with the server URL and the reason (fallbacks, version retries, reconnects, hidden tools), and the wire at debug through `transport::post`. Never log an `Authorization` value; shorten session IDs.
 - Every modern POST sends `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `resources/read` and `prompts/get`, `Mcp-Name`. Values that aren't plain ASCII use the `=?base64?...?=` form. Tool parameters marked `x-mcp-header` are mirrored into `Mcp-Param-*`; tools with invalid annotations are hidden and reported as `rejected`.
 - Replies may be `application/json` or `text/event-stream`; both must work. SSE is parsed incrementally and the stream is dropped once the matching response arrives.
 - Results without `resultType` are `complete`; `input_required` passes through to the UI; anything else is an error.
@@ -29,7 +31,9 @@ This file tracks the Model Context Protocol (MCP) client that runs in our servic
 - [x] `tools/list` with pagination, `ttlMs` caching and `x-mcp-header` validation
 - [x] `tools/call` with `Mcp-Name` / `Mcp-Param-*` headers and a retry after `HeaderMismatch`
 - [x] Structured errors and bearer-token auth
-- [x] Unit tests (`npm run test:rust`) and the browser smoke test (`npm run test:browser -- --reference`)
+- [x] Legacy fallback when CORS blocks the modern probe
+- [x] Structured logs from the page, worker and WASM client in the Logs tab, with an HTTP trace at debug level
+- [x] Unit tests (`npm run test:rust`) and the browser smoke test (`npm run test:browser -- --reference`, `npm run test:public`)
 
 ### Next
 - [ ] OAuth 2.1 with PKCE and client ID metadata documents, validating the authorization server's `iss`
@@ -41,5 +45,5 @@ This file tracks the Model Context Protocol (MCP) client that runs in our servic
 
 ## Testing Requirements
 - Protocol logic that doesn't touch the browser (SSE parsing, header encoding, era classification, envelopes) gets native unit tests in its module.
-- Changes to the connection flow, the service worker or the MCP UI must pass `npm run test:browser -- --reference`, which covers modern, legacy, SSE and dual-era mock servers, the official Python SDK server, a service worker restart and unreachable servers.
+- Changes to the connection flow, the service worker or the MCP UI must pass `npm run test:browser -- --reference`, which covers modern, legacy, SSE, dual-era, strict-CORS and token-protected mock servers, the official Python SDK server, a service worker restart, a second tab, unreachable servers and what the Logs tab records. `npm run test:public` adds the public servers the in-app Guide suggests.
 - New server behaviors should be added to `test_mcp_server.py` (standard library only) rather than mocked in the client.

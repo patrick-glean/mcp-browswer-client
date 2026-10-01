@@ -79,7 +79,7 @@ pub async fn call_tool(url: &str, name: &str, args: Value, opts: &Options) -> Re
             let headers = param_headers(url, name, &params["arguments"], opts, false).await?;
             match request(url, opts, "tools/call", params.clone(), &headers, CALL_TIMEOUT_MS).await {
                 Err(err) if err.code == Some(HEADER_MISMATCH) => {
-                    logging::info(&format!("{url} rejected the headers for {name}; refreshing its tool list"));
+                    logging::info(url, &format!("The server rejected the headers for {name}; refreshing its tool list and retrying"));
                     let headers = param_headers(url, name, &params["arguments"], opts, true).await?;
                     request(url, opts, "tools/call", params, &headers, CALL_TIMEOUT_MS).await?
                 }
@@ -111,7 +111,7 @@ async fn fetch_tools(url: &str, opts: &Options) -> Result<ToolCache, McpError> {
                 Ok(()) => tools.push(tool.clone()),
                 Err(reason) => {
                     let name = tool.get("name").cloned().unwrap_or(Value::Null);
-                    logging::warn(&format!("Hiding tool {name} from {url}: {reason}"));
+                    logging::warn(url, &format!("Hiding tool {}: {reason}", name.as_str().unwrap_or("(unnamed)")));
                     rejected.push(json!({ "name": name, "reason": reason }));
                 }
             }
@@ -126,7 +126,7 @@ async fn fetch_tools(url: &str, opts: &Options) -> Result<ToolCache, McpError> {
         }
     }
     if cursor.is_some() {
-        logging::warn(&format!("Stopped listing tools from {url} after {MAX_TOOL_PAGES} pages"));
+        logging::warn(url, &format!("Stopped listing tools after {MAX_TOOL_PAGES} pages"));
     }
     let cache = ToolCache { tools, rejected, ttl_ms, cache_scope, fetched_at: js_sys::Date::now() };
     registry::set_tools(url, cache.clone());
@@ -177,46 +177,78 @@ fn check_result_type(result: Value) -> Result<Value, McpError> {
 async fn establish(url: &str, opts: &Options) -> Result<Connection, McpError> {
     let auth = opts.auth_headers();
     let mut version = MODERN_VERSION.to_string();
-    let mut probe = modern::discover(url, &version, &auth).await?;
+    let mut probe = match modern::discover(url, &version, &auth).await {
+        Err(err) if err.kind == ErrorKind::Network => return legacy_after_blocked_probe(url, &auth, err).await,
+        other => other?,
+    };
     if let Probe::Retry(next) = probe {
         version = next;
         probe = modern::discover(url, &version, &auth).await?;
     }
-    let connection = match probe {
-        Probe::Modern(result) => {
-            let discovery = modern::parse_discovery(&result);
-            Connection {
-                era: Era::Modern,
-                version,
-                session_id: None,
-                capabilities: discovery.capabilities,
-                server_info: discovery.server_info,
-                instructions: discovery.instructions,
-                tools: None,
-            }
-        }
-        Probe::Legacy => {
-            let session = legacy::initialize(url, &auth).await?;
-            Connection {
-                era: Era::Legacy,
-                version: session.version,
-                session_id: session.session_id,
-                capabilities: session.capabilities,
-                server_info: session.server_info,
-                instructions: session.instructions,
-                tools: None,
-            }
-        }
-        Probe::Retry(_) => {
-            return Err(McpError::new(
-                ErrorKind::UnsupportedVersion,
-                "The server rejected every protocol version this client supports.",
-            ))
-        }
-        Probe::Failed(err) => return Err(err),
-    };
-    logging::info(&format!("Connected to {url}: {} ({})", connection.version, connection.era.as_str()));
-    Ok(connection)
+    match probe {
+        Probe::Modern(result) => Ok(modern_connection(version, modern::parse_discovery(&result))),
+        Probe::Legacy => Ok(legacy_connection(legacy::initialize(url, &auth).await?)),
+        Probe::Retry(_) => Err(McpError::new(
+            ErrorKind::UnsupportedVersion,
+            "The server rejected every protocol version this client supports.",
+        )),
+        Probe::Failed(err) => Err(err),
+    }
+}
+
+/// Browsers report a CORS preflight that rejects the 2026-07-28 headers (`Mcp-Method` and
+/// the rest) exactly like an unreachable server. The 2025 handshake sends fewer headers, so a
+/// server whose allowlist predates them still gets a chance.
+async fn legacy_after_blocked_probe(url: &str, auth: &[(String, String)], probe_error: McpError) -> Result<Connection, McpError> {
+    logging::info(
+        url,
+        "server/discover got no reply the browser could read, which is also what happens when CORS rejects the 2026-07-28 headers; trying the 2025 initialize handshake",
+    );
+    match legacy::initialize(url, auth).await {
+        Ok(session) => Ok(legacy_connection(session)),
+        Err(handshake_error) => Err(after_blocked_probe(url, probe_error, handshake_error)),
+    }
+}
+
+/// Which error explains a failed connection when both the probe and the handshake failed.
+fn after_blocked_probe(url: &str, probe_error: McpError, handshake_error: McpError) -> McpError {
+    match handshake_error.kind {
+        ErrorKind::Network => probe_error,
+        // Reachable, and it wants 2026-07-28: the headers are what the browser blocked.
+        ErrorKind::UnsupportedVersion => McpError::new(
+            ErrorKind::Network,
+            format!(
+                "{url} answered the 2025 handshake by asking for MCP 2026-07-28, but the browser blocked the 2026-07-28 request. \
+                 The server's CORS policy must allow the MCP-Protocol-Version, Mcp-Method and Mcp-Name headers \
+                 (and Mcp-Param-* headers for tools that use them)."
+            ),
+        ),
+        _ => handshake_error,
+    }
+}
+
+fn modern_connection(version: String, discovery: modern::Discovery) -> Connection {
+    Connection {
+        era: Era::Modern,
+        version,
+        session_id: None,
+        capabilities: discovery.capabilities,
+        server_info: discovery.server_info,
+        instructions: discovery.instructions,
+        tools: None,
+    }
+}
+
+fn legacy_connection(session: legacy::Session) -> Connection {
+    Connection {
+        era: Era::Legacy,
+        version: session.version,
+        session_id: session.session_id,
+        capabilities: session.capabilities,
+        server_info: session.server_info,
+        instructions: session.instructions,
+        tools: None,
+    }
 }
 
 pub fn connection_info(url: &str, connection: &Connection) -> Value {
@@ -254,7 +286,7 @@ async fn request(
     let connection = connection_for(url, opts).await?;
     match send(url, &connection, opts, method, params.clone(), extra_headers, timeout_ms).await {
         Err(err) if needs_reconnect(&connection, &err) => {
-            logging::info(&format!("Reconnecting to {url}: {}", err.message));
+            logging::info(url, &format!("Reconnecting: {}", err.message));
             registry::remove(url);
             let connection = connection_for(url, opts).await?;
             send(url, &connection, opts, method, params, extra_headers, timeout_ms).await
@@ -360,6 +392,22 @@ mod tests {
         assert_eq!(listing["ttlMs"], 30_000);
         assert_eq!(listing["cacheScope"], "public");
         assert_eq!(listing["fromCache"], true);
+    }
+
+    #[test]
+    fn explains_a_probe_the_browser_blocked() {
+        let url = "http://localhost:8081";
+        let probe_error = McpError::new(ErrorKind::Network, "Couldn't reach it.");
+        // Unreachable both ways: the original explanation stands.
+        let unreachable = after_blocked_probe(url, probe_error.clone(), McpError::new(ErrorKind::Network, "again"));
+        assert_eq!(unreachable, probe_error);
+        // The handshake got through and the server asked for 2026-07-28: its CORS policy is the problem.
+        let wants_modern = after_blocked_probe(url, probe_error.clone(), McpError::new(ErrorKind::UnsupportedVersion, "only 2026-07-28"));
+        assert_eq!(wants_modern.kind, ErrorKind::Network);
+        assert!(wants_modern.message.contains("Mcp-Method") && wants_modern.message.contains(url));
+        // Any other answer from the server is more useful than the probe's guess.
+        let auth = McpError::new(ErrorKind::AuthRequired, "Add a bearer token.").with_status(401);
+        assert_eq!(after_blocked_probe(url, probe_error, auth.clone()), auth);
     }
 
     #[test]

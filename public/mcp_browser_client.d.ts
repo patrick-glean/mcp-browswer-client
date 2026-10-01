@@ -6,7 +6,11 @@ declare namespace wasm_bindgen {
 	export function increment_uptime(): void;
 	export function get_version(): string;
 	export function get_compiled_info(): string;
-	export function set_debug_mode(enabled: boolean): void;
+	/**
+	 * Sends the module's log entries to `logger` instead of the console. It's called with one
+	 * JSON string per entry: `{level, server, message, detail?}`.
+	 */
+	export function set_logger(logger: Function): void;
 	export function get_metadata(): string;
 	export function add_memory_event(text: string): void;
 	export function clear_memory_events(): void;
@@ -38,7 +42,7 @@ declare interface InitOutput {
   readonly increment_uptime: () => void;
   readonly get_version: () => [number, number];
   readonly get_compiled_info: () => [number, number];
-  readonly set_debug_mode: (a: number) => void;
+  readonly set_logger: (a: any) => void;
   readonly get_metadata: () => [number, number];
   readonly add_memory_event: (a: number, b: number) => void;
   readonly clear_memory_events: () => void;
@@ -55,8 +59,8 @@ declare interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hc7efaec20a611c04: (a: number, b: number) => void;
-  readonly closure71_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure93_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure74_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure96_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

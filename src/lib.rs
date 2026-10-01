@@ -62,10 +62,11 @@ pub fn get_compiled_info() -> String {
     format!("v{} built {} ({})", VERSION, BUILD_DATETIME, &BUILD_HASH[..8])
 }
 
+/// Sends the module's log entries to `logger` instead of the console. It's called with one
+/// JSON string per entry: `{level, server, message, detail?}`.
 #[wasm_bindgen]
-pub fn set_debug_mode(enabled: bool) {
-    logging::set_debug(enabled);
-    logging::info(&format!("Debug mode {}", if enabled { "on" } else { "off" }));
+pub fn set_logger(logger: js_sys::Function) {
+    logging::set_logger(logger);
 }
 
 #[wasm_bindgen]

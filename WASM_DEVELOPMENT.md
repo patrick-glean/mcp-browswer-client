@@ -30,7 +30,7 @@ When adding new functionality to the WASM module, follow these steps in order:
                result: result
            });
        } catch (error) {
-           debugLog('My new function failed', { error: error.message });
+           logger.error(`my_new_function failed: ${error.message}`);
        }
        break;
    ```
@@ -57,6 +57,7 @@ The MCP client lives in `src/mcp/` and is exported from `src/lib.rs`. Every call
 | `list_tools(url, options)` | `{tools, rejected, ttlMs, cacheScope, fromCache}` |
 | `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
 | `forget_server(url)` | nothing; drops the remembered connection |
+| `set_logger(fn)` | nothing; `fn` then receives every log entry as a JSON string (see [Logging](#logging)) |
 
 `options` is `{"bearerToken"?: string, "refresh"?: boolean}`. `list_tools` and `call_tool` connect on their own if needed, so they keep working after the browser restarts the service worker.
 
@@ -69,7 +70,40 @@ Page-to-worker messages and the replies the worker broadcasts:
 | `{type: 'call_tool', tapConfig, engramId, bearerToken?}` | `tool_result {result}` or `tool_result {error, errorKind}` |
 | `{type: 'forget-mcp', url}` | none |
 
-The worker handles every message inside `event.waitUntil()` so a long call keeps it alive, and it redacts `bearerToken` values before logging messages.
+The worker handles every message inside `event.waitUntil()` so a long call keeps it alive. It logs only a message's type and target, never its payload, so bearer tokens stay out of the logs.
+
+## Logging
+
+Every log entry, wherever it starts, has the same shape and ends up in each open page's Logs tab:
+
+```js
+{ time, level: 'debug' | 'info' | 'warn' | 'error', source: 'page' | 'worker' | 'wasm', message, server?, detail? }
+```
+
+Log from wherever the event happens:
+
+```rust
+// Rust (src/mcp/): the server URL comes first. The service worker registers the logger at load.
+logging::info(url, &format!("Reconnecting: {}", err.message));
+logging::emit(Level::Debug, url, &format!("→ {request}"), Some(&detail));
+```
+
+```js
+// Service worker (sw.js, wasm.js)
+logger.info(`Listed ${count} tools in ${formatDuration(ms)}`, { server: url, detail: { ttlMs } });
+
+// Page (index.html)
+chatShell.log({ level: 'error', message: 'Select a server first', server: url });
+```
+
+What goes where:
+
+- **info**: what a person testing the client wants to follow: each connect, listing and call with how long it took, and every protocol decision (fallbacks, version retries, reconnects) with the reason.
+- **warn**: something was skipped or degraded: a hidden tool, an `isError` result, an `input_required` result.
+- **error**: an operation failed. Put the `McpError` kind, status and code in `detail`, not the message.
+- **debug**: the wire: `transport::post` traces each request (method, target, id, MCP headers, body) and reply (status, SSE or JSON, timing, body). Bodies over 4 KB are cut.
+
+Write messages as sentences someone can act on, and put structured data in `detail` rather than in the message. Never log an `Authorization` value; the transport trace redacts it and shortens session IDs, and a unit test checks that. The worker prints entries to its console with the matching `console` method, so debug entries only show at DevTools' Verbose level.
 
 ## Message Flow Pattern
 
@@ -152,7 +186,7 @@ The worker handles every message inside `event.waitUntil()` so a long call keeps
        const result = await wasmInstance.my_function();
        // Handle success
    } catch (error) {
-       debugLog('Function failed', { error: error.message });
+       logger.error(`my_function failed: ${error.message}`);
        broadcastToClients({
            type: 'error',
            message: error.message
@@ -164,11 +198,7 @@ The worker handles every message inside `event.waitUntil()` so a long call keeps
    ```javascript
    // In index.html
    case 'error':
-       this.log({
-           level: 'ERROR',
-           message: message.message,
-           timestamp: new Date().toISOString()
-       });
+       this.log({ level: 'error', message: message.message });
        break;
    ```
 
@@ -181,27 +211,16 @@ The worker handles every message inside `event.waitUntil()` so a long call keeps
    npm run test:browser   # the real UI in headless Chrome against the mock servers
    ```
 
-2. **Clear Service Worker**:
-   - Open Chrome DevTools
-   - Go to Application tab
-   - Click Service Workers
-   - Click Unregister
-   - Check "Bypass for network"
+2. **Reload the page**. Each load checks the worker's scripts, and `build.js` (written by `wasm-build.sh`) changes with every build, so a new worker installs and takes over. The Logs tab shows "Installing the service worker for WASM build …" followed by "Loaded the WASM module" with the new build time.
 
-3. **Clear Cache**:
-   - In DevTools Application tab
-   - Click Clear storage
-   - Click Clear site data
-
-4. **Hard Refresh**:
-   - Hold Shift and click refresh
-   - Or use Cmd+Shift+R (Mac) / Ctrl+Shift+R (Windows)
+3. **If the old build is still running**: open DevTools → Application → Service workers and choose Unregister, then reload. Clear site data as well if saved servers or chat history get in the way.
 
 ## Debugging Tips
 
-1. **Service Worker Logs**:
-   - Check Chrome DevTools Console
-   - Look for `[SW v1.0.0]` prefixed messages
+1. **Logs**:
+   - The Logs tab has entries from the page, the worker and the WASM client. Choose Everything to see each HTTP request and reply.
+   - The worker's own console is at `chrome://inspect/#service-workers`; debug entries show at DevTools' Verbose level.
+   - `python3 test_mcp_server.py --verbose` prints what arrives at the mock, headers included.
 
 2. **WASM Status**:
    - Monitor the status indicators in the UI
@@ -209,9 +228,8 @@ The worker handles every message inside `event.waitUntil()` so a long call keeps
    - Verify build info is displayed
 
 3. **Message Flow**:
-   - Use Chrome DevTools Network tab
-   - Check "Disable cache"
-   - Monitor message passing
+   - DevTools → Network, with the worker's DevTools open, shows the worker's requests to MCP servers
+   - Page-to-worker messages appear as debug entries ("Page sent list_tools")
 
 ## Common Issues
 

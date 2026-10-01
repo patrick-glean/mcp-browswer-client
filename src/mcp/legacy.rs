@@ -58,14 +58,16 @@ pub async fn initialize(url: &str, auth: &[(String, String)]) -> Result<Session,
     let reply = transport::post(url, auth, &body, CONNECT_TIMEOUT_MS).await?;
     let result = interpret_reply(&reply)?;
     let session = parse_initialize(&result, reply.session_id.clone())?;
+    let sessions = if session.session_id.is_some() { "opened a session" } else { "doesn't use sessions" };
+    logging::debug(url, &format!("The server chose MCP {} and {sessions}", session.version));
 
     let mut headers = auth.to_vec();
     headers.extend(session_headers(&session.version, session.session_id.as_deref()));
     let initialized = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
     match transport::post(url, &headers, &initialized, CONNECT_TIMEOUT_MS).await {
         Ok(reply) if reply.status < 300 => {}
-        Ok(reply) => logging::warn(&format!("{url} answered notifications/initialized with HTTP {}", reply.status)),
-        Err(err) => logging::warn(&format!("Couldn't send notifications/initialized to {url}: {}", err.message)),
+        Ok(reply) => logging::warn(url, &format!("notifications/initialized got HTTP {}", reply.status)),
+        Err(err) => logging::warn(url, &format!("Couldn't send notifications/initialized: {}", err.message)),
     }
     Ok(session)
 }

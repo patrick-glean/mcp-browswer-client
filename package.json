@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "description": "MCP Browser Client with WASM",
   "scripts": {
-    "start": "http-server public",
+    "start": "http-server public -p 8080 -c-1",
     "build": "./wasm-build.sh",
     "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
     "start:mock-mcp": "python3 test_mcp_server.py",
     "start:reference-mcp": "venv/bin/python tests/reference_server.py",
     "test:rust": "cargo test --lib",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:public": "node tests/browser-smoke.mjs --public"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

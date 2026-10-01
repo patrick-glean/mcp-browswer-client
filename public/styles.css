@@ -131,6 +131,9 @@ hr.divider {
 .icon-trash { --icon: url('icons/trash-2.svg'); }
 .icon-x { --icon: url('icons/x.svg'); }
 .icon-zap { --icon: url('icons/zap.svg'); }
+.icon-copy { --icon: url('icons/copy.svg'); }
+.icon-download { --icon: url('icons/download.svg'); }
+.icon-help { --icon: url('icons/help-circle.svg'); }
 .icon-theme { --icon: url('icons/moon.svg'); }
 .dark-theme .icon-theme { --icon: url('icons/sun.svg'); }
 
@@ -599,6 +602,44 @@ input[type='checkbox'] {
     color: var(--theme-text-secondary);
 }
 
+/* Errors logged while the Logs tab was hidden. */
+.tab-badge {
+    min-width: 18px;
+    height: 18px;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--radius-full);
+    background: var(--theme-error);
+    color: var(--theme-alternate);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+}
+
+.tab-badge[hidden] {
+    display: none;
+}
+
+/* A button that reads as a link inside running text. */
+.link-button {
+    display: inline;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--theme-link);
+    font-weight: 400;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.link-button:hover:not(:disabled) {
+    background: none;
+    color: var(--theme-link-hover);
+}
+
 .tab-content {
     padding-top: 24px;
 }
@@ -690,6 +731,19 @@ input[type='checkbox'] {
 .imprint-list-item.selected {
     background: var(--theme-selected);
     font-weight: 500;
+}
+
+.server-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.server-row .server-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .empty-state {
@@ -978,6 +1032,7 @@ input[type='checkbox'] {
 
 .tool-description {
     color: var(--theme-text-secondary);
+    white-space: pre-line;
 }
 
 .tool-input-schema {
@@ -1097,63 +1152,33 @@ input[type='checkbox'] {
 
 .log-header {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 16px;
 }
 
-/* The kit's Switch, built on the existing checkbox + .slider markup. */
-.debug-toggle {
-    position: relative;
-    display: inline-flex;
+.log-header .section-subtitle {
+    max-width: 640px;
+}
+
+.log-toolbar {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    cursor: pointer;
 }
 
-.debug-toggle input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0;
+.log-toolbar select {
+    width: auto;
 }
 
-.slider {
-    position: relative;
-    flex: none;
-    width: 44px;
-    height: 22px;
-    border-radius: 24px;
-    background: var(--theme-background-dark);
-    transition: background-color 0.15s ease;
-}
-
-.slider::before {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--theme-background);
-    transition: transform 0.15s ease;
-}
-
-.debug-toggle input:checked + .slider {
-    background: var(--theme-primary-highlight);
-}
-
-.debug-toggle input:checked + .slider::before {
-    transform: translateX(22px);
-}
-
-.debug-toggle input:focus-visible + .slider {
-    outline: 2px solid var(--theme-link);
-    outline-offset: 2px;
+.log-toolbar input[type='search'] {
+    width: 220px;
 }
 
 .log-container {
-    height: calc(100vh - 236px);
+    height: calc(100vh - 300px);
     min-height: 360px;
     padding: 12px 16px;
     overflow-y: auto;
@@ -1164,37 +1189,239 @@ input[type='checkbox'] {
     line-height: 1.25rem;
 }
 
-.log-entry {
-    display: flex;
-    gap: 12px;
-    padding: 2px 0;
-    white-space: pre-wrap;
-    word-break: break-word;
+.log-container:empty::before {
+    content: attr(data-empty);
+    color: var(--theme-text-secondary);
+    font-family: var(--font-body);
 }
 
-.log-timestamp {
-    flex: none;
-    min-width: 88px;
+.log-entry {
+    display: grid;
+    grid-template-columns: 96px 44px 48px minmax(0, 1fr);
+    gap: 12px;
+    padding: 2px 0;
+}
+
+.log-time,
+.log-source {
     color: var(--theme-text-secondary);
 }
 
 .log-level {
-    flex: none;
-    min-width: 48px;
     font-weight: 500;
 }
 
-.log-message {
+.log-body {
+    min-width: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.log-server {
+    color: var(--theme-text-secondary);
+}
+
+.log-detail summary {
+    width: max-content;
+    color: var(--theme-link);
+    cursor: pointer;
+}
+
+.log-detail pre {
+    max-height: 360px;
+    margin: 4px 0 8px;
+    padding: 8px 12px;
+    overflow: auto;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-200);
+    background: var(--theme-background);
+    white-space: pre;
+}
+
+.log-entry.level-debug .log-level { color: var(--theme-info-foreground); }
+.log-entry.level-info .log-level { color: var(--theme-success-foreground); }
+.log-entry.level-warn .log-level,
+.log-entry.level-warn .log-message { color: var(--theme-warning-foreground); }
+.log-entry.level-error .log-level,
+.log-entry.level-error .log-message { color: var(--theme-error); }
+
+.log-count {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+/* The pop-out window (?logs=1) shows only the logs. */
+body.logs-only .app-header-actions,
+body.logs-only .tab-bar {
+    display: none;
+}
+
+body.logs-only .log-container {
+    height: calc(100vh - 240px);
+}
+
+/* ---------- Getting started guide ---------- */
+
+.guide-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1100;
+    width: 420px;
+    max-width: 100vw;
+    padding: 20px 24px 32px;
+    overflow-y: auto;
+    border-left: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-modal);
+}
+
+.guide-drawer[hidden] {
+    display: none;
+}
+
+/* Wide screens keep the app beside the guide instead of under it. */
+@media (min-width: 1200px) {
+    body.guide-open .container {
+        margin-right: 420px;
+    }
+}
+
+.guide-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.guide-header h2 {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    letter-spacing: -0.0375rem;
+}
+
+.guide-header h2:focus {
+    outline: none;
+}
+
+.guide-intro {
+    color: var(--theme-text-secondary);
+}
+
+.guide-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.guide-section:last-child {
+    border-bottom: none;
+}
+
+.guide-section h3 {
+    font-size: 1rem;
+    line-height: 1.5rem;
+    letter-spacing: -0.034rem;
+}
+
+.guide-section code {
+    padding: 0 4px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background-mid);
+    font-size: 0.8125rem;
+    overflow-wrap: break-word;
+}
+
+.guide-label {
+    margin-top: 4px;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.guide-label a {
+    color: var(--theme-link);
+}
+
+.guide-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.guide-servers li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+}
+
+.guide-server-text {
     flex: 1;
     min-width: 0;
 }
 
-.log-entry.DEBUG .log-level { color: var(--theme-info-foreground); }
-.log-entry.INFO .log-level { color: var(--theme-success-foreground); }
-.log-entry.WARN .log-level,
-.log-entry.WARNING .log-level { color: var(--theme-warning-foreground); }
-.log-entry.ERROR .log-level,
-.log-entry.ERROR .log-message { color: var(--theme-error); }
+.guide-server-text p {
+    margin-top: 2px;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+.guide-meta {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+.guide-note {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+.guide-command {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+}
+
+.guide-command code {
+    flex: 1;
+    padding: 0;
+    background: none;
+}
+
+.guide-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.guide-faq {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+}
+
+.guide-faq dt {
+    margin-top: 8px;
+    font-weight: 500;
+}
+
+.guide-faq dd {
+    margin: 0;
+    color: var(--theme-text-secondary);
+}
 
 /* ---------- Narrow screens ---------- */
 
