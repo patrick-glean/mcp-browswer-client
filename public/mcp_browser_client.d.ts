@@ -30,6 +30,21 @@ declare namespace wasm_bindgen {
 	 */
 	export function call_tool(url: string, name: string, args: string, options: string): Promise<string>;
 	export function forget_server(url: string): void;
+	/**
+	 * Starts signing in to a server that needs OAuth: discovery, client registration if needed,
+	 * and the URL to open. `options` is `{redirectUri, applicationType, clients, wwwAuthenticate?}`;
+	 * returns `{authorizationUrl, pending, client, newClient, authServer, scope}`.
+	 */
+	export function auth_begin(server_url: string, options: string): Promise<string>;
+	/**
+	 * Finishes a sign-in with the callback's `{code, state, iss, error, errorDescription}` and
+	 * returns the tokens to store.
+	 */
+	export function auth_finish(pending: string, callback: string): Promise<string>;
+	/**
+	 * Refreshes stored tokens. Rejects with kind `auth_required` when the user has to sign in again.
+	 */
+	export function auth_refresh(tokens: string): Promise<string>;
 	
 }
 
@@ -51,6 +66,9 @@ declare interface InitOutput {
   readonly list_tools: (a: number, b: number, c: number, d: number) => any;
   readonly call_tool: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
   readonly forget_server: (a: number, b: number) => void;
+  readonly auth_begin: (a: number, b: number, c: number, d: number) => any;
+  readonly auth_finish: (a: number, b: number, c: number, d: number) => any;
+  readonly auth_refresh: (a: number, b: number) => any;
   readonly __externref_table_alloc: () => number;
   readonly __wbindgen_export_1: WebAssembly.Table;
   readonly __wbindgen_exn_store: (a: number) => void;
@@ -58,9 +76,9 @@ declare interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hc7efaec20a611c04: (a: number, b: number) => void;
-  readonly closure74_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure96_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h3c5941f0d731c178: (a: number, b: number) => void;
+  readonly closure104_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure126_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

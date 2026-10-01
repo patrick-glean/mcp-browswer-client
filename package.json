@@ -4,6 +4,7 @@
   "description": "MCP Browser Client with WASM",
   "scripts": {
     "start": "http-server public -p 8080 -c-1",
+    "start:glean": "http-server public -a 127.0.0.1 -p 8888 -c-1",
     "build": "./wasm-build.sh",
     "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
     "start:mock-mcp": "python3 test_mcp_server.py",

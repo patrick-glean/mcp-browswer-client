@@ -1,6 +1,6 @@
-//! Protocol constants, JSON-RPC helpers and the error type shared by the MCP client.
+//! Protocol constants and JSON-RPC helpers shared by the MCP client.
 
-use serde::Serialize;
+pub use crate::error::{ErrorKind, McpError};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,48 +23,7 @@ pub const CONNECT_TIMEOUT_MS: i32 = 20_000;
 pub const LIST_TIMEOUT_MS: i32 = 30_000;
 pub const CALL_TIMEOUT_MS: i32 = 120_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorKind {
-    /// fetch() rejected: the server is down, CORS blocked the request, or the browser's
-    /// local network permission was denied.
-    Network,
-    Timeout,
-    AuthRequired,
-    Http,
-    Protocol,
-    UnsupportedVersion,
-    InvalidResponse,
-    Internal,
-}
-
-/// An error the UI can explain; it crosses into JavaScript as JSON.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct McpError {
-    pub kind: ErrorKind,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
-}
-
 impl McpError {
-    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        McpError { kind, message: message.into(), status: None, code: None, data: None }
-    }
-
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Internal, message)
-    }
-
-    pub fn with_status(mut self, status: u16) -> Self {
-        self.status = Some(status);
-        self
-    }
-
     pub fn from_rpc(error: RpcError, status: u16) -> Self {
         let kind = if error.code == UNSUPPORTED_PROTOCOL_VERSION {
             ErrorKind::UnsupportedVersion
@@ -77,12 +36,6 @@ impl McpError {
             error.message
         };
         McpError { kind, message, status: Some(status), code: Some(error.code), data: error.data }
-    }
-
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| {
-            json!({ "kind": "internal", "message": self.message }).to_string()
-        })
     }
 }
 
@@ -140,11 +93,5 @@ mod tests {
         assert_eq!(error.kind, ErrorKind::UnsupportedVersion);
         assert_eq!(error.status, Some(400));
         assert!(error.message.contains("-32022"));
-    }
-
-    #[test]
-    fn errors_serialize_for_javascript() {
-        let json: Value = serde_json::from_str(&McpError::new(ErrorKind::AuthRequired, "Sign in").with_status(401).to_json()).unwrap();
-        assert_eq!(json, json!({ "kind": "auth_required", "message": "Sign in", "status": 401 }));
     }
 }

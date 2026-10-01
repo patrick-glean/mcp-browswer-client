@@ -3,25 +3,12 @@
 
 use super::sse::{SseEvent, SseParser};
 use super::types::{rpc_error, ErrorKind, McpError};
+use crate::http::{self, fetch_error, js_internal, loggable_body, shorten};
 use crate::logging::{self, Level};
-use js_sys::{Promise, Reflect, Uint8Array};
+use js_sys::{Reflect, Uint8Array};
 use serde_json::{json, Map, Value};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-
-/// Longer bodies are cut short in the debug trace.
-const MAX_LOGGED_BODY: usize = 4_000;
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = self, js_name = fetch)]
-    fn fetch_with_options(url: &str, options: &JsValue) -> Promise;
-    #[wasm_bindgen(js_namespace = self, js_name = setTimeout)]
-    fn set_timeout(handler: &js_sys::Function, ms: i32) -> JsValue;
-    #[wasm_bindgen(js_namespace = self, js_name = clearTimeout)]
-    fn clear_timeout(handle: &JsValue);
-}
 
 /// What came back for one POST.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,30 +55,13 @@ async fn exchange(
     request_id: Option<&Value>,
     timeout_ms: i32,
 ) -> Result<HttpReply, McpError> {
-    let js_headers = web_sys::Headers::new().map_err(js_internal)?;
-    js_headers.set("Content-Type", "application/json").map_err(js_internal)?;
-    js_headers.set("Accept", "application/json, text/event-stream").map_err(js_internal)?;
-    for (name, value) in headers {
-        js_headers
-            .set(name, value)
-            .map_err(|e| McpError::internal(format!("Couldn't set header {name}: {}", js_message(&e))))?;
-    }
-
-    let controller = web_sys::AbortController::new().map_err(js_internal)?;
-    let options = js_sys::Object::new();
-    set(&options, "method", &JsValue::from_str("POST"))?;
-    set(&options, "headers", &js_headers)?;
-    set(&options, "body", &JsValue::from_str(body))?;
-    set(&options, "signal", &controller.signal())?;
-
-    // Held until the body is fully read, so a stalled SSE stream is aborted as well.
-    let _timeout = Timeout::start(&controller, timeout_ms);
-    let response = JsFuture::from(fetch_with_options(url, &options))
-        .await
-        .map_err(|e| fetch_error(&e, url, timeout_ms))?;
-    let response: web_sys::Response = response
-        .dyn_into()
-        .map_err(|_| McpError::internal("fetch() didn't return a Response"))?;
+    let mut all_headers = vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("Accept".to_string(), "application/json, text/event-stream".to_string()),
+    ];
+    all_headers.extend(headers.iter().cloned());
+    // The timeout is held until the body is fully read, so a stalled SSE stream is aborted as well.
+    let http::Started { response, timeout: _timeout } = http::start("POST", url, &all_headers, Some(body), timeout_ms).await?;
 
     let status = response.status();
     let response_headers = response.headers();
@@ -111,7 +81,7 @@ async fn exchange(
         reply.streamed = true;
         reply.message = read_sse(&response, request_id, url, timeout_ms).await?;
     } else {
-        let text = read_text(&response, url, timeout_ms).await?;
+        let text = http::read_text(&response, url, timeout_ms).await?;
         match serde_json::from_str::<Value>(&text) {
             Ok(message) => reply.message = Some(message),
             Err(_) => reply.body_excerpt = excerpt(&text),
@@ -171,16 +141,6 @@ fn loggable_headers(headers: &[(String, String)]) -> Value {
     Value::Object(shown)
 }
 
-/// The message itself when it's small enough to pretty-print in the Logs tab, otherwise the
-/// start of its text.
-fn loggable_body(message: &Value, text: &str) -> Value {
-    if text.len() <= MAX_LOGGED_BODY {
-        message.clone()
-    } else {
-        Value::String(shorten(text, MAX_LOGGED_BODY))
-    }
-}
-
 fn reply_detail(reply: &HttpReply) -> Option<Value> {
     let mut detail = Map::new();
     if let Some(id) = &reply.session_id {
@@ -196,13 +156,12 @@ fn reply_detail(reply: &HttpReply) -> Option<Value> {
 
 /// Turns a reply into the JSON-RPC `result`, or an error the UI can explain.
 pub fn interpret_reply(reply: &HttpReply) -> Result<Value, McpError> {
+    if reply.status == 401 {
+        return Err(http_error(reply));
+    }
     if let Some(message) = &reply.message {
         if let Some(error) = rpc_error(message) {
-            let mut err = McpError::from_rpc(error, reply.status);
-            if reply.status == 401 {
-                err.kind = ErrorKind::AuthRequired;
-            }
-            return Err(err);
+            return Err(McpError::from_rpc(error, reply.status));
         }
         if let Some(result) = message.get("result") {
             if (200..300).contains(&reply.status) {
@@ -218,7 +177,7 @@ pub fn http_error(reply: &HttpReply) -> McpError {
     let (kind, message) = match status {
         401 => (
             ErrorKind::AuthRequired,
-            "The server requires authentication (HTTP 401). Add a bearer token in the server details.".to_string(),
+            "The server needs you to sign in (HTTP 401). Choose Sign in in the server details, or set a static token there if the server uses one.".to_string(),
         ),
         403 => (
             ErrorKind::Http,
@@ -236,10 +195,16 @@ pub fn http_error(reply: &HttpReply) -> McpError {
         _ => (ErrorKind::Http, format!("The server returned HTTP {status}.")),
     };
     let message = match &reply.body_excerpt {
-        Some(body) if !(200..300).contains(&status) => format!("{message} Response: {body}"),
+        Some(body) if !(200..300).contains(&status) && status != 401 => format!("{message} Response: {body}"),
         _ => message,
     };
-    McpError::new(kind, message).with_status(status)
+    let err = McpError::new(kind, message).with_status(status);
+    // Sign-in needs the challenge's resource_metadata and scope; browsers only show the header
+    // when the server exposes it through CORS.
+    match &reply.www_authenticate {
+        Some(challenge) if status == 401 || status == 403 => err.with_data(json!({ "wwwAuthenticate": challenge })),
+        _ => err,
+    }
 }
 
 /// True when a message is the response to `request_id`. Error responses without an id
@@ -336,75 +301,9 @@ fn server_log_entry(params: &Value) -> (Level, String) {
     (level, format!("Server log{logger}: {data}"))
 }
 
-async fn read_text(response: &web_sys::Response, url: &str, timeout_ms: i32) -> Result<String, McpError> {
-    let promise = response.text().map_err(js_internal)?;
-    let text = JsFuture::from(promise).await.map_err(|e| fetch_error(&e, url, timeout_ms))?;
-    Ok(text.as_string().unwrap_or_default())
-}
-
 fn excerpt(text: &str) -> Option<String> {
     let text = text.trim();
     (!text.is_empty()).then(|| shorten(text, 300))
-}
-
-fn shorten(text: &str, max_chars: usize) -> String {
-    match text.char_indices().nth(max_chars) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text.to_string(),
-    }
-}
-
-fn fetch_error(error: &JsValue, url: &str, timeout_ms: i32) -> McpError {
-    let name = Reflect::get(error, &JsValue::from_str("name")).ok().and_then(|v| v.as_string());
-    if name.as_deref() == Some("AbortError") {
-        return McpError::new(ErrorKind::Timeout, format!("{url} didn't answer within {} seconds.", timeout_ms / 1000));
-    }
-    McpError::new(
-        ErrorKind::Network,
-        format!(
-            "Couldn't reach {url}. The server may be down, or the browser blocked the request: the server must allow this site through CORS, and localhost servers need the browser's local network permission. ({})",
-            js_message(error)
-        ),
-    )
-}
-
-fn set(target: &js_sys::Object, key: &str, value: &JsValue) -> Result<(), McpError> {
-    Reflect::set(target, &JsValue::from_str(key), value).map(|_| ()).map_err(js_internal)
-}
-
-fn js_internal(error: JsValue) -> McpError {
-    McpError::internal(js_message(&error))
-}
-
-fn js_message(value: &JsValue) -> String {
-    if let Some(text) = value.as_string() {
-        return text;
-    }
-    Reflect::get(value, &JsValue::from_str("message"))
-        .ok()
-        .and_then(|m| m.as_string())
-        .unwrap_or_else(|| format!("{value:?}"))
-}
-
-/// Aborts the request when the timer fires; dropping it cancels the timer.
-struct Timeout {
-    handle: JsValue,
-    _callback: Closure<dyn FnMut()>,
-}
-
-impl Timeout {
-    fn start(controller: &web_sys::AbortController, ms: i32) -> Self {
-        let controller = controller.clone();
-        let callback = Closure::<dyn FnMut()>::new(move || controller.abort());
-        let handle = set_timeout(callback.as_ref().unchecked_ref(), ms);
-        Timeout { handle, _callback: callback }
-    }
-}
-
-impl Drop for Timeout {
-    fn drop(&mut self) {
-        clear_timeout(&self.handle);
-    }
 }
 
 #[cfg(test)]
@@ -459,6 +358,16 @@ mod tests {
     fn a_json_rpc_error_on_a_401_is_still_an_auth_error() {
         let err = interpret_reply(&reply(401, Some(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32001, "message": "Unauthorized" } })))).unwrap_err();
         assert_eq!(err.kind, ErrorKind::AuthRequired);
+        assert!(err.message.contains("Sign in"));
+    }
+
+    #[test]
+    fn a_401_carries_the_challenge_for_sign_in() {
+        let mut challenged = reply(401, None);
+        challenged.www_authenticate = Some(r#"Bearer resource_metadata="https://x.test/.well-known/oauth-protected-resource""#.into());
+        let err = interpret_reply(&challenged).unwrap_err();
+        assert_eq!(err.data, Some(json!({ "wwwAuthenticate": r#"Bearer resource_metadata="https://x.test/.well-known/oauth-protected-resource""# })));
+        assert_eq!(interpret_reply(&reply(401, None)).unwrap_err().data, None);
     }
 
     #[test]
@@ -468,8 +377,6 @@ mod tests {
         let short = excerpt(&long).unwrap();
         assert_eq!(short.chars().count(), 301);
         assert!(short.ends_with('…'));
-        assert_eq!(shorten("Zürich", 3), "Zür…");
-        assert_eq!(shorten("Zürich", 6), "Zürich");
     }
 
     #[test]
@@ -508,15 +415,6 @@ mod tests {
         assert_eq!(shown["Mcp-Session-Id"], "01234567…");
         assert_eq!(shown["Mcp-Method"], "tools/call");
         assert!(!shown.to_string().contains("s3cret"));
-    }
-
-    #[test]
-    fn logs_small_bodies_whole_and_cuts_large_ones() {
-        let small = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
-        assert_eq!(loggable_body(&small, &small.to_string()), small);
-        let large = json!({ "text": "x".repeat(MAX_LOGGED_BODY) });
-        let cut = loggable_body(&large, &large.to_string());
-        assert!(cut.as_str().is_some_and(|text| text.ends_with('…') && text.chars().count() == MAX_LOGGED_BODY + 1));
     }
 
     #[test]

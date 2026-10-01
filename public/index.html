@@ -150,11 +150,41 @@
                                             <label class="field"><span class="field-label">Name</span><input type="text" id="cardServerName" disabled></label>
                                             <label class="field"><span class="field-label">Status</span><input type="text" id="cardServerStatus" disabled></label>
                                             <label class="field"><span class="field-label">Protocol</span><input type="text" id="cardServerProtocol" disabled></label>
-                                            <label class="field"><span class="field-label">Bearer token (optional)</span><span class="autosave-input-wrap"><input type="password" id="cardServerToken" autocomplete="off" placeholder="Sent as Authorization: Bearer"><span class="autosave-checkmark" id="checkmark-cardServerToken"></span></span></label>
                                             <label class="field"><span class="field-label">Date added</span><input type="text" id="cardServerDateAdded" disabled></label>
                                             <label class="field"><span class="field-label">Date modified</span><input type="text" id="cardServerDateModified" disabled></label>
+                                            <details class="static-token" id="cardStaticToken">
+                                                <summary>Use a static token instead of signing in</summary>
+                                                <label class="field"><span class="field-label">Bearer token</span><span class="autosave-input-wrap"><input type="password" id="cardServerToken" autocomplete="off" placeholder="Sent as Authorization: Bearer"><span class="autosave-checkmark" id="checkmark-cardServerToken"></span></span></label>
+                                            </details>
+                                        </div>
+                                        <div class="auth-block" id="cardAuth" hidden>
+                                            <div class="auth-text">
+                                                <span class="field-label">Sign-in</span>
+                                                <span id="cardAuthStatus" class="text-secondary"></span>
+                                            </div>
+                                            <div class="button-row">
+                                                <button type="button" id="signInBtn" class="btn-primary btn-sm">Sign in</button>
+                                                <button type="button" id="continueHereBtn" class="btn-sm" hidden>Continue in this tab</button>
+                                                <button type="button" id="copyAuthLinkBtn" class="btn-sm" hidden><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy link</span></button>
+                                                <button type="button" id="cancelSignInBtn" class="btn-outline btn-sm" hidden>Cancel</button>
+                                                <button type="button" id="signOutBtn" class="btn-outline btn-sm" hidden title="Shift-click to also forget this client's registration">Sign out</button>
+                                            </div>
+                                            <div class="auth-elsewhere" id="cardAuthElsewhere" hidden>
+                                                <input type="text" id="authLink" class="auth-link" readonly aria-label="Sign-in link" hidden>
+                                                <p id="authLinkHint" class="text-secondary" hidden>Press ⌘C or Ctrl+C to copy the link, then open it in another tab.</p>
+                                                <details class="auth-paste">
+                                                    <summary>Signing in from another browser?</summary>
+                                                    <p class="text-secondary">Open the link there and sign in. You'll land on a page that says it isn't where you started; copy its address and paste it here.</p>
+                                                    <div class="auth-paste-row">
+                                                        <input type="text" id="authCallbackUrl" spellcheck="false" autocomplete="off" aria-label="The address sign-in sent you to">
+                                                        <button type="button" id="finishSignInBtn" class="btn-primary btn-sm">Finish signing in</button>
+                                                    </div>
+                                                    <p id="authPasteError" class="text-error" hidden></p>
+                                                </details>
+                                            </div>
                                         </div>
                                         <p id="cardServerError" class="server-error text-error" hidden></p>
+                                        <div class="connection-info" id="cardConnection" hidden></div>
                                         <div class="panel-actions">
                                             <!--<button id="saveServerBtn">Save</button>-->
                                             <button id="deleteServerBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete server</button>
@@ -162,8 +192,13 @@
                                     </div>
                                 </div>
                                 <div class="tools-display panel">
-                                    <div class="panel-title">Available tools</div>
+                                    <div class="panel-header">
+                                        <div class="panel-title">Available tools <span id="toolCount" class="text-secondary"></span></div>
+                                        <button type="button" id="downloadToolsBtn" class="btn-sm btn-tertiary" title="Download the server's details and tool list as JSON" hidden><span class="icon icon-download" aria-hidden="true"></span>Download</button>
+                                    </div>
+                                    <input type="search" id="toolFilter" class="tool-filter" placeholder="Filter by name, title or description" aria-label="Filter tools" hidden>
                                     <div id="toolsList"></div>
+                                    <details id="hiddenTools" class="hidden-tools" hidden><summary></summary><ul></ul></details>
                                 </div>
                             </div>
                             <div class="tool-cards-row">
@@ -231,6 +266,19 @@
 
         <section class="guide-section">
             <h3>1. Pick a server</h3>
+            <p class="guide-label">Glean, signed in with your work account</p>
+            <div class="guide-glean">
+                <p>Enter your work email and the client asks Glean where your company's Glean is. Or paste your MCP server URL, from Glean's Your settings, then Third party apps and MCP, then the <em>Connect to your AI apps with Glean MCP</em> card.</p>
+                <div class="guide-glean-row">
+                    <input type="text" id="gleanUrl" class="guide-input" placeholder="you@company.com or https://your-company-be.glean.com/mcp/default" spellcheck="false" autocomplete="email" aria-label="Work email or Glean MCP server URL">
+                    <button type="button" class="btn-sm" id="gleanAddBtn">Add and sign in</button>
+                </div>
+                <p id="gleanStatus" class="guide-note" hidden></p>
+                <p id="gleanUrlError" class="guide-note text-error" hidden></p>
+                <p id="gleanOriginNote" class="guide-note" hidden>Glean answers only pages from origins on its allowlist. If this page's origin isn't on yours, connecting fails with a network (CORS) error. If your Glean allows <code>http://127.0.0.1:8888</code>, run <code>npm run start:glean</code> in a clone and open the client there; otherwise ask a Glean admin to add this origin.</p>
+                <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>.</p>
+            </div>
+
             <p class="guide-label">Public servers, nothing to install</p>
             <ul class="guide-servers">
                 <li>
@@ -567,6 +615,10 @@
                 this.servers = this.loadServers();
                 this.pendingConnects = new Map();
                 this.pendingCall = null;
+                // Sign-in status per server URL, as the worker reports it (never the tokens).
+                this.authStatus = {};
+                // The sign-in in progress: { url, popup }.
+                this.signingIn = null;
                 
                 // Store the bound message handler
                 this.boundMessageHandler = this.handleServiceWorkerMessage.bind(this);
@@ -748,6 +800,186 @@
                         });
                     }
                 });
+
+                document.getElementById('toolFilter').addEventListener('input', () => this.filterTools());
+                document.getElementById('downloadToolsBtn').addEventListener('click', () => this.exportToolList());
+
+                // Sign-in opens its window straight from the click, so pop-up blockers allow it.
+                document.getElementById('signInBtn').addEventListener('click', () => this.signIn(this.selectedServerUrl));
+                document.getElementById('cancelSignInBtn').addEventListener('click', () => this.cancelSignIn());
+                document.getElementById('signOutBtn').addEventListener('click', event => this.signOut(this.selectedServerUrl, { forgetClient: event.shiftKey }));
+                document.getElementById('continueHereBtn').addEventListener('click', () => this.continueSignInHere());
+                document.getElementById('copyAuthLinkBtn').addEventListener('click', () => this.copySignInLink());
+                document.getElementById('finishSignInBtn').addEventListener('click', () => this.finishSignInFromPaste());
+                document.getElementById('authCallbackUrl').placeholder = `${new URL('oauth-callback.html', location.href).href}?code=…`;
+            }
+
+            // The sign-in window has to open during a click, or pop-up blockers stop it. It shows
+            // `text` until the worker has found where to sign in.
+            openSignInWindow(text = 'Finding where to sign in…') {
+                const popup = window.open('', 'mcp-sign-in', 'popup,width=520,height=720');
+                try {
+                    popup.document.title = 'Signing in…';
+                    popup.document.body.style.font = '15px system-ui, sans-serif';
+                    popup.document.body.textContent = text;
+                } catch { /* blocked, or still on another origin from an earlier sign-in */ }
+                return popup;
+            }
+
+            // Asks the worker to start signing in; it answers with auth_redirect or auth_error.
+            // Without a pop-up (blocked, or a browser that has none) the card offers other ways to
+            // open the sign-in page.
+            signIn(url, popup = this.openSignInWindow()) {
+                if (!url || !this.servers[url]) {
+                    try { popup?.close(); } catch { /* already closed */ }
+                    return;
+                }
+                if (popup?.closed) popup = null;
+                try { popup.document.body.textContent = 'Finding where to sign in…'; } catch { /* none, or on another origin */ }
+                this.signingIn = { url, popup, authorizationUrl: null };
+                // The card's "needs you to sign in" error has done its job.
+                this.updateServer(url, { lastError: null });
+                this.renderAuth(url);
+                this.log({ level: 'info', message: popup ? 'Starting sign-in' : 'Starting sign-in without a pop-up window', server: url });
+                const sent = this.postToWorker({ type: 'auth-start', url, wwwAuthenticate: this.servers[url].wwwAuthenticate || undefined });
+                if (!sent) this.cancelSignIn();
+            }
+
+            cancelSignIn() {
+                const url = this.signingIn?.url;
+                try { this.signingIn?.popup?.close(); } catch { /* already closed */ }
+                this.signingIn = null;
+                if (url) this.renderAuth(url);
+            }
+
+            // Leaves for the sign-in page in this tab. oauth-callback.html brings the browser back
+            // here when the marker's state matches the response it gets.
+            continueSignInHere() {
+                const { url, popup, authorizationUrl } = this.signingIn || {};
+                if (!authorizationUrl) return;
+                try { popup?.close(); } catch { /* already closed */ }
+                sessionStorage.setItem('mcpSignInReturn', JSON.stringify({ url, state: new URL(authorizationUrl).searchParams.get('state') }));
+                this.log({ level: 'info', message: 'Continuing sign-in in this tab', server: url });
+                location.assign(authorizationUrl);
+            }
+
+            async copySignInLink() {
+                const link = this.signingIn?.authorizationUrl;
+                if (!link) return;
+                const input = document.getElementById('authLink');
+                try {
+                    await navigator.clipboard.writeText(link);
+                    flashLabel(document.getElementById('copyAuthLinkBtn'), 'Copied');
+                } catch {
+                    // Some embedded browsers refuse clipboard access; leave the link selected instead.
+                    input.value = link;
+                    input.hidden = false;
+                    document.getElementById('authLinkHint').hidden = false;
+                    input.focus();
+                    input.select();
+                }
+            }
+
+            // For a sign-in finished in another browser: that browser's callback page shows its
+            // address, and the worker here holds the sign-in it belongs to.
+            finishSignInFromPaste() {
+                const error = document.getElementById('authPasteError');
+                const fail = text => {
+                    error.textContent = text;
+                    error.hidden = false;
+                };
+                error.hidden = true;
+                const expected = new URL('oauth-callback.html', location.href);
+                let pasted;
+                try {
+                    pasted = new URL(document.getElementById('authCallbackUrl').value.trim());
+                } catch {
+                    return fail(`Paste the whole address, starting with ${expected.origin}.`);
+                }
+                if (pasted.origin !== expected.origin || pasted.pathname !== expected.pathname) {
+                    return fail(`That isn't the address sign-in sends you back to, which starts with ${expected.href}.`);
+                }
+                if (!pasted.searchParams.has('state')) {
+                    return fail('That address has no sign-in response in it. Copy it from the page you landed on after signing in.');
+                }
+                this.postToWorker({ type: 'auth-callback', query: pasted.search });
+            }
+
+            signOut(url, { forgetClient = false } = {}) {
+                if (!url) return;
+                this.postToWorker({ type: 'auth-signout', url, forgetClient });
+                if (this.servers[url]) this.updateServer(url, { status: 'unknown', tools: [], needsSignIn: true });
+                if (url === this.selectedServerUrl) this.updateToolsList([]);
+            }
+
+            handleAuthMessage(message) {
+                const url = message.url;
+                const mine = this.signingIn?.url === url;
+                switch (message.type) {
+                    case 'auth_redirect': {
+                        if (!mine) return;
+                        this.signingIn.authorizationUrl = message.authorizationUrl;
+                        const popup = this.signingIn.popup;
+                        if (popup && !popup.closed) popup.location.href = message.authorizationUrl;
+                        else this.signingIn.popup = null;
+                        break;
+                    }
+                    case 'auth_callback_done':
+                        // Only a pasted address gets this here; the callback page handles its own.
+                        if (!message.ok) {
+                            const error = document.getElementById('authPasteError');
+                            error.textContent = message.error?.message || 'Sign-in failed';
+                            error.hidden = false;
+                        }
+                        return;
+                    case 'auth_error':
+                        if (mine) this.cancelSignIn();
+                        this.updateServer(url, { lastError: message.error?.message || 'Sign-in failed' });
+                        break;
+                    case 'auth_complete':
+                        this.authStatus[url] = message.status;
+                        if (mine) this.cancelSignIn();
+                        if (this.servers[url]) {
+                            this.updateServer(url, { needsSignIn: false, lastError: null });
+                            this.connectMcpServer(url);
+                        }
+                        break;
+                    case 'auth_status':
+                        this.authStatus[url] = message.status;
+                        break;
+                }
+                if (url === this.selectedServerUrl) this.renderAuth(url);
+            }
+
+            renderAuth(url) {
+                const server = this.servers[url];
+                if (!server) return;
+                const status = this.authStatus[url];
+                const signingIn = this.signingIn?.url === url;
+                const signedIn = !!status?.signedIn;
+                const linkReady = signingIn && !!this.signingIn.authorizationUrl;
+                document.getElementById('cardAuth').hidden = !(server.needsSignIn || signedIn || signingIn);
+                document.getElementById('cardAuthStatus').textContent = !signingIn
+                    ? (signedIn ? describeSignIn(status) : 'This server needs you to sign in.')
+                    : !linkReady ? 'Finding where to sign in…'
+                    : this.signingIn.popup ? "Finish signing in in the pop-up window. If it didn't open, continue in this tab or copy the link."
+                    : "This browser didn't open a pop-up window. Continue in this tab, or copy the link to sign in in another tab or browser.";
+                document.getElementById('signInBtn').hidden = signingIn || signedIn;
+                document.getElementById('continueHereBtn').hidden = !linkReady;
+                document.getElementById('copyAuthLinkBtn').hidden = !linkReady;
+                document.getElementById('cancelSignInBtn').hidden = !signingIn;
+                document.getElementById('signOutBtn').hidden = signingIn || !signedIn;
+                // The card redraws often; reset these only when they appear or go away.
+                const elsewhere = document.getElementById('cardAuthElsewhere');
+                if (elsewhere.hidden !== !linkReady) {
+                    elsewhere.hidden = !linkReady;
+                    document.getElementById('authLink').hidden = true;
+                    document.getElementById('authLinkHint').hidden = true;
+                    document.getElementById('authPasteError').hidden = true;
+                    document.getElementById('authCallbackUrl').value = '';
+                }
+                // A static token takes precedence over signing in, so show it when it's set.
+                if (server.bearerToken) document.getElementById('cardStaticToken').open = true;
             }
 
             startPeriodicWasmChecks() {
@@ -907,6 +1139,13 @@
                     case 'mcp_server_error':
                         this.handleServerError(message.url, message.action, message.error);
                         break;
+                    case 'auth_redirect':
+                    case 'auth_callback_done':
+                    case 'auth_error':
+                    case 'auth_complete':
+                    case 'auth_status':
+                        this.handleAuthMessage(message);
+                        break;
                     case 'wasm_initialized':
                         this.updateBuildInfo(message.buildInfo);
                         this.syncWorker();
@@ -1012,6 +1251,14 @@
             syncWorker() {
                 navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
                 sendTapConfigToServiceWorker();
+                for (const url of Object.keys(this.servers)) {
+                    this.postToWorkerQuietly({ type: 'auth-status', url });
+                }
+            }
+
+            // For messages that can wait until the worker is up; syncWorker sends them again then.
+            postToWorkerQuietly(message) {
+                (navigator.serviceWorker.controller || this.serviceWorker)?.postMessage(message);
             }
 
             // Posts to the worker even before it controls this page (on the very first visit it
@@ -1033,8 +1280,7 @@
                 }
             }
 
-            connectMcpServer() {
-                const url = this.selectedServerUrl;
+            connectMcpServer(url = this.selectedServerUrl) {
                 const server = this.servers[url];
                 if (!server) {
                     this.log({ level: 'error', message: 'Select a server to connect to first' });
@@ -1085,6 +1331,7 @@
                     lastError: null,
                     era: info.era,
                     protocolVersion: info.protocolVersion,
+                    serverInfo: info.serverInfo || null,
                     capabilities: info.capabilities,
                     instructions: info.instructions || null
                 });
@@ -1096,6 +1343,11 @@
                 if (!this.servers[url]) return;
                 const changes = { lastError: error?.message || 'Unknown error' };
                 if (action === 'connect') changes.status = 'failed';
+                if (error?.kind === 'auth_required') {
+                    changes.needsSignIn = true;
+                    // The challenge, when the browser lets the page read it, says where to sign in.
+                    changes.wwwAuthenticate = error.data?.wwwAuthenticate || null;
+                }
                 this.updateServer(url, changes);
             }
 
@@ -1172,6 +1424,12 @@
                 const errorLine = document.getElementById('cardServerError');
                 errorLine.textContent = server.lastError || '';
                 errorLine.hidden = !server.lastError;
+                this.renderAuth(url);
+                this.renderConnectionInfo(server);
+                if (this.shownCardUrl !== url) {
+                    this.shownCardUrl = url;
+                    this.postToWorkerQuietly({ type: 'auth-status', url });
+                }
                 // Setup autosave for alias, url and token
                 this.initAutosaveGroup(card.querySelector('.autosave-group'), (fields) => {
                     if (!this.selectedServerUrl) return;
@@ -1203,6 +1461,34 @@
                 });
             }
 
+            // What the server said about itself when it connected.
+            renderConnectionInfo(server) {
+                const panel = document.getElementById('cardConnection');
+                panel.hidden = server.status !== 'connected';
+                if (panel.hidden) return;
+                const info = server.serverInfo || {};
+                const rows = [];
+                if (info.name || info.title) {
+                    const label = [info.title || info.name, info.version].filter(Boolean).join(' ');
+                    rows.push(['Server', escapeHtml(label) + (info.title && info.name && info.title !== info.name ? ` <span class="text-secondary">(${escapeHtml(info.name)})</span>` : '')]);
+                }
+                const capabilities = Object.entries(server.capabilities || {}).map(([name, details]) => {
+                    const flags = details && typeof details === 'object' ? Object.keys(details).filter(flag => details[flag] === true) : [];
+                    return `<span class="badge">${escapeHtml(name)}${flags.length ? ` <span class="text-secondary">${escapeHtml(flags.join(', '))}</span>` : ''}</span>`;
+                });
+                rows.push(['Capabilities', capabilities.length ? `<span class="badge-row">${capabilities.join('')}</span>` : '<span class="text-secondary">None declared</span>']);
+                if (server.bearerToken) rows.push(['Credentials', 'Static token']);
+                else if (this.authStatus[server.url]?.signedIn) rows.push(['Credentials', 'Signed in (OAuth)']);
+                if (info.websiteUrl && /^https?:\/\//i.test(info.websiteUrl)) {
+                    rows.push(['Website', `<a href="${escapeHtml(info.websiteUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(info.websiteUrl)}</a>`]);
+                }
+                panel.innerHTML = `
+                    <h3 class="subsection-title">Connection</h3>
+                    <dl class="info-list">${rows.map(([term, value]) => `<dt>${term}</dt><dd>${value}</dd>`).join('')}</dl>
+                    ${server.instructions ? `<details class="instructions"><summary>Instructions from the server</summary><p>${escapeHtml(server.instructions)}</p></details>` : ''}
+                `;
+            }
+
             hideServerCard() {
                 const card = document.getElementById('serverCard');
                 card.style.display = 'none';
@@ -1210,26 +1496,90 @@
 
             updateToolsList(tools) {
                 const toolsList = document.getElementById('toolsList');
+                const filter = document.getElementById('toolFilter');
+                const server = this.servers[this.selectedServerUrl];
                 toolsList.innerHTML = '';
-                if (!tools || tools.length === 0) {
+                tools = tools || [];
+                filter.hidden = tools.length < 2;
+                document.getElementById('downloadToolsBtn').hidden = !tools.length && !server?.rejectedTools?.length;
+                this.renderHiddenTools(server?.rejectedTools || []);
+                if (tools.length === 0) {
+                    document.getElementById('toolCount').textContent = '';
                     toolsList.innerHTML = '<div class="empty-state">No tools available.</div>';
                     this.renderToolCard(null);
                     this.renderToolResultCard(null);
                     return;
                 }
-                tools.forEach((tool, idx) => {
+                tools.forEach(tool => {
                     const toolItem = document.createElement('div');
                     toolItem.className = 'tool-item';
-                    toolItem.textContent = tool.name;
-                    toolItem.style.cursor = 'pointer';
+                    toolItem.dataset.tool = tool.name;
+                    toolItem.dataset.search = [tool.name, tool.title, tool.annotations?.title, tool.description].filter(Boolean).join(' ').toLowerCase();
+                    const title = toolTitle(tool);
+                    toolItem.innerHTML = `
+                        <div class="tool-item-head"><span class="tool-name">${escapeHtml(tool.name)}</span>${toolBadges(tool)}</div>
+                        ${title ? `<div class="tool-item-title">${escapeHtml(title)}</div>` : ''}
+                    `;
                     toolItem.onclick = () => {
+                        toolsList.querySelectorAll('.tool-item.selected').forEach(item => item.classList.remove('selected'));
+                        toolItem.classList.add('selected');
                         this.renderToolCard(tool);
                         this.renderToolResultCard(null);
                     };
                     toolsList.appendChild(toolItem);
                 });
+                this.filterTools();
                 this.renderToolCard(null);
                 this.renderToolResultCard(null);
+            }
+
+            filterTools() {
+                const query = document.getElementById('toolFilter').value.trim().toLowerCase();
+                const items = [...document.querySelectorAll('#toolsList .tool-item')];
+                let shown = 0;
+                for (const item of items) {
+                    item.hidden = !!query && !item.dataset.search.includes(query);
+                    if (!item.hidden) shown++;
+                }
+                document.getElementById('toolCount').textContent = query ? `${shown} of ${items.length}` : String(items.length);
+            }
+
+            // Tools the client won't call, with the reason (also logged when the list arrives).
+            renderHiddenTools(rejected) {
+                const section = document.getElementById('hiddenTools');
+                section.hidden = !rejected.length;
+                if (!rejected.length) return;
+                section.querySelector('summary').textContent = `${rejected.length} hidden ${rejected.length === 1 ? 'tool' : 'tools'}`;
+                section.querySelector('ul').innerHTML = rejected
+                    .map(tool => `<li><code>${escapeHtml(tool.name ?? '(unnamed)')}</code>: ${escapeHtml(tool.reason || 'no reason given')}</li>`)
+                    .join('');
+            }
+
+            // Everything the inspector knows about a server, as a JSON download.
+            exportToolList(url = this.selectedServerUrl) {
+                const server = this.servers[url];
+                if (!server) return;
+                const report = {
+                    server: url,
+                    exportedAt: new Date().toISOString(),
+                    protocolVersion: server.protocolVersion || null,
+                    era: server.era || null,
+                    serverInfo: server.serverInfo || null,
+                    capabilities: server.capabilities || null,
+                    instructions: server.instructions || null,
+                    tools: server.tools || [],
+                    hiddenTools: server.rejectedTools || []
+                };
+                let host = 'server';
+                try { host = new URL(url).host.replace(/[^a-z0-9.-]+/gi, '-'); } catch { /* keep the default */ }
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+                link.download = `mcp-tools-${host}-${report.exportedAt.slice(0, 10)}.json`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+                return report;
             }
 
             // Recursive input field renderer for tool schemas
@@ -1287,11 +1637,24 @@
                     e.preventDefault();
                     this.handleCallTool(tool, card);
                 };
+                const title = toolTitle(tool);
+                const schemaBlock = (label, value) => value
+                    ? `<details class="tool-raw-json tool-schema"><summary>${label}</summary><pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre></details>`
+                    : '';
                 card.innerHTML = `
-                    <h3>${escapeHtml(tool.name)}</h3>
+                    <div class="tool-card-head">
+                        <h3>${escapeHtml(tool.name)}</h3>
+                        ${toolBadges(tool)}
+                    </div>
+                    ${title ? `<div class="tool-card-title">${escapeHtml(title)}</div>` : ''}
                     <div class="tool-description">${escapeHtml(tool.description || '')}</div>
                     <div class="tool-input-schema"></div>
                     <button type="submit" class="call-tool-btn btn-primary">Call tool</button>
+                    <div class="tool-schemas">
+                        ${schemaBlock('Input schema', tool.inputSchema || tool.input_schema)}
+                        ${schemaBlock('Output schema', tool.outputSchema)}
+                        ${schemaBlock('Definition (raw JSON)', tool)}
+                    </div>
                 `;
                 toolCard.appendChild(card);
                 // Render input schema if present
@@ -1402,7 +1765,7 @@
             }
 
             // Adds a server (or picks it if it's already listed), shows it on the MCP tab and connects.
-            addServer(url, alias = '') {
+            addServer(url, alias = '', { connect = true } = {}) {
                 if (!this.servers[url]) {
                     const now = new Date().toISOString();
                     this.servers[url] = {
@@ -1422,7 +1785,7 @@
                 this.showServerCard(url);
                 this.updateToolsList(this.servers[url].tools || []);
                 showTab('mcp');
-                this.connectMcpServer();
+                if (connect) this.connectMcpServer(url);
             }
 
             handleSaveServer() {
@@ -1639,6 +2002,44 @@
             return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
 
+        // A tool's display title when it differs from its name (2025-06-18 added title; annotations.title is older).
+        function toolTitle(tool) {
+            const title = tool.title || tool.annotations?.title;
+            return title && title !== tool.name ? title : '';
+        }
+
+        // Badges for what a tool declares about itself. Annotations are hints from the server,
+        // not guarantees.
+        function toolBadges(tool) {
+            const hints = tool.annotations || {};
+            const meta = tool._meta || {};
+            const badges = [];
+            if (hints.readOnlyHint === true) badges.push(['read-only', 'badge-info', "Doesn't change anything (readOnlyHint)"]);
+            if (hints.destructiveHint === true && hints.readOnlyHint !== true) badges.push(['destructive', 'badge-error', 'May delete or overwrite things (destructiveHint)']);
+            if (hints.idempotentHint === true) badges.push(['idempotent', '', 'Calling it again with the same arguments has no further effect (idempotentHint)']);
+            if (hints.openWorldHint === true) badges.push(['open world', 'badge-warning', 'Reaches outside systems, such as the web (openWorldHint)']);
+            if (meta['io.modelcontextprotocol/ui'] || meta.ui?.resourceUri || meta['ui/resourceUri']) badges.push(['app', 'badge-success', 'Comes with an interactive UI (MCP Apps)']);
+            if (tool.outputSchema) badges.push(['structured output', '', 'Declares an output schema']);
+            if (!badges.length) return '';
+            return `<span class="badge-row">${badges.map(([label, kind, help]) => `<span class="badge ${kind}" title="${escapeHtml(help)}">${label}</span>`).join('')}</span>`;
+        }
+
+        // "Signed in with scio-prod-be.glean.com · mcp offline_access · expires in 59 min · renews automatically"
+        function describeSignIn(status) {
+            let host = status.issuer;
+            try { host = new URL(status.issuer).host; } catch { /* show the issuer as is */ }
+            const parts = [`Signed in with ${host}`];
+            if (status.scope) parts.push(status.scope);
+            if (status.expiresAt) {
+                const minutes = Math.round((status.expiresAt - Date.now()) / 60_000);
+                parts.push(minutes <= 0 ? 'access token expired'
+                    : minutes < 90 ? `expires in ${minutes} min`
+                    : `expires in ${Math.round(minutes / 60)} h`);
+            }
+            if (status.refreshable) parts.push('renews automatically');
+            return parts.join(' · ');
+        }
+
         document.getElementById('initProtocol').addEventListener('click', () => chatShell.connectMcpServer());
 
         // Add after the initProtocol event listener:
@@ -1766,7 +2167,97 @@
             ? 'python3 test_mcp_server.py'
             : `python3 test_mcp_server.py --allow-origin ${location.origin}`;
         document.getElementById('mockRemoteNote').hidden = pageIsLocal;
-        if (!LOGS_ONLY && !localStorage.getItem('guideSeen') && Object.keys(chatShell.servers).length === 0) {
+
+        // Glean: everyone's server URL is their own, so it's remembered in this browser only.
+        const gleanUrlInput = document.getElementById('gleanUrl');
+        gleanUrlInput.value = localStorage.getItem('gleanMcpUrl') || '';
+        document.getElementById('gleanOriginNote').hidden = location.origin === 'http://127.0.0.1:8888';
+        const gleanNote = (id, text) => {
+            const note = document.getElementById(id);
+            note.textContent = text || '';
+            note.hidden = !text;
+        };
+        document.getElementById('gleanAddBtn').addEventListener('click', async () => {
+            const value = gleanUrlInput.value.trim();
+            const isEmail = /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(value);
+            gleanNote('gleanUrlError', null);
+            gleanNote('gleanStatus', null);
+            if (!isEmail && !/^https:\/\/[^/\s]+\/\S*$/i.test(value)) {
+                gleanNote('gleanUrlError', 'Enter your work email, or the full https:// address of your Glean MCP server.');
+                gleanUrlInput.focus();
+                return;
+            }
+            let url = value;
+            let popup;
+            if (isEmail) {
+                popup = chatShell.openSignInWindow("Looking up your company's Glean…");
+                gleanNote('gleanStatus', "Looking up your company's Glean…");
+                try {
+                    const found = await findGleanServer(value);
+                    url = found.mcpUrl;
+                    gleanUrlInput.value = url;
+                    gleanNote('gleanStatus', `${found.domain} uses the Glean at ${found.queryUrl}. Signing in to its default MCP server.`);
+                    chatShell.log({ level: 'info', message: `Glean says ${found.domain} uses ${found.queryUrl}; adding ${url}` });
+                } catch (error) {
+                    try { popup?.close(); } catch { /* already closed */ }
+                    gleanNote('gleanStatus', null);
+                    gleanNote('gleanUrlError', error.message);
+                    chatShell.log({ level: 'warn', message: error.message });
+                    return;
+                }
+            }
+            localStorage.setItem('gleanMcpUrl', url);
+            const signedIn = chatShell.authStatus[url]?.signedIn;
+            chatShell.addServer(url, chatShell.servers[url]?.alias || 'Glean', { connect: signedIn });
+            if (signedIn) {
+                try { popup?.close(); } catch { /* already closed */ }
+            } else {
+                chatShell.signIn(url, popup);
+            }
+        });
+
+        // Glean's own sign-in page asks this endpoint which deployment an email belongs to. It isn't
+        // a documented API, so when it fails people can still paste the URL. It answers the same
+        // page origins as Glean's MCP servers.
+        const GLEAN_CONFIG_URL = 'https://app.glean.com/config/search';
+        async function findGleanServer(email) {
+            const domain = email.split('@').pop().toLowerCase();
+            let response;
+            try {
+                response = await fetch(GLEAN_CONFIG_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, isGleanApp: 'true' })
+                });
+            } catch {
+                throw new Error(`Couldn't ask app.glean.com where ${domain}'s Glean is; it only answers pages from the origins it allows. Paste your MCP server URL instead.`);
+            }
+            if (!response.ok) {
+                throw new Error(`app.glean.com answered HTTP ${response.status} when asked where ${domain}'s Glean is. Paste your MCP server URL instead.`);
+            }
+            const config = (await response.json().catch(() => null))?.search_config || {};
+            const parse = value => { try { return new URL(value); } catch { return null; } };
+            const base = parse(config.queryURL);
+            const secure = base && (base.protocol === 'https:' || ['127.0.0.1', 'localhost'].includes(base.hostname));
+            // For a domain it doesn't know, Glean answers with its central deployment.
+            const central = parse(config.centralURL);
+            if (!secure || (!config.isMultiTenant && central && central.href === base.href)) {
+                throw new Error(`Glean doesn't know a deployment for ${domain}. Check the address, or paste your MCP server URL.`);
+            }
+            return { domain, queryUrl: base.href, mcpUrl: new URL('mcp/default', base).href };
+        }
+
+        // ?server=<url> adds that server and connects, so a link can open the client on it.
+        const linkedServer = new URLSearchParams(location.search).get('server')?.trim();
+        const serverLinked = !LOGS_ONLY && /^https?:\/\/\S+$/i.test(linkedServer || '');
+        if (serverLinked) {
+            const rest = new URLSearchParams(location.search);
+            rest.delete('server');
+            history.replaceState(null, '', location.pathname + (rest.size ? `?${rest}` : '') + location.hash);
+            navigator.serviceWorker.ready.then(() => setTimeout(() => chatShell.addServer(linkedServer), 0));
+        }
+
+        if (!LOGS_ONLY && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(chatShell.servers).length === 0) {
             openGuide();
         }
 

@@ -6,6 +6,8 @@ A browser client for MCP (the Model Context Protocol). Its protocol logic is Rus
 
 Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.io/mcp-browswer-client/). The Guide (top right, and open on your first visit) has one-click buttons for public MCP servers that need no account, such as Hugging Face and Microsoft Learn. Choose one, click a tool, fill in its fields and choose Call tool. The Logs tab shows what happened.
 
+For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your Glean MCP server URL) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
+
 ## Prerequisites
 
 - Python 3.x (the mock MCP server uses only the standard library)
@@ -20,8 +22,11 @@ Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.
 .
 ├── src/                    # Rust source code
 │   ├── lib.rs             # WASM exports used by the service worker
+│   ├── error.rs           # The error type every export rejects with
+│   ├── http.rs            # fetch with timeouts, a redacted HTTP trace, form and JSON bodies
 │   ├── logging.rs         # Structured log entries, sent to the worker's logger
 │   ├── mcp/               # MCP client: transport, SSE parser, headers, modern and legacy eras
+│   ├── oauth/             # Sign-in: discovery, client registration, PKCE, token exchange and refresh
 │   └── build_info.rs      # Generated build metadata
 ├── public/                # Web assets and service worker
 │   ├── mcp_browser_client_bg.wasm  # Compiled WASM module
@@ -30,8 +35,10 @@ Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.
 │   ├── sw.js              # Service worker
 │   ├── wasm.js            # Loads the WASM module in the worker and forwards its logs
 │   ├── logger.js          # The worker's structured logger
+│   ├── authStore.js       # IndexedDB storage for sign-ins: registered clients, tokens, sign-ins in progress
 │   ├── chatStorage.js     # IndexedDB storage for conversations
 │   ├── index.html         # Web interface, including the Guide and the Logs tab
+│   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── styles.css         # UI styles (Glean design language)
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
 │   ├── fonts/             # Inter and DM Sans (OFL)
@@ -39,7 +46,7 @@ Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
-├── test_mcp_server.py     # Mock MCP server (modern, legacy or dual-era; JSON or SSE; tokens; strict CORS)
+├── test_mcp_server.py     # Mock MCP server (modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS)
 ├── venv/                  # Python virtual environment (only for the reference server)
 ├── node_modules/          # Node.js dependencies
 ├── .cursor/               # Cursor IDE configuration
@@ -98,6 +105,7 @@ npm run start:mock-mcp
 ### Available Scripts
 
 - `npm start`: Start the web server on port 8080 with caching off
+- `npm run start:glean`: The same on `http://127.0.0.1:8888`, an origin Glean allows (see [Glean](#glean))
 - `npm run build`: Build the WASM module
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
@@ -130,11 +138,39 @@ Connecting to a server works out which protocol era it speaks:
 
 The result is remembered per server URL. After the browser restarts the service worker, the first request reconnects automatically. Replies can be plain JSON or an SSE stream. Tool lists are paginated and cached for the server's `ttlMs`. Parameters a tool marks with `x-mcp-header` are also sent as `Mcp-Param-*` headers, and tools with invalid annotations are hidden.
 
+### Sign-in (OAuth)
+
+A server that answers HTTP 401 needs you to sign in, and the server details then offer Sign in. The client follows the MCP authorization spec (2026-07-28):
+
+1. **Find the authorization server.** It reads the protected resource metadata (RFC 9728) from the 401's `WWW-Authenticate` header when the browser lets it, and otherwise from `/.well-known/oauth-protected-resource` under the server's path, then its root. The metadata must name this server as its resource. Then it reads the authorization server's metadata (RFC 8414, falling back to OpenID Connect discovery); the issuer must match exactly, and it must support PKCE with S256.
+2. **Register.** It registers itself with dynamic client registration (RFC 7591), as a `native` app when the page is served from `localhost` or `127.0.0.1` and a `web` app otherwise, with `oauth-callback.html` next to the page as the redirect. Registrations are kept per authorization server and reused.
+3. **Sign in.** A pop-up opens on the authorization page with PKCE, `state` and the `resource` parameter (RFC 8707). It asks for the scope from the server's challenge or metadata, plus `offline_access` when offered, so it gets a refresh token. The authorization server sends the pop-up back to `oauth-callback.html`, which hands the response to the service worker. The worker checks `state` and the `iss` parameter (RFC 9207), exchanges the code, and the page reconnects.
+
+   Where pop-ups don't work (embedded browsers such as Cursor's, or a strict blocker), the server details offer three other ways:
+
+   - **Continue in this tab** goes to the sign-in page in the same tab. You come back to the client, connected.
+   - **Copy link** copies the sign-in page's address, to open in another tab of the same browser. The tab you started in connects when you finish.
+   - **Signing in from another browser?** is for browsers that can't complete the sign-in. Some identity providers refuse embedded browsers, for example. Open the copied link in another browser and sign in. That browser lands on a page that says it isn't where you started and shows its address; paste that address into the server details where you started. Only the browser that started a sign-in holds its `state` and PKCE verifier, so the code is redeemed there.
+4. **Stay signed in.** Requests carry the access token. A token that expires within a minute is refreshed first, and a token the server turns down is refreshed once and the request retried. When the refresh token stops working, the server details ask you to sign in again.
+
+Tokens live in this browser's IndexedDB (`mcp_auth`), are shared by every tab, and are only sent to the server they were issued for and its authorization server. Pages only learn whether you're signed in, never the tokens, and the HTTP trace redacts tokens, codes and verifiers. Sign out forgets the tokens; Shift-click it to also forget the client registration. A static bearer token, under "Use a static token instead of signing in", takes precedence over sign-in; it's stored in `localStorage`.
+
+Not supported yet: client ID metadata documents (the spec's preferred alternative to dynamic registration), step-up authorization when a server asks for more scopes, and revoking tokens on sign-out.
+
+### Inspecting a server
+
+The MCP tab doubles as an inspector, in the spirit of the MCP Inspector but without installing anything:
+
+- **Connection**: once connected, the server details show the protocol and era, the server's name and version, the capabilities it declared, how you're authenticated and the server's instructions.
+- **Tools**: the count, a filter on name, title and description, each tool's title, and badges for its annotations (read-only, destructive, idempotent, open world), MCP Apps UI and an output schema. Annotations are hints from the server, not guarantees.
+- **Tool details**: the call form, plus the input schema, output schema and raw definition.
+- **Hidden tools**: tools the client won't call, with the reason.
+- **Download** saves the server's details and full tool list as JSON.
+
 Known constraints:
 
-- **CORS**: the server must allow this site's origin and the headers above: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, any `Mcp-Param-*` its tools use, and `Authorization` if you use a token. Legacy servers that use sessions must also list `Mcp-Session-Id` in `Access-Control-Expose-Headers`, or the browser can't read it.
+- **CORS**: the server must allow this site's origin and the headers above: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, any `Mcp-Param-*` its tools use, and `Authorization` for tokens. Legacy servers that use sessions must also list `Mcp-Session-Id` in `Access-Control-Expose-Headers`, or the browser can't read it. Sign-in also needs CORS on the metadata, registration and token endpoints.
 - **Local servers**: from a public site such as GitHub Pages, Chrome 142+ asks the user before it lets the page reach `localhost` ("Apps on device").
-- **Auth**: OAuth isn't supported yet. For servers that accept a static token, add a bearer token in the server details; it's stored in this browser's `localStorage`.
 - **Not yet supported**: `input_required` results (elicitation), `subscriptions/listen`, resources and prompts in the UI, and the deprecated 2024-11-05 HTTP+SSE transport.
 
 ## Testing
@@ -159,7 +195,12 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 | `--mode modern` | Speaks only 2026-07-28 |
 | `--mode legacy` | Acts as a 2025-era server: `initialize` handshake and `Mcp-Session-Id` |
 | `--sse` | Streams replies as SSE instead of JSON |
-| `--token s3cret` | Requires `Authorization: Bearer s3cret`. Connect fails with a request for a token; paste it into Bearer token and choose Connect |
+| `--token s3cret` | Requires `Authorization: Bearer s3cret`. Connect fails asking you to sign in or set a static token; open "Use a static token instead of signing in", paste it and choose Connect |
+| `--oauth` | Requires an OAuth sign-in: serves protected resource and authorization server metadata, accepts client registrations, approves sign-ins at once (no login page), and issues refresh tokens that rotate |
+| `--hide-www-authenticate` | Keeps the 401's `WWW-Authenticate` header from the page, as Glean does, so the client has to find the metadata at its well-known address |
+| `--token-ttl 5` | How long access tokens last, in seconds (default 3600) |
+| `--omit-expires-in` | Leaves `expires_in` out of token responses, so the client learns of expiry from a 401 |
+| `--oauth-wrong-iss` | Names the wrong issuer in sign-in responses, which the client must reject |
 | `--allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"` | Uses a CORS policy written before 2026-07-28. With `--mode legacy` the client still connects; with `--mode modern` it explains which headers to allow |
 | `--allow-origin https://example.github.io` | Accepts requests from another page origin (repeatable) |
 | `--verbose` | Prints every request's headers and body |
@@ -181,6 +222,21 @@ They're third-party services, so their behavior can change; `npm run test:public
 
 `tests/reference_server.py` runs a server on the official MCP Python SDK (`npm run setup:python` installs it, then `npm run start:reference-mcp`); add `http://127.0.0.1:8082/mcp`.
 
+### Glean
+
+Glean's MCP server signs you in with your work account through dynamic client registration, which the client handles. Its URL looks like `https://your-company-be.glean.com/mcp/default`. You don't need to look it up: enter your work email in the Guide's Glean field, and the page asks `app.glean.com/config/search` which deployment your email belongs to, the way Glean's own sign-in page does. It then uses that deployment's default MCP server. Only the email's domain is logged. That endpoint isn't a documented API, so you can also paste the URL yourself, from Glean's Your settings, then Third party apps and MCP, on the "Connect to your AI apps with Glean MCP" card. Use the pasted URL if your company uses a server other than `default`.
+
+Glean only sends CORS headers to page origins on its allowlist, so from an origin that isn't on it every request fails as "Couldn't reach". Glean's own deployment allows `http://127.0.0.1:8888` (and not `localhost:8888`), so:
+
+```bash
+npm run start:glean   # serves public/ on http://127.0.0.1:8888 (after ./setup.sh or npm install)
+python3 -m http.server 8888 --bind 127.0.0.1 --directory public   # the same, with nothing to install
+```
+
+Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. Glean shows the client under Third party apps and MCP as "MCP Browser Client", where you can revoke it.
+
+What to expect in the Logs tab: `server/discover` is blocked (Glean's CORS policy doesn't allow the 2026-07-28 headers), so the client connects with the 2025 handshake; the 401's challenge isn't readable, so the client finds `/.well-known/oauth-protected-resource/mcp/default`, registers, and signs in with `https://your-company-be.glean.com/oauth` for `mcp offline_access`.
+
 ### From the deployed site
 
 The GitHub Pages copy can reach a mock on your machine too. Start it with the site's origin allowed, as the Guide's command does:
@@ -194,13 +250,13 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 ### Automated tests
 
 ```bash
-npm run test:rust                    # protocol logic: SSE parsing, header encoding, era detection, log redaction
+npm run test:rust                    # protocol logic: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:browser                 # the real UI in headless Chrome against every mock variant
 npm run test:browser -- --reference  # plus the official Python SDK server
 npm run test:public                  # plus the public servers above (needs internet)
 ```
 
-The browser test starts its own servers on ports 18080-18089 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers, a worker restart, a second tab, the logs pop-out, the Guide, and what the Logs tab records (timings, fallback reasons, no tokens, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the inspector views and download; a worker restart, a second tab, the logs pop-out, the Guide; and what the Logs tab records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 ## Logs
 
@@ -217,7 +273,7 @@ The level menu decides what's shown: Errors, Warnings and errors, Info (the defa
 - **Pop out** (the icon at the end of the tabs) opens the logs in their own window, with the history so far.
 - **Errors** logged while you're on another tab show as a count on the Logs tab.
 
-The `Authorization` header never appears in logs, and session IDs are shortened. Each tab keeps its last 1,000 entries.
+The `Authorization` header never appears in logs, nor do access and refresh tokens, authorization codes, PKCE verifiers or client secrets in sign-in requests and replies. Session IDs are shortened. Each tab keeps its last 1,000 entries.
 
 The worker also prints every entry to its own console: open `chrome://inspect/#service-workers` (or DevTools → Application → Service workers) and choose Inspect. Debug entries show there at DevTools' Verbose level.
 
@@ -226,7 +282,12 @@ The worker also prints every entry to its own console: open `chrome://inspect/#s
 - **"Couldn't reach …"**: the server isn't running, or it doesn't allow this site through CORS. A server on `localhost` reached from a public site also needs Chrome's local network permission.
 - **"… CORS policy must allow the MCP-Protocol-Version, Mcp-Method and Mcp-Name headers"**: the server speaks 2026-07-28 but its CORS allowlist predates it. Add those headers (and any `Mcp-Param-*` its tools use) to `Access-Control-Allow-Headers`.
 - **HTTP 404 or 405**: the URL isn't the MCP endpoint, which often ends in `/mcp`.
-- **HTTP 401**: add a bearer token in the server details and choose Connect.
+- **HTTP 401**: choose Sign in in the server details, or, for a server that uses a fixed token, set it under "Use a static token instead of signing in" and choose Connect.
+- **Sign-in doesn't open**: the browser blocked the pop-up, or has none. Choose Continue in this tab or Copy link in the server details (see [Sign-in](#sign-in-oauth)), or allow pop-ups for the page.
+- **"This browser or app may not be secure" (Google) in an embedded browser**: copy the link, sign in from a regular browser, and paste the address it lands on back under "Signing in from another browser?".
+- **Sign-in fails before the pop-up shows a login page**: the Logs tab names the step. Usually the server's metadata or registration endpoint doesn't allow this origin through CORS, or the authorization server doesn't support dynamic client registration.
+- **Glean: "Couldn't reach …" or "Couldn't ask app.glean.com …"**: this page's origin isn't on Glean's CORS allowlist. Use `npm run start:glean` and http://127.0.0.1:8888 (see [Glean](#glean)).
+- **Glean: "Glean doesn't know a deployment for …"**: the email's domain isn't one Glean recognizes (it answered with its central deployment). Check the address, or paste the server URL.
 - **A tool call fails with a validation error**: optional fields left empty aren't sent, but required ones are; check the fields marked `*`.
 - **Old behavior after a rebuild**: reload the page and check that the Logs tab shows "Loaded the WASM module" with the new build time. If it doesn't, open the runtime controls from the status pill and reload the WASM module, or unregister the worker in DevTools → Application → Service workers.
 - **Stuck on "connecting" or "Calling …"**: the page gives up after 50 seconds (connect) or 130 seconds (tool call) with an explanation. The Logs tab, set to Everything, shows the last request that went out.

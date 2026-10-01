@@ -10,6 +10,9 @@ Examples:
   python3 test_mcp_server.py                      # dual mode on http://127.0.0.1:8081
   python3 test_mcp_server.py --mode legacy --sse  # a 2025-era server that streams replies
   python3 test_mcp_server.py --token s3cret       # requires Authorization: Bearer s3cret
+  python3 test_mcp_server.py --oauth              # requires an OAuth sign-in (approved at once)
+  python3 test_mcp_server.py --oauth --hide-www-authenticate --token-ttl 5
+                                                  # like Glean: no readable challenge; short tokens
   python3 test_mcp_server.py --allow-origin https://example.github.io
   python3 test_mcp_server.py --mode legacy --allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"
                                                   # a CORS policy written before 2026-07-28
@@ -17,9 +20,11 @@ Examples:
 
 import argparse
 import base64
+import hashlib
 import json
 import threading
 import time
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -39,12 +44,14 @@ UNSUPPORTED_PROTOCOL_VERSION = -32022
 TOOLS = [
     {
         "name": "echo",
+        "title": "Echo",
         "description": "Echoes back the input text.",
         "inputSchema": {
             "type": "object",
             "properties": {"text": {"type": "string", "description": "Text to echo back."}},
             "required": ["text"],
         },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
     {
         "name": "echo_region",
@@ -66,6 +73,12 @@ TOOLS = [
             "properties": {"n": {"type": "integer", "description": "How far to count."}},
             "required": ["n"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {"counted": {"type": "integer", "description": "The number reached."}},
+            "required": ["counted"],
+        },
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
     },
     {
         "name": "broken_header",
@@ -147,6 +160,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        path, _, query = self.path.partition("?")
+        if self.server.oauth and self.oauth_get(path, urllib.parse.parse_qs(query)):
+            return
         # Neither era serves the standalone GET stream here; 405 is the specified answer.
         self.label = "GET"
         self.send_json(405, rpc_error(None, INVALID_REQUEST, "Method not allowed"))
@@ -171,6 +187,19 @@ class Handler(BaseHTTPRequestHandler):
                 401, rpc_error(None, -32001, "Unauthorized: send Authorization: Bearer <token>"),
                 headers={"WWW-Authenticate": 'Bearer realm="mock-mcp"'},
             )
+        if self.server.oauth:
+            path = self.path.partition("?")[0]
+            if path == "/oauth/register":
+                return self.register(body)
+            if path == "/oauth/token":
+                return self.token(body)
+            if not self.has_valid_access_token():
+                self.label = "request without a valid access token"
+                challenge = (
+                    f'Bearer resource_metadata="{self.base_url()}/.well-known/oauth-protected-resource", '
+                    'scope="mcp", error="invalid_token"'
+                )
+                return self.send_json(401, rpc_error(None, -32001, "Unauthorized"), headers={"WWW-Authenticate": challenge})
         if self.server.verbose:
             print(f"--> {dict(self.headers)}\n    {body.decode('utf-8', 'replace')}", flush=True)
         try:
@@ -309,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         available = TOOLS if modern else LEGACY_TOOLS
         if name not in {tool["name"] for tool in available}:
             return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"Unknown tool: {name}"))
-        complete = {"resultType": "complete"} if modern else {}
+        result = {"resultType": "complete"} if modern else {}
         steps = 0
         if name == "echo":
             text = f"Echo: {args.get('text', '')}"
@@ -318,10 +347,169 @@ class Handler(BaseHTTPRequestHandler):
         elif name == "count":
             steps = max(1, min(int(args.get("n", 3)), 10))
             text = f"Counted to {steps}"
+            result["structuredContent"] = {"counted": steps}
         else:
-            return self.respond(request_id, {**complete, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
+            return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")
-        self.respond(request_id, {**complete, "content": [text_content(text)]}, steps=steps, progress_token=progress_token)
+        self.respond(request_id, {**result, "content": [text_content(text)]}, steps=steps, progress_token=progress_token)
+
+    # --- OAuth (--oauth): metadata, registration, an authorize endpoint that approves at once, tokens ---
+
+    def base_url(self):
+        return f"http://{self.headers.get('Host')}"
+
+    def oauth_get(self, path, query):
+        base = self.base_url()
+        issuer = f"{base}/oauth"
+        if path == "/.well-known/oauth-protected-resource":
+            self.label = "protected resource metadata"
+            self.send_json(200, {
+                "resource": f"{base}/",
+                "authorization_servers": [issuer],
+                "scopes_supported": ["mcp"],
+                "bearer_methods_supported": ["header"],
+            })
+        elif path == "/.well-known/oauth-authorization-server/oauth":
+            self.label = "authorization server metadata"
+            self.send_json(200, {
+                "issuer": issuer,
+                "authorization_endpoint": f"{issuer}/authorize",
+                "token_endpoint": f"{issuer}/token",
+                "registration_endpoint": f"{issuer}/register",
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": ["none"],
+                "scopes_supported": ["mcp", "offline_access"],
+                "authorization_response_iss_parameter_supported": True,
+            })
+        elif path == "/oauth/authorize":
+            self.authorize(query, base, issuer)
+        else:
+            return False
+        return True
+
+    def register(self, body):
+        self.label = "client registration"
+        try:
+            request = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return self.oauth_error("invalid_client_metadata", "the body isn't JSON")
+        redirect_uris = request.get("redirect_uris")
+        if not isinstance(redirect_uris, list) or not redirect_uris or not all(isinstance(u, str) for u in redirect_uris):
+            return self.oauth_error("invalid_redirect_uri", "redirect_uris must list at least one URI")
+        if request.get("application_type") not in ("native", "web"):
+            return self.oauth_error("invalid_client_metadata", "application_type must be native or web")
+        client_id = uuid.uuid4().hex
+        with self.server.lock:
+            self.server.oauth_clients[client_id] = redirect_uris
+        self.send_json(201, {
+            "client_id": client_id,
+            "client_id_issued_at": int(time.time()),
+            "redirect_uris": redirect_uris,
+            "grant_types": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_method": "none",
+            "application_type": request["application_type"],
+        })
+
+    def authorize(self, query, base, issuer):
+        self.label = "authorization request"
+        def one(name):
+            return (query.get(name) or [None])[0]
+        client_id, redirect_uri = one("client_id"), one("redirect_uri")
+        with self.server.lock:
+            registered = self.server.oauth_clients.get(client_id)
+        if not registered or redirect_uri not in registered:
+            return self.send_text(400, "Unknown client, or a redirect URI it didn't register.")
+        problem = None
+        if one("response_type") != "code":
+            problem = "response_type must be code"
+        elif one("code_challenge_method") != "S256" or not one("code_challenge"):
+            problem = "PKCE with S256 is required"
+        elif one("resource") != f"{base}/":
+            problem = f"resource must be {base}/"
+        elif not one("state"):
+            problem = "state is required"
+        if problem:
+            return self.redirect(redirect_uri, {"error": "invalid_request", "error_description": problem, "state": one("state") or "", "iss": issuer})
+        code = uuid.uuid4().hex
+        with self.server.lock:
+            self.server.oauth_codes[code] = {
+                "client_id": client_id, "redirect_uri": redirect_uri, "challenge": one("code_challenge"),
+                "resource": one("resource"), "scope": one("scope"),
+            }
+        iss = "http://impostor.test/oauth" if self.server.oauth_wrong_iss else issuer
+        self.redirect(redirect_uri, {"code": code, "state": one("state"), "iss": iss})
+
+    def token(self, body):
+        form = {name: values[0] for name, values in urllib.parse.parse_qs(body.decode("utf-8")).items()}
+        grant = form.get("grant_type")
+        self.label = f"token ({grant})"
+        if grant == "authorization_code":
+            with self.server.lock:
+                issued = self.server.oauth_codes.pop(form.get("code"), None)
+            if not issued:
+                return self.oauth_error("invalid_grant", "unknown or already used code")
+            verifier = (form.get("code_verifier") or "").encode()
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier).digest()).rstrip(b"=").decode()
+            if challenge != issued["challenge"]:
+                return self.oauth_error("invalid_grant", "code_verifier doesn't match the code_challenge")
+            if form.get("client_id") != issued["client_id"]:
+                return self.oauth_error("invalid_client", "client_id doesn't match the code")
+            if form.get("redirect_uri") != issued["redirect_uri"]:
+                return self.oauth_error("invalid_grant", "redirect_uri doesn't match the authorization request")
+            if form.get("resource") != issued["resource"]:
+                return self.oauth_error("invalid_target", "resource doesn't match the authorization request")
+            return self.issue_tokens(issued["client_id"], issued["resource"], issued["scope"])
+        if grant == "refresh_token":
+            with self.server.lock:
+                held = self.server.oauth_refresh.pop(form.get("refresh_token"), None)
+            if not held:
+                return self.oauth_error("invalid_grant", "unknown or already used refresh token")
+            if form.get("client_id") != held["client_id"]:
+                return self.oauth_error("invalid_client", "client_id doesn't match the refresh token")
+            if form.get("resource") not in (None, held["resource"]):
+                return self.oauth_error("invalid_target", "resource doesn't match the refresh token")
+            return self.issue_tokens(held["client_id"], held["resource"], held["scope"])
+        self.oauth_error("unsupported_grant_type", f"grant_type {grant!r} isn't supported")
+
+    def issue_tokens(self, client_id, resource, scope):
+        access, refresh = uuid.uuid4().hex, uuid.uuid4().hex
+        with self.server.lock:
+            self.server.oauth_access[access] = time.time() + self.server.token_ttl
+            # Refresh tokens rotate: each one works once.
+            self.server.oauth_refresh[refresh] = {"client_id": client_id, "resource": resource, "scope": scope}
+        reply = {"access_token": access, "token_type": "Bearer", "refresh_token": refresh, "scope": scope or "mcp"}
+        if not self.server.omit_expires_in:
+            reply["expires_in"] = self.server.token_ttl
+        self.send_json(200, reply, headers={"Cache-Control": "no-store"})
+
+    def oauth_error(self, error, description):
+        self.send_json(400, {"error": error, "error_description": description})
+
+    def has_valid_access_token(self):
+        header = self.headers.get("Authorization") or ""
+        token = header[len("Bearer "):] if header.startswith("Bearer ") else None
+        with self.server.lock:
+            expires = self.server.oauth_access.get(token)
+        return expires is not None and expires > time.time()
+
+    def redirect(self, location, params):
+        separator = "&" if "?" in location else "?"
+        self.send_response(302)
+        self.send_header("Location", location + separator + urllib.parse.urlencode(params))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        print(f"{self.command} {self.label} -> 302", flush=True)
+
+    def send_text(self, status, text):
+        data = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        print(f"{self.command} {self.label} -> {status}", flush=True)
 
     # --- Responses ---
 
@@ -377,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
         if origin and self.origin_allowed():
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
+            exposed = "Mcp-Session-Id" if self.server.hide_www_authenticate else "Mcp-Session-Id, WWW-Authenticate"
+            self.send_header("Access-Control-Expose-Headers", exposed)
         if preflight:
             self.send_header("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
             # By default, echo the request's list: it covers every Mcp-Param-* header and Authorization.
@@ -403,6 +592,15 @@ def main():
     )
     parser.add_argument("--token", help="require Authorization: Bearer TOKEN on every request")
     parser.add_argument(
+        "--oauth", action="store_true",
+        help="require an OAuth sign-in: serves resource and authorization server metadata, client registration, "
+             "an authorize endpoint that approves at once, and a token endpoint",
+    )
+    parser.add_argument("--hide-www-authenticate", action="store_true", help="don't let browsers read WWW-Authenticate, as Glean does")
+    parser.add_argument("--token-ttl", type=int, default=3600, metavar="SECONDS", help="how long OAuth access tokens last (default 3600)")
+    parser.add_argument("--oauth-wrong-iss", action="store_true", help="name the wrong issuer in authorization responses, which clients must reject")
+    parser.add_argument("--omit-expires-in", action="store_true", help="leave expires_in out of token responses, so clients learn of expiry from a 401")
+    parser.add_argument(
         "--allow-headers", metavar="LIST",
         help="headers CORS preflights allow, e.g. 'Content-Type, Mcp-Session-Id' "
              "(default: whatever the browser asks for)",
@@ -417,10 +615,18 @@ def main():
     server.allowed_origins = args.allowed_origins or DEFAULT_ORIGINS
     server.allowed_headers = args.allow_headers
     server.token = args.token
+    server.oauth = args.oauth
+    server.hide_www_authenticate = args.hide_www_authenticate
+    server.token_ttl = args.token_ttl
+    server.oauth_wrong_iss = args.oauth_wrong_iss
+    server.omit_expires_in = args.omit_expires_in
+    server.oauth_clients, server.oauth_codes, server.oauth_access, server.oauth_refresh = {}, {}, {}, {}
     server.sessions = {}
     server.lock = threading.Lock()
     url = f"http://{args.host}:{args.port}"
     features = [args.mode] + (["SSE replies"] if args.sse else []) + (["bearer token required"] if args.token else [])
+    if args.oauth:
+        features.append(f"OAuth sign-in, tokens last {args.token_ttl} s")
     print(f"Mock MCP server ({', '.join(features)}) on {url}", flush=True)
     print(f"  Browser origins allowed: {', '.join(server.allowed_origins)}", flush=True)
     if args.allow_headers:

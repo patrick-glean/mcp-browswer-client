@@ -7,10 +7,13 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
 
+mod error;
+mod http;
 mod logging;
 pub mod mcp;
+pub mod oauth;
 
-use mcp::types::McpError;
+use error::McpError;
 
 include!("build_info.rs");
 include!("bootrom.rs");
@@ -136,6 +139,48 @@ pub async fn call_tool(url: String, name: String, args: String, options: String)
 #[wasm_bindgen]
 pub fn forget_server(url: &str) {
     mcp::forget(url.trim());
+}
+
+/// Starts signing in to a server that needs OAuth: discovery, client registration if needed,
+/// and the URL to open. `options` is `{redirectUri, applicationType, clients, wwwAuthenticate?}`;
+/// returns `{authorizationUrl, pending, client, newClient, authServer, scope}`.
+#[wasm_bindgen]
+pub async fn auth_begin(server_url: String, options: String) -> Result<String, JsValue> {
+    let result = match parse::<oauth::BeginOptions>(&options, "sign-in options") {
+        Ok(opts) => oauth::begin(server_url.trim(), opts).await.and_then(|begin| to_value(&begin)),
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Finishes a sign-in with the callback's `{code, state, iss, error, errorDescription}` and
+/// returns the tokens to store.
+#[wasm_bindgen]
+pub async fn auth_finish(pending: String, callback: String) -> Result<String, JsValue> {
+    let parsed = (parse::<oauth::Pending>(&pending, "sign-in record"), parse::<oauth::Callback>(&callback, "sign-in response"));
+    let result = match parsed {
+        (Ok(pending), Ok(callback)) => oauth::finish(pending, callback).await.and_then(|tokens| to_value(&tokens)),
+        (Err(err), _) | (_, Err(err)) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Refreshes stored tokens. Rejects with kind `auth_required` when the user has to sign in again.
+#[wasm_bindgen]
+pub async fn auth_refresh(tokens: String) -> Result<String, JsValue> {
+    let result = match parse::<oauth::Tokens>(&tokens, "tokens") {
+        Ok(tokens) => oauth::refresh(tokens).await.and_then(|tokens| to_value(&tokens)),
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+fn parse<T: serde::de::DeserializeOwned>(json: &str, what: &str) -> Result<T, McpError> {
+    serde_json::from_str(json).map_err(|e| McpError::internal(format!("Invalid {what}: {e}")))
+}
+
+fn to_value<T: Serialize>(value: &T) -> Result<Value, McpError> {
+    serde_json::to_value(value).map_err(|e| McpError::internal(e.to_string()))
 }
 
 fn parse_args(args: &str) -> Result<Value, McpError> {

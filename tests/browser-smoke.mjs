@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Browser smoke test: loads the app in headless Chrome and drives the real UI against mock MCP
-// servers (modern, streaming, legacy, dual-era, strict CORS, token-protected) and, with
+// servers (modern, streaming, legacy, dual-era, strict CORS, token-protected, OAuth sign-in) and, with
 // --reference, a server built on the official Python SDK. --public also connects to the public
 // servers the in-app guide suggests, through the guide's own buttons (needs internet access).
 //
@@ -10,7 +10,7 @@
 // setup.sh creates. Exits non-zero if any check fails.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +21,8 @@ const WITH_PUBLIC = process.argv.includes('--public');
 const HOST = 'http://127.0.0.1';
 const PORTS = {
     app: 18080, modern: 18081, sse: 18082, legacy: 18083, legacySse: 18084, dual: 18085, reference: 18086,
-    strictLegacy: 18087, token: 18088, strictModern: 18089, devtools: 19222,
+    strictLegacy: 18087, token: 18088, strictModern: 18089, oauth: 18090, oauthWrongIss: 18091,
+    oauthNoExpiry: 18092, devtools: 19222,
 };
 const TOKEN = 'smoke-secret-token';
 // A CORS policy written before 2026-07-28: no Mcp-Method, Mcp-Name or Mcp-Param-* headers.
@@ -106,6 +107,7 @@ async function openPage(match = () => true) {
     let nextId = 0;
     const pending = new Map();
     const exceptions = [];
+    const listeners = new Map();
     ws.addEventListener('message', event => {
         const message = JSON.parse(event.data);
         if (message.id && pending.has(message.id)) {
@@ -114,6 +116,8 @@ async function openPage(match = () => true) {
         } else if (message.method === 'Runtime.exceptionThrown') {
             const details = message.params.exceptionDetails;
             exceptions.push(details.exception?.description ?? details.text);
+        } else if (listeners.has(message.method)) {
+            listeners.get(message.method)(message.params);
         }
     });
     const send = (method, params = {}) => new Promise(resolve => {
@@ -140,7 +144,61 @@ async function openPage(match = () => true) {
     await send('Page.enable');
     await send('Runtime.enable');
     await send('ServiceWorker.enable');
-    return { send, run, waitFor, exceptions, close: () => ws.close() };
+    const on = (method, listener) => listeners.set(method, listener);
+    return { id: target.id, send, run, waitFor, on, exceptions, close: () => ws.close() };
+}
+
+async function closeTab(page) {
+    page.close();
+    await fetch(`${HOST}:${PORTS.devtools}/json/close/${page.id}`).catch(() => {});
+}
+
+// A separate browser context: its own storage and no service worker, like signing in from Chrome
+// while the client runs in a browser without pop-ups.
+async function otherBrowser() {
+    const { webSocketDebuggerUrl } = await (await fetch(`${HOST}:${PORTS.devtools}/json/version`)).json();
+    const ws = new WebSocket(webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => {
+        ws.addEventListener('open', resolve, { once: true });
+        ws.addEventListener('error', reject, { once: true });
+    });
+    let nextId = 0;
+    const pending = new Map();
+    ws.addEventListener('message', event => {
+        const message = JSON.parse(event.data);
+        if (message.id && pending.has(message.id)) {
+            pending.get(message.id)(message);
+            pending.delete(message.id);
+        }
+    });
+    const send = (method, params = {}, sessionId) => new Promise(resolve => {
+        const id = ++nextId;
+        pending.set(id, resolve);
+        ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    });
+    const { browserContextId } = (await send('Target.createBrowserContext')).result;
+    return {
+        async open(url) {
+            const { targetId } = (await send('Target.createTarget', { url, browserContextId })).result;
+            const { sessionId } = (await send('Target.attachToTarget', { targetId, flatten: true })).result;
+            const run = async expression =>
+                (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)).result?.result?.value;
+            const waitFor = async (expression, ms = 15000) => {
+                const end = Date.now() + ms;
+                while (Date.now() < end) {
+                    const value = await run(expression);
+                    if (value) return value;
+                    await sleep(150);
+                }
+                return null;
+            };
+            return { run, waitFor };
+        },
+        async close() {
+            await send('Target.disposeBrowserContext', { browserContextId });
+            ws.close();
+        },
+    };
 }
 
 // UI helpers: everything goes through the same buttons and forms a person would use.
@@ -177,7 +235,7 @@ async function callTool(page, url, tool, values, ms = 20000) {
         document.getElementById('mcpTabBtn').click();
         const item = [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(url)});
         item.closest('.server-item').click();
-        const toolItem = [...document.querySelectorAll('#toolsList .tool-item')].find(el => el.textContent === ${JSON.stringify(tool)});
+        const toolItem = [...document.querySelectorAll('#toolsList .tool-item')].find(el => el.dataset.tool === ${JSON.stringify(tool)});
         toolItem.click();
         for (const [name, value] of Object.entries(${JSON.stringify(values)})) {
             document.querySelector('#toolCard [name="' + name + '"]').value = value;
@@ -195,6 +253,26 @@ async function callTool(page, url, tool, values, ms = 20000) {
 // The Logs tab's entries, for checks that the right things were (and weren't) logged.
 const entries = `chatShell.logPanel.entries`;
 
+// Chooses Sign in on the selected server's card, as a click (pop-up windows need one), then waits
+// for `until`. The mock approves at once, so the pop-up goes straight to the callback page.
+async function signIn(page, until, ms = 20000) {
+    await page.send('Runtime.evaluate', { expression: `document.getElementById('signInBtn').click()`, userGesture: true });
+    return page.waitFor(until, ms);
+}
+
+// What the worker keeps in IndexedDB for a server's sign-in.
+function storedTokens(url) {
+    return `new Promise((resolve, reject) => {
+        const open = indexedDB.open('mcp_auth');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const request = open.result.transaction('tokens').objectStore('tokens').get(${JSON.stringify(url)});
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+        };
+    })`;
+}
+
 async function main() {
     if (!CHROME) throw new Error('Google Chrome not found; set CHROME_PATH');
     const referencePython = join(ROOT, 'venv', 'bin', 'python');
@@ -211,6 +289,11 @@ async function main() {
     mock('legacy+old CORS', PORTS.strictLegacy, '--mode', 'legacy', '--allow-headers', OLD_CORS_HEADERS);
     mock('token', PORTS.token, '--mode', 'modern', '--token', TOKEN);
     mock('modern+old CORS', PORTS.strictModern, '--mode', 'modern', '--allow-headers', OLD_CORS_HEADERS);
+    // Like Glean, this one doesn't let pages read WWW-Authenticate. Its tokens last 62 s, so two
+    // seconds in they're inside the client's one-minute refresh margin.
+    mock('oauth', PORTS.oauth, '--mode', 'modern', '--oauth', '--hide-www-authenticate', '--token-ttl', '62');
+    mock('oauth+wrong iss', PORTS.oauthWrongIss, '--mode', 'modern', '--oauth', '--oauth-wrong-iss');
+    mock('oauth+no expires_in', PORTS.oauthNoExpiry, '--mode', 'modern', '--oauth', '--token-ttl', '2', '--omit-expires-in');
     if (WITH_REFERENCE) {
         start('reference', referencePython, ['tests/reference_server.py', '--port', String(PORTS.reference)]);
     }
@@ -286,6 +369,54 @@ async function main() {
             !!region?.includes('Echo from Zürich: hi'), region);
         const counted = await callTool(page, `${HOST}:${PORTS.sse}/`, 'count', { n: 3 });
         check('modern server with SSE replies: reads a streamed reply', !!counted?.includes('Counted to 3'), counted);
+
+        // The inspector views of the modern mock: echo has a title and annotations, count an output
+        // schema, and broken_header is hidden.
+        const inspector = await page.run(`(() => {
+            document.getElementById('mcpTabBtn').click();
+            [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(modernUrl)}).closest('.server-item').click();
+            const item = name => document.querySelector('#toolsList .tool-item[data-tool="' + name + '"]');
+            const badges = name => [...item(name).querySelectorAll('.badge')].map(b => b.textContent);
+            const filter = document.getElementById('toolFilter');
+            filter.value = 'region';
+            filter.dispatchEvent(new Event('input'));
+            const visible = [...document.querySelectorAll('#toolsList .tool-item')].filter(el => !el.hidden).map(el => el.dataset.tool);
+            const count = document.getElementById('toolCount').textContent;
+            filter.value = '';
+            filter.dispatchEvent(new Event('input'));
+            item('count').click();
+            const hidden = document.getElementById('hiddenTools');
+            const connection = document.getElementById('cardConnection');
+            return {
+                echo: [item('echo').querySelector('.tool-item-title')?.textContent, ...badges('echo')].join(', '),
+                count: badges('count').join(', '),
+                filtered: visible.join(', ') + ' (' + count + ')',
+                schemas: [...document.querySelectorAll('#toolCard .tool-schema summary')].map(s => s.textContent).join(', '),
+                hidden: hidden.hidden ? '' : hidden.innerText.replace(/\\s+/g, ' '),
+                connection: connection.hidden ? '' : connection.innerText.replace(/\\s+/g, ' '),
+            };
+        })()`);
+        check('inspector: tools show their titles and annotation badges',
+            inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 3)', inspector.filtered);
+        check('inspector: a tool shows its input and output schemas and raw definition',
+            inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
+        check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden), inspector.hidden);
+        check('inspector: the server card shows what the server said about itself',
+            /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities tools/.test(inspector.connection), inspector.connection);
+        const downloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-downloads-'));
+        await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads });
+        await page.run(`document.getElementById('downloadToolsBtn').click()`);
+        let downloaded;
+        for (let i = 0; i < 50 && !downloaded; i++) {
+            downloaded = readdirSync(downloads).find(name => name.endsWith('.json'));
+            if (!downloaded) await sleep(100);
+        }
+        const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
+        rmSync(downloads, { recursive: true, force: true });
+        check('inspector: Download saves the server details and tool list as JSON',
+            report?.server === modernUrl && report.tools.length === 3 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            downloaded || 'no file');
 
         const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
         check('console tool picker is populated', !!picker, picker);
@@ -376,7 +507,7 @@ async function main() {
 
         const tokenUrl = `${HOST}:${PORTS.token}/`;
         const locked = await addAndConnect(page, tokenUrl, 'needs a token');
-        check('a server that needs a token says so', locked?.status === 'failed' && /bearer token/i.test(locked.error || ''), locked?.error);
+        check('a server that needs a token says so', locked?.status === 'failed' && /sign in|static token/i.test(locked.error || ''), locked?.error);
         await page.run(`(() => {
             const input = document.getElementById('cardServerToken');
             input.value = ${JSON.stringify(TOKEN)};
@@ -390,6 +521,187 @@ async function main() {
         check('with a bearer token tools can be called', !!withToken?.includes('Echo: with a token'), withToken);
         const leaked = await page.run(`JSON.stringify(${entries}).includes(${JSON.stringify(TOKEN)})`);
         check('logs: the bearer token never appears', !leaked);
+
+        // Sign-in (OAuth), as with Glean: the 401's challenge is unreadable, so the client finds
+        // the protected resource metadata at its well-known address.
+        const oauthUrl = `${HOST}:${PORTS.oauth}/`;
+        const needsSignIn = await addAndConnect(page, oauthUrl, 'OAuth mock');
+        const offered = await page.run(`!document.getElementById('cardAuth').hidden && !document.getElementById('signInBtn').hidden`);
+        check('a server that needs sign-in says so and offers Sign in',
+            needsSignIn?.status === 'failed' && /sign in/i.test(needsSignIn.error || '') && offered, needsSignIn?.error);
+        const signedIn = await signIn(page, `chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`);
+        check('signing in through the pop-up window connects', !!signedIn,
+            signedIn ? '' : await page.run(`chatShell.servers[${JSON.stringify(oauthUrl)}]?.lastError`));
+        const shown = await page.run(`(() => {
+            const visible = [...document.querySelectorAll('#cardAuth button')].filter(b => b.offsetParent).map(b => b.textContent);
+            return document.getElementById('cardAuthStatus').textContent + ' [' + visible.join(', ') + ']';
+        })()`);
+        check('the server card says who you signed in with and offers only Sign out',
+            shown.includes(`Signed in with 127.0.0.1:${PORTS.oauth}`) && shown.includes('renews automatically') && shown.endsWith('[Sign out]'), shown);
+        const missingSteps = await page.run(`(() => {
+            const said = ${entries}.filter(e => e.server === ${JSON.stringify(oauthUrl)} && e.level === 'info').map(e => e.message);
+            return ['^Found the protected resource metadata at .+/\\\\.well-known/oauth-protected-resource', '^Registered with .+ \\\\(native app', '^Signed in with ']
+                .filter(pattern => !said.some(message => new RegExp(pattern).test(message)));
+        })()`);
+        check('logs: discovery, registration and sign-in are reported', missingSteps.length === 0, missingSteps.join(' | '));
+        const oauthTools = await toolNames(page, oauthUrl);
+        const signedInEcho = await callTool(page, oauthUrl, 'echo', { text: 'signed in' });
+        check('signed in, tools are listed and called', oauthTools.includes('echo') && !!signedInEcho?.includes('Echo: signed in'), signedInEcho);
+        await sleep(2500);
+        const beforeRefresh = await page.run(`${entries}.length`);
+        const refreshedEcho = await callTool(page, oauthUrl, 'echo', { text: 'after a refresh' });
+        const refreshed = await page.run(`${entries}.slice(${beforeRefresh}).some(e => e.server === ${JSON.stringify(oauthUrl)} && /^Refreshed the access token/.test(e.message))`);
+        check('an access token about to expire is refreshed before use', refreshed && !!refreshedEcho?.includes('Echo: after a refresh'), refreshedEcho);
+        const tokens = await page.run(storedTokens(oauthUrl));
+        const secrets = [tokens?.accessToken, tokens?.refreshToken].filter(Boolean);
+        const exposed = await page.run(`(() => {
+            const places = [JSON.stringify(${entries}), localStorage.getItem('mcpServers') || '', document.body.innerHTML];
+            return ${JSON.stringify(secrets)}.filter(secret => places.some(text => text.includes(secret))).length;
+        })()`);
+        const unredacted = await page.run(`${entries}.some(e => /"(access_token|refresh_token|code|code_verifier)":"(?!\\[redacted\\])/.test(JSON.stringify(e.detail ?? '')))`);
+        check('tokens never reach the logs, the page or localStorage', secrets.length === 2 && exposed === 0 && !unredacted,
+            `${secrets.length} tokens checked`);
+        await page.run(`document.getElementById('signOutBtn').click()`);
+        const forgotten = await page.waitFor(`${storedTokens(oauthUrl)}.then(tokens => !tokens)`, 5000);
+        await page.waitFor(`!document.getElementById('signInBtn').hidden`, 5000);
+        await page.run(`document.getElementById('initProtocol').click()`);
+        const signedOut = await page.waitFor(`(() => {
+            const s = chatShell.servers[${JSON.stringify(oauthUrl)}];
+            return s?.status === 'failed' ? s.lastError : null;
+        })()`);
+        check('signing out forgets the tokens, and the server asks for sign-in again', !!forgotten && /sign in/i.test(signedOut || ''), signedOut);
+
+        const noExpiryUrl = `${HOST}:${PORTS.oauthNoExpiry}/`;
+        await addAndConnect(page, noExpiryUrl, 'OAuth mock, no expires_in');
+        await signIn(page, `chatShell.servers[${JSON.stringify(noExpiryUrl)}]?.status === 'connected'`);
+        await sleep(2500);
+        const beforeRetry = await page.run(`${entries}.length`);
+        const retriedEcho = await callTool(page, noExpiryUrl, 'echo', { text: 'after a retry' });
+        const retriedAfterRefresh = await page.run(`(() => {
+            const said = ${entries}.slice(${beforeRetry}).filter(e => e.server === ${JSON.stringify(noExpiryUrl)}).map(e => e.message);
+            return said.some(m => /turned down the access token/.test(m)) && said.some(m => /^Refreshed the access token/.test(m));
+        })()`);
+        check('a turned-down access token is refreshed and the call retried', retriedAfterRefresh && !!retriedEcho?.includes('Echo: after a retry'), retriedEcho);
+
+        const wrongIssUrl = `${HOST}:${PORTS.oauthWrongIss}/`;
+        await addAndConnect(page, wrongIssUrl, 'OAuth mock, wrong issuer');
+        const wrongIss = await signIn(page, `(() => {
+            const error = chatShell.servers[${JSON.stringify(wrongIssUrl)}]?.lastError || '';
+            return /impostor/.test(error) ? error : null;
+        })()`);
+        const wrongIssStored = await page.run(storedTokens(wrongIssUrl));
+        check('a sign-in response from the wrong issuer is rejected', !!wrongIss && !wrongIssStored, wrongIss);
+
+        await page.send('Runtime.evaluate', { expression: `window.open('oauth-callback.html?code=forged&state=forged', 'forged-callback')`, userGesture: true });
+        // Sign-in pop-ups close once they're done, so the only callback page left is this one.
+        const forged = await openPage(t => t.url.includes('oauth-callback'));
+        const forgedText = await forged.waitFor(`document.getElementById('callbackTitle').textContent === 'Sign-in failed' && document.getElementById('callbackDetail').textContent`, 10000);
+        check('the callback page turns away a response with an unknown state', /doesn't match a sign-in in progress/.test(forgedText || ''), forgedText);
+        forged.close();
+
+        // The Guide's Glean field takes a work email: the page asks app.glean.com which deployment
+        // it belongs to. That request is answered here: oauth-mock.test lives on the OAuth mock,
+        // unknown.test gets Glean's central deployment (its answer for domains it doesn't know),
+        // and blocked.test fails the way a CORS rejection does.
+        const lookups = [];
+        await page.send('Fetch.enable', { patterns: [{ urlPattern: 'https://app.glean.com/config/search*' }] });
+        page.on('Fetch.requestPaused', async ({ requestId, request }) => {
+            const cors = [
+                { name: 'Access-Control-Allow-Origin', value: `${HOST}:${PORTS.app}` },
+                { name: 'Access-Control-Allow-Headers', value: 'Content-Type' },
+                { name: 'Access-Control-Allow-Methods', value: 'POST' },
+            ];
+            if (request.method === 'OPTIONS') {
+                return page.send('Fetch.fulfillRequest', { requestId, responseCode: 204, responseHeaders: cors });
+            }
+            const asked = JSON.parse(request.postData || '{}');
+            lookups.push(asked);
+            if (asked.email?.endsWith('@blocked.test')) return page.send('Fetch.failRequest', { requestId, errorReason: 'Failed' });
+            const queryURL = asked.email?.endsWith('@oauth-mock.test') ? `${HOST}:${PORTS.oauth}/` : 'https://apps-be.glean.com/';
+            const body = JSON.stringify({ search_config: { queryURL, isMultiTenant: false, centralURL: 'https://apps-be.glean.com/' } });
+            return page.send('Fetch.fulfillRequest', {
+                requestId, responseCode: 200, body: Buffer.from(body).toString('base64'),
+                responseHeaders: [...cors, { name: 'Content-Type', value: 'application/json' }],
+            });
+        });
+        const lookUp = async (email, until) => {
+            await page.run(`(() => {
+                if (document.getElementById('guide').hidden) document.getElementById('guideBtn').click();
+                document.getElementById('gleanUrl').value = ${JSON.stringify(email)};
+            })()`);
+            await page.send('Runtime.evaluate', { expression: `document.getElementById('gleanAddBtn').click()`, userGesture: true });
+            return page.waitFor(until, 20000);
+        };
+        const gleanError = `(() => { const note = document.getElementById('gleanUrlError'); return note.hidden ? null : note.textContent; })()`;
+        const unknown = await lookUp('someone@unknown.test', gleanError);
+        check('Glean by email: a domain Glean doesn\'t know is reported', /doesn't know a deployment for unknown\.test/.test(unknown || ''), unknown);
+        const blockedLookup = await lookUp('someone@blocked.test', gleanError);
+        check('Glean by email: a lookup the browser blocks falls back to pasting the URL', /Paste your MCP server URL/.test(blockedLookup || ''), blockedLookup);
+        const gleanUrl = `${HOST}:${PORTS.oauth}/mcp/default`;
+        const foundAndSignedIn = await lookUp('someone@oauth-mock.test', `chatShell.servers[${JSON.stringify(gleanUrl)}]?.status === 'connected'`);
+        const filled = await page.run(`document.getElementById('gleanUrl').value + ' | ' + document.getElementById('gleanStatus').textContent`);
+        check('Glean by email: the lookup finds the server, and sign-in connects to its default MCP server',
+            !!foundAndSignedIn && filled.startsWith(`${gleanUrl} | oauth-mock.test uses the Glean at ${HOST}:${PORTS.oauth}/`), filled);
+        check('Glean by email: the lookup sends the email the way Glean\'s sign-in page does',
+            lookups.length === 3 && lookups.every(asked => asked.isGleanApp === 'true' && /@/.test(asked.email)), JSON.stringify(lookups));
+        const emailLogged = await page.run(`JSON.stringify(${entries}).includes('someone@')`);
+        check('Glean by email: logs name the domain, not the email address', !emailLogged);
+        await page.send('Fetch.disable');
+        await page.run(`document.getElementById('closeGuide').click()`);
+
+        // Browsers without pop-ups (embedded ones, or a strict blocker): the card offers to
+        // continue in this tab, or to open the copied link in another tab or browser.
+        const signInWithoutPopup = async () => {
+            await page.run(`(() => {
+                window.realOpen ??= window.open;
+                window.open = () => null;
+                [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(oauthUrl)}).closest('.server-item').click();
+                if (!document.getElementById('signOutBtn').hidden) document.getElementById('signOutBtn').click();
+            })()`);
+            await page.waitFor(`!document.getElementById('signInBtn').hidden`, 5000);
+            await page.send('Runtime.evaluate', { expression: `document.getElementById('signInBtn').click()`, userGesture: true });
+            return page.waitFor(`!document.getElementById('cardAuthElsewhere').hidden && chatShell.signingIn?.authorizationUrl`);
+        };
+        const link = await signInWithoutPopup();
+        const noPopupStatus = await page.run(`document.getElementById('cardAuthStatus').textContent`);
+        check('without a pop-up, the card offers to continue in this tab or copy the link',
+            !!link && /didn't open a pop-up window/.test(noPopupStatus), noPopupStatus);
+        await page.send('Runtime.evaluate', { expression: `window.realOpen(${JSON.stringify(link)}, '_blank', 'noopener')`, userGesture: true });
+        const fromTab = await page.waitFor(`chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`);
+        const tab = await openPage(t => t.url.includes('oauth-callback'));
+        const tabSays = await tab.waitFor(`document.getElementById('callbackTitle').textContent === 'Signed in' && document.getElementById('callbackDetail').textContent`, 10000);
+        await closeTab(tab);
+        check('the copied link signs in from another tab, and this one connects', !!fromTab && /close this tab/.test(tabSays || ''), tabSays);
+
+        const secondLink = await signInWithoutPopup();
+        const elsewhere = await otherBrowser();
+        const there = await elsewhere.open(secondLink);
+        const landed = await there.waitFor(`document.getElementById('callbackTitle')?.textContent === 'Finish signing in where you started' && document.getElementById('callbackAddress').value`);
+        await elsewhere.close();
+        check('in another browser, the callback page offers its address to take back',
+            /oauth-callback\.html\?code=.+&state=/.test(landed || ''), (landed || 'nothing').replace(/code=[^&]+/, 'code=…'));
+        const pasteInto = address => page.run(`(() => {
+            document.querySelector('#cardAuthElsewhere details').open = true;
+            document.getElementById('authCallbackUrl').value = ${JSON.stringify(address)};
+            document.getElementById('finishSignInBtn').click();
+            const error = document.getElementById('authPasteError');
+            return error.hidden ? '' : error.textContent;
+        })()`);
+        const wrongPaste = await pasteInto('https://example.com/callback?state=abc');
+        check('pasting an address that isn\'t the callback is turned away', /isn't the address sign-in sends you back to/.test(wrongPaste), wrongPaste);
+        await pasteInto(landed || '');
+        const pastedBack = await page.waitFor(`chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`);
+        check('pasting the address from the other browser here finishes signing in', !!pastedBack,
+            pastedBack ? '' : await page.run(`document.getElementById('authPasteError').textContent || chatShell.servers[${JSON.stringify(oauthUrl)}]?.lastError`));
+
+        // This reloads the page, so it comes last among the checks that use the page's state.
+        await signInWithoutPopup();
+        await page.run(`document.getElementById('continueHereBtn').click()`);
+        await sleep(500);
+        const cameBack = await page.waitFor(`typeof chatShell !== 'undefined' && location.search === '' &&
+            chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`, 20000);
+        check('continuing in this tab signs in and comes back to the client, connected', !!cameBack,
+            cameBack ? '' : await page.run(`location.href + ' ' + (document.getElementById('callbackDetail')?.textContent || '')`));
 
         const blocked = await addAndConnect(page, `${HOST}:${PORTS.strictModern}/`, 'modern, old CORS policy');
         check('a modern server whose CORS policy blocks the new headers is diagnosed',

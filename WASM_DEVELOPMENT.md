@@ -49,7 +49,7 @@ When adding new functionality to the WASM module, follow these steps in order:
 
 ## MCP Client API
 
-The MCP client lives in `src/mcp/` and is exported from `src/lib.rs`. Every call takes and returns JSON strings. On failure the promise rejects with a JSON `McpError`: `{kind, message, status?, code?, data?}`, where `kind` is one of `network`, `timeout`, `auth_required`, `http`, `protocol`, `unsupported_version`, `invalid_response` or `internal`. `mcpError()` in `sw.js` parses it.
+The MCP client lives in `src/mcp/`, sign-in in `src/oauth/`, and both use `src/http.rs` for requests; the exports are in `src/lib.rs`. Every call takes and returns JSON strings. On failure the promise rejects with a JSON `McpError` (`src/error.rs`): `{kind, message, status?, code?, data?}`, where `kind` is one of `network`, `timeout`, `auth_required`, `auth_failed`, `http`, `protocol`, `unsupported_version`, `invalid_response` or `internal`. `mcpError()` in `sw.js` parses it. A 401 rejects with `auth_required`, and `data.wwwAuthenticate` holds the challenge when the browser could read it.
 
 | Export | Returns |
 | --- | --- |
@@ -58,8 +58,17 @@ The MCP client lives in `src/mcp/` and is exported from `src/lib.rs`. Every call
 | `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
 | `forget_server(url)` | nothing; drops the remembered connection |
 | `set_logger(fn)` | nothing; `fn` then receives every log entry as a JSON string (see [Logging](#logging)) |
+| `auth_begin(serverUrl, options)` | `{authorizationUrl, pending, client, newClient, authServer, scope}` |
+| `auth_finish(pendingJson, callbackJson)` | the tokens record |
+| `auth_refresh(tokensJson)` | the refreshed tokens record (rejects with `auth_required` when the user has to sign in again) |
 
 `options` is `{"bearerToken"?: string, "refresh"?: boolean}`. `list_tools` and `call_tool` connect on their own if needed, so they keep working after the browser restarts the service worker.
+
+The auth exports do the network steps and checks but store nothing; the worker keeps their records in IndexedDB (`authStore.js`):
+
+- `auth_begin` options are `{redirectUri, applicationType: 'native' | 'web', clients, wwwAuthenticate?}`. It discovers the authorization server, reuses a client from `clients` registered with that issuer for that redirect URI or registers a new one (store it when `newClient` is true), and builds the authorization URL. Keep `pending` (keyed by its `state`) until the callback arrives.
+- `auth_finish` takes that `pending` record and the callback's `{code, state, iss, error, errorDescription}`. It checks `state` and `iss`, then exchanges the code.
+- The tokens record is `{serverUrl, resource, issuer, clientId, clientSecret?, tokenEndpointAuthMethod, tokenEndpoint, accessToken, refreshToken?, scope?, expiresAt?}` (`expiresAt` in ms). Pass it to `auth_refresh` as is. A refresh keeps the old refresh token when the server doesn't rotate it.
 
 Page-to-worker messages and the replies the worker broadcasts:
 
@@ -69,8 +78,14 @@ Page-to-worker messages and the replies the worker broadcasts:
 | `{type: 'list_tools', url, refresh?, bearerToken?}` | `tools_list {url, tools, rejected, ttlMs, fromCache}` or `mcp_server_error` |
 | `{type: 'call_tool', tapConfig, engramId, bearerToken?}` | `tool_result {result}` or `tool_result {error, errorKind}` |
 | `{type: 'forget-mcp', url}` | none |
+| `{type: 'auth-start', url, wwwAuthenticate?}` | `auth_redirect {url, authorizationUrl, issuer}` or `auth_error {url, error}`, to the sender only |
+| `{type: 'auth-callback', query}` (the callback's query string, from `oauth-callback.html` or pasted into a page) | `auth_callback_done {ok, url?, error?, unknownState?}` to the sender, then `auth_complete {url, status}` or `auth_error {url, error}` to every page. `unknownState` means no sign-in in this browser has that `state`: it was started in another browser, expired, or was used already |
+| `{type: 'auth-status', url}` | `auth_status {url, status}` |
+| `{type: 'auth-signout', url, forgetClient?}` | `auth_status {url, status}` to every page |
 
-The worker handles every message inside `event.waitUntil()` so a long call keeps it alive. It logs only a message's type and target, never its payload, so bearer tokens stay out of the logs.
+`status` is `{signedIn, issuer?, scope?, expiresAt?, refreshable?, clientId?}`: pages learn whether they're signed in, never the tokens. MCP calls get their credentials in the worker: a static `bearerToken` wins, otherwise the stored access token, refreshed first when it expires within a minute. When a server turns down an OAuth token with `auth_required`, the worker refreshes it once and retries (`withAuth` in `sw.js`). Refreshes for one server run one at a time, because refresh tokens may rotate.
+
+The worker handles every message inside `event.waitUntil()` so a long call keeps it alive. It logs only a message's type and target, never its payload, so bearer tokens and authorization codes stay out of the logs.
 
 ## Logging
 
@@ -103,7 +118,7 @@ What goes where:
 - **error**: an operation failed. Put the `McpError` kind, status and code in `detail`, not the message.
 - **debug**: the wire: `transport::post` traces each request (method, target, id, MCP headers, body) and reply (status, SSE or JSON, timing, body). Bodies over 4 KB are cut.
 
-Write messages as sentences someone can act on, and put structured data in `detail` rather than in the message. Never log an `Authorization` value; the transport trace redacts it and shortens session IDs, and a unit test checks that. The worker prints entries to its console with the matching `console` method, so debug entries only show at DevTools' Verbose level.
+Write messages as sentences someone can act on, and put structured data in `detail` rather than in the message. Never log an `Authorization` value or a token; `http::send` redacts the `Authorization` header and the secret fields of form and JSON bodies (`access_token`, `refresh_token`, `id_token`, `code`, `code_verifier`, `client_secret`, `registration_access_token`), the transport trace shortens session IDs, and unit tests check both. The worker prints entries to its console with the matching `console` method, so debug entries only show at DevTools' Verbose level.
 
 ## Message Flow Pattern
 

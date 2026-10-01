@@ -13,6 +13,7 @@ const mcpServersIndex = {};
 // --- Tool Call Circuit Breaker ---
 const toolCallHistory = {}; // { engramId: [timestamps] }
 
+import * as authStore from './authStore.js';
 import { WASM_SHA256 } from './build.js';
 import { handleOp, initDB, openDB } from './chatStorage.js';
 import { formatDuration, logger, setLogSink } from './logger.js';
@@ -70,11 +71,88 @@ function broadcastWasmStatus(wasmState) {
 
 // --- MCP client helpers ---
 
-// Options for the WASM MCP client. The bearer token comes with the message, or from the
-// server list the page last sent.
-function mcpOptions(url, message = {}, extra = {}) {
-    const bearerToken = message.bearerToken ?? mcpServersIndex[url]?.bearerToken;
+// --- Sign-in (OAuth) ---
+
+// Authorization servers send the browser back to this page, next to the worker.
+const REDIRECT_URI = new URL('oauth-callback.html', self.registration.scope).href;
+// The MCP spec asks clients served from a loopback address to register as native apps.
+const APPLICATION_TYPE = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(self.registration.scope).hostname) ? 'native' : 'web';
+// Tokens this close to expiring are refreshed before use.
+const REFRESH_MARGIN_MS = 60_000;
+
+// A static token, from the message or the server list the page last sent.
+function staticToken(url, message = {}) {
+    return message.bearerToken ?? mcpServersIndex[url]?.bearerToken;
+}
+
+// Options for the WASM MCP client. A static token wins; otherwise the server's OAuth token.
+async function mcpOptions(url, message = {}, extra = {}) {
+    const bearerToken = staticToken(url, message) || await oauthAccessToken(url);
     return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...extra });
+}
+
+// Runs an MCP call with the server's credentials. When the server turns down an OAuth token,
+// it's refreshed once and the call retried.
+async function withAuth(url, message, extra, call) {
+    try {
+        return await call(await mcpOptions(url, message, extra));
+    } catch (error) {
+        if (mcpError(error).kind !== 'auth_required' || staticToken(url, message)) throw error;
+        const held = await authStore.getTokens(url);
+        if (!held?.refreshToken) throw error;
+        logger.info('The server turned down the access token; refreshing it and trying again', { server: url });
+        const accessToken = await oauthAccessToken(url, { force: true });
+        if (!accessToken || accessToken === held.accessToken) throw error;
+        return call(JSON.stringify({ bearerToken: accessToken, ...extra }));
+    }
+}
+
+// The stored access token for a server, refreshed first when it's about to expire (or when
+// `force` is set). Refreshes for one server run one at a time, since refresh tokens rotate.
+async function oauthAccessToken(url, { force = false } = {}) {
+    const tokens = await authStore.getTokens(url);
+    if (!tokens) return undefined;
+    const expiring = tokens.expiresAt && tokens.expiresAt - Date.now() < REFRESH_MARGIN_MS;
+    if (!force && !expiring) return tokens.accessToken;
+    const usable = tokens.expiresAt ? tokens.expiresAt > Date.now() : true;
+    if (!tokens.refreshToken) return usable && !force ? tokens.accessToken : undefined;
+    if (!refreshes.has(url)) {
+        refreshes.set(url, refreshTokens(url, tokens).finally(() => refreshes.delete(url)));
+    }
+    const fresh = await refreshes.get(url);
+    return fresh ? fresh.accessToken : usable && !force ? tokens.accessToken : undefined;
+}
+
+const refreshes = new Map();
+
+async function refreshTokens(url, tokens) {
+    try {
+        const fresh = JSON.parse(await wasmInstance.auth_refresh(JSON.stringify(tokens)));
+        await authStore.putTokens(fresh);
+        broadcastToClients({ type: 'auth_status', url, status: authStatus(fresh) });
+        return fresh;
+    } catch (error) {
+        const failure = mcpError(error);
+        logger.warn(`Couldn't refresh the access token: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+        if (failure.kind === 'auth_required') {
+            await authStore.deleteTokens(url);
+            broadcastToClients({ type: 'auth_status', url, status: authStatus(null) });
+        }
+        return null;
+    }
+}
+
+// What pages may know about a sign-in: never the tokens themselves.
+function authStatus(tokens) {
+    if (!tokens) return { signedIn: false };
+    return {
+        signedIn: true,
+        issuer: tokens.issuer,
+        scope: tokens.scope || null,
+        expiresAt: tokens.expiresAt || null,
+        refreshable: !!tokens.refreshToken,
+        clientId: tokens.clientId
+    };
 }
 
 // WASM MCP calls reject with a JSON McpError: {kind, message, status?, code?, data?}.
@@ -226,7 +304,7 @@ async function handleClientMessage(event) {
             logger.info('Connecting', { server: url });
             const started = performance.now();
             try {
-                const info = JSON.parse(await wasmInstance.connect(url, mcpOptions(url, message)));
+                const info = JSON.parse(await withAuth(url, message, {}, options => wasmInstance.connect(url, options)));
                 broadcastToClients({ type: 'mcp_server_connected', url, info });
                 logger.info(
                     `Connected to ${describeServer(url, info)} in ${formatDuration(performance.now() - started)}: MCP ${info.protocolVersion} (${info.era})`,
@@ -244,6 +322,72 @@ async function handleClientMessage(event) {
                 logger.debug('Forgot the connection', { server: message.url });
             }
             break;
+        case 'auth-start': {
+            const url = message.url;
+            try {
+                const options = {
+                    redirectUri: REDIRECT_URI,
+                    applicationType: APPLICATION_TYPE,
+                    clients: await authStore.listClients(),
+                    wwwAuthenticate: message.wwwAuthenticate || undefined
+                };
+                const begin = JSON.parse(await wasmInstance.auth_begin(url, JSON.stringify(options)));
+                if (begin.newClient) await authStore.putClient(begin.client);
+                await authStore.putPending(begin.pending);
+                event.source?.postMessage({ type: 'auth_redirect', url, authorizationUrl: begin.authorizationUrl, issuer: begin.authServer.issuer });
+            } catch (error) {
+                const failure = mcpError(error);
+                logger.error(`Couldn't start signing in: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                event.source?.postMessage({ type: 'auth_error', url, error: failure });
+            }
+            break;
+        }
+        case 'auth-callback': {
+            // The query string the authorization server sent the browser back with, from
+            // oauth-callback.html or pasted into a page after signing in from another browser.
+            const query = new URLSearchParams(message.query || '');
+            const params = {};
+            for (const [name, key] of [['code', 'code'], ['state', 'state'], ['iss', 'iss'], ['error', 'error'], ['error_description', 'errorDescription']]) {
+                if (query.has(name)) params[key] = query.get(name);
+            }
+            const pending = await authStore.takePending(params.state);
+            if (!pending) {
+                const failure = { kind: 'auth_failed', message: "This sign-in response doesn't match a sign-in in progress in this browser; it may have expired or been used already." };
+                logger.error(failure.message);
+                event.source?.postMessage({ type: 'auth_callback_done', ok: false, unknownState: true, error: failure });
+                break;
+            }
+            const url = pending.serverUrl;
+            try {
+                const tokens = JSON.parse(await wasmInstance.auth_finish(JSON.stringify(pending), JSON.stringify(params)));
+                await authStore.putTokens(tokens);
+                // A connection made before signing in shouldn't outlive it.
+                wasmInstance.forget_server(url);
+                event.source?.postMessage({ type: 'auth_callback_done', ok: true, url });
+                broadcastToClients({ type: 'auth_complete', url, status: authStatus(tokens) });
+            } catch (error) {
+                const failure = mcpError(error);
+                logger.error(`Sign-in failed: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                event.source?.postMessage({ type: 'auth_callback_done', ok: false, url, error: failure });
+                broadcastToClients({ type: 'auth_error', url, error: failure });
+            }
+            break;
+        }
+        case 'auth-status':
+            event.source?.postMessage({ type: 'auth_status', url: message.url, status: authStatus(await authStore.getTokens(message.url)) });
+            break;
+        case 'auth-signout': {
+            const url = message.url;
+            const tokens = await authStore.getTokens(url);
+            await authStore.deleteTokens(url);
+            if (message.forgetClient && tokens) {
+                await authStore.deleteClient(tokens.issuer, REDIRECT_URI);
+            }
+            wasmInstance?.forget_server(url);
+            logger.info(message.forgetClient && tokens ? `Signed out, and forgot this client's registration with ${tokens.issuer}` : 'Signed out', { server: url });
+            broadcastToClients({ type: 'auth_status', url, status: authStatus(null) });
+            break;
+        }
         case 'unload_wasm':
             unloadWasm();
             break;
@@ -282,8 +426,7 @@ async function handleClientMessage(event) {
             }
             const started = performance.now();
             try {
-                const options = mcpOptions(url, message, { refresh: !!message.refresh });
-                const listing = JSON.parse(await wasmInstance.list_tools(url, options));
+                const listing = JSON.parse(await withAuth(url, message, { refresh: !!message.refresh }, options => wasmInstance.list_tools(url, options)));
                 if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
                 mcpServersIndex[url].tools = listing.tools;
                 broadcastToClients({
@@ -666,11 +809,8 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     try {
         // Only calls the page asked for directly may bring a token; calls started from chat or
         // from tool output use the one the page registered for the server.
-        result = await wasmInstance.call_tool(
-            server,
-            tool,
-            JSON.stringify(toolArgs),
-            mcpOptions(server, source === 'console' ? message : {})
+        result = await withAuth(server, source === 'console' ? message : {}, {}, options =>
+            wasmInstance.call_tool(server, tool, JSON.stringify(toolArgs), options)
         );
     } catch (err) {
         const error = mcpError(err);
