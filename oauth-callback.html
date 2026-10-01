@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>Signing in - MCP Browser Client</title>
+    <script>
+        (function () {
+            var stored = localStorage.getItem('theme');
+            var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.classList.toggle('dark-theme', dark);
+        })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="stylesheet" href="./tokens.css">
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="callback-page">
+    <main class="callback-panel panel">
+        <h1 id="callbackTitle">Finishing sign-in…</h1>
+        <p id="callbackDetail" class="text-secondary"></p>
+        <div id="callbackCopy" class="callback-copy" hidden>
+            <input type="text" id="callbackAddress" readonly aria-label="This page's address">
+            <button type="button" id="copyCallbackBtn" class="btn-primary btn-sm"><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy address</span></button>
+        </div>
+        <a id="backToClient" class="callback-back" href="./" hidden>Back to the client</a>
+    </main>
+    <script>
+        // The authorization server sends the browser here with ?code, state and iss (or an error).
+        // The worker checks them against the sign-in it started and trades the code for tokens.
+        (async () => {
+            // The address as it arrived. It comes out of the address bar and history right away,
+            // but after signing in from another browser it has to be copied to where you started.
+            const received = location.href;
+            const query = location.search;
+            history.replaceState(null, '', location.pathname);
+            // Set by "Continue in this tab", which should come back to the client afterwards.
+            let returnTo = null;
+            try { returnTo = JSON.parse(sessionStorage.getItem('mcpSignInReturn')); } catch { /* not ours */ }
+            sessionStorage.removeItem('mcpSignInReturn');
+            if (returnTo?.state !== new URLSearchParams(query).get('state')) returnTo = null;
+
+            const title = document.getElementById('callbackTitle');
+            const detail = document.getElementById('callbackDetail');
+            const show = (heading, text) => {
+                title.textContent = heading;
+                detail.textContent = text;
+            };
+            const back = () => { document.getElementById('backToClient').hidden = false; };
+            const offerCopy = () => {
+                const input = document.getElementById('callbackAddress');
+                const button = document.getElementById('copyCallbackBtn');
+                input.value = received;
+                document.getElementById('callbackCopy').hidden = false;
+                button.addEventListener('click', async () => {
+                    try {
+                        await navigator.clipboard.writeText(received);
+                        button.querySelector('.btn-label').textContent = 'Copied';
+                    } catch {
+                        input.focus();
+                        input.select();
+                    }
+                });
+            };
+            const whereYouStarted = "copy this page's address and paste it into the client where you started, under Signing in from another browser? in the server details.";
+
+            // A browser that never ran the client here has no record of the sign-in.
+            const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
+            if (!registration) {
+                show('Finish signing in where you started', `This browser isn't the one you started signing in from. To finish, ${whereYouStarted}`);
+                offerCopy();
+                return;
+            }
+            const worker = navigator.serviceWorker.controller || registration.active || (await navigator.serviceWorker.ready).active;
+            const reply = new Promise(resolve => {
+                navigator.serviceWorker.addEventListener('message', event => {
+                    if (event.data?.type === 'auth_callback_done') resolve(event.data);
+                });
+                setTimeout(() => resolve({ ok: false, error: { message: "The client didn't answer. Close this window and sign in again." } }), 30_000);
+            });
+            worker.postMessage({ type: 'auth-callback', query });
+            const result = await reply;
+            if (result.ok && returnTo) {
+                show('Signed in', 'Taking you back to the client…');
+                location.replace(`./?server=${encodeURIComponent(result.url || returnTo.url)}`);
+            } else if (result.ok && window.opener) {
+                show('Signed in', 'You can close this window.');
+                setTimeout(() => window.close(), 600);
+            } else if (result.ok) {
+                show('Signed in', 'You can close this tab; the client connects on its own.');
+                back();
+            } else if (result.unknownState) {
+                show('Sign-in failed', `${result.error.message} If you started signing in in another browser, ${whereYouStarted}`);
+                offerCopy();
+                back();
+            } else {
+                show('Sign-in failed', result.error?.message || 'Something went wrong.');
+                back();
+            }
+        })();
+    </script>
+</body>
+</html>
