@@ -17,6 +17,8 @@ import * as authStore from './authStore.js';
 import { WASM_SHA256 } from './build.js';
 import { handleOp, initDB, openDB } from './chatStorage.js';
 import { formatDuration, logger, setLogSink } from './logger.js';
+import { canonicalJson, compareKeyFor, comparedValue, sha256, stored } from './workbench/runs.js';
+import { addRun, latestRun } from './workbench/store.js';
 import {
     checkWasm,
     ensureWasm,
@@ -455,6 +457,8 @@ async function handleClientMessage(event) {
                 const errorMsg = {
                     type: 'tool_result',
                     error: 'WASM module not loaded',
+                    // Not a call, so not in history, but the page waits on this run id.
+                    run: message.run?.id ? { id: message.run.id, outcome: 'failed', changed: null } : null,
                     engramId: message.engramId || null,
                     requestId: message.requestId || null,
                     source: 'console'
@@ -804,7 +808,9 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     const server = tapConfig.serverUrl;
     const tool = tapConfig.toolName;
     logger.debug(`Calling ${tool}`, { server, detail: { from: CALL_ORIGINS[source] || source, arguments: Object.keys(toolArgs) } });
+    const startedAt = Date.now();
     const started = performance.now();
+    const call = { source, message, serverUrl: server, toolName: tool, toolArgs, startedAt };
     let result;
     try {
         // Only calls the page asked for directly may bring a token; calls started from chat or
@@ -815,10 +821,12 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     } catch (err) {
         const error = mcpError(err);
         logger.error(`${tool} failed after ${formatDuration(performance.now() - started)}: ${error.message}`, { server, detail: errorDetail(error) });
+        const run = await recordRun(call, { outcome: 'failed', error, durationMs: performance.now() - started });
         const errorMsg = {
             type: 'tool_result',
             error: error.message,
             errorKind: error.kind,
+            run,
             source,
             engramId: message.engramId || null,
             requestId: message.requestId || null
@@ -839,7 +847,8 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
         parsedResult = { text: '[Tool returned invalid JSON]' };
     }
     let toolText = extractToolResponseText(parsedResult);
-    const took = formatDuration(performance.now() - started);
+    const durationMs = performance.now() - started;
+    const took = formatDuration(durationMs);
     if (parsedResult?.resultType === 'input_required') {
         logger.warn(`${tool} asked for more input after ${took} (input_required), which this client can't provide yet`, { server });
     } else if (parsedResult?.isError) {
@@ -865,10 +874,12 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
         }
         await persistEngramMessage(toolMsg);
     }
+    const run = await recordRun(call, { outcome: parsedResult?.isError ? 'tool_error' : 'ok', result: parsedResult, durationMs });
     // Route tool_result strictly
     const resultMsg = {
         type: 'tool_result',
         result: parsedResult,
+        run,
         source,
         engramId: message.engramId || null,
         requestId: message.requestId || null
@@ -888,6 +899,53 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
             await maybeCallExtractedTool(call, message.engramId || null);
         }
     }
+}
+
+// --- Run history: every tool call becomes a run, whichever part of the client made it ---
+
+// handleToolCall's sources, as the Workbench names them.
+const RUN_SOURCES = { console: 'workbench', tap: 'chat', extracted: 'reply' };
+
+// Saves the call and compares its result with the last run of the same request. Pages asking for
+// a call send `run` details: the arguments as written (with {{variables}}), the saved request it
+// came from and the environment. History failing must never fail the call, so errors only log.
+async function recordRun(call, { outcome, result = null, error = null, durationMs }) {
+    const details = call.message?.run || {};
+    const record = {
+        id: details.id || crypto.randomUUID(),
+        startedAt: call.startedAt,
+        durationMs: Math.round(durationMs),
+        source: call.source === 'console' && details.collectionRunId ? 'collection' : RUN_SOURCES[call.source] || call.source,
+        serverUrl: call.serverUrl,
+        toolName: call.toolName,
+        requestId: details.requestId || null,
+        collectionRunId: details.collectionRunId || null,
+        environmentName: details.environmentName || null,
+        outcome,
+        error: error?.message || null,
+        errorKind: error?.kind || null,
+        ...stored('args', details.args ?? call.toolArgs),
+        ...stored('sentArgs', call.toolArgs),
+        ...stored('result', result),
+    };
+    record.truncated = !!(record.argsText || record.sentArgsText || record.resultText);
+    const summary = { id: record.id, startedAt: record.startedAt, durationMs: record.durationMs, outcome, changed: null, previousRunId: null };
+    try {
+        record.resultHash = await sha256(canonicalJson(comparedValue({ outcome, result, error: record.error, errorKind: record.errorKind })));
+        record.compareKey = await compareKeyFor({ requestId: record.requestId, serverUrl: call.serverUrl, toolName: call.toolName, sentArgs: call.toolArgs });
+        const previous = await latestRun(record.compareKey);
+        record.previousRunId = previous?.id || null;
+        record.changed = previous ? previous.resultHash !== record.resultHash : null;
+        await addRun(record);
+        Object.assign(summary, { changed: record.changed, previousRunId: record.previousRunId });
+        broadcastToClients({
+            type: 'run_recorded',
+            run: { ...summary, source: record.source, serverUrl: record.serverUrl, toolName: record.toolName, requestId: record.requestId, errorKind: record.errorKind }
+        });
+    } catch (failure) {
+        logger.warn(`Couldn't save the call to ${call.toolName} in the run history: ${failure.message}`, { server: call.serverUrl });
+    }
+    return summary;
 }
 
 // --- Tool/Server Lookup Helper ---

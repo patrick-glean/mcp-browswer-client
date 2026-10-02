@@ -15,50 +15,55 @@
     <link rel="preload" href="./fonts/Inter/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="./tokens.css">
     <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./workbench/workbench.css">
 </head>
 <body>
-    <div class="container">
-        <header class="app-header">
+    <div class="wb-app">
+        <header class="wb-topbar">
             <div class="app-title">
                 <span class="app-mark"><span class="icon icon-zap" aria-hidden="true"></span></span>
                 <h1>MCP Browser Client</h1>
             </div>
-            <div class="app-header-actions">
-                <button type="button" class="status-bar" id="statusBar" title="Runtime controls">
-                    <span class="status-item">
-                        <span class="status-indicator" id="sw-status">●</span>
-                        <span class="status-label">Service worker</span>
-                        <span class="status-uptime" id="sw-uptime">0s</span>
-                    </span>
-                    <span class="status-item">
-                        <span class="status-indicator" id="wasm-status">●</span>
-                        <span class="status-label">WASM</span>
-                        <span class="status-uptime" id="wasm-uptime">0s</span>
-                    </span>
-                </button>
-                <button type="button" id="guideBtn" class="btn-tertiary" title="How to try this client" aria-controls="guide">
-                    <span class="icon icon-help" aria-hidden="true"></span>Guide
-                </button>
-                <button type="button" id="themeToggle" class="btn-icon btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
-                    <span class="icon icon-theme" aria-hidden="true"></span>
-                </button>
+            <nav class="wb-modes" aria-label="Workbench or apps">
+                <button type="button" class="wb-mode" data-mode="workbench" aria-pressed="true">Workbench</button>
+                <button type="button" class="wb-mode" data-mode="apps" aria-pressed="false">Apps</button>
+            </nav>
+            <span class="wb-spacer"></span>
+            <div class="env-picker wb-workbench-only">
+                <label for="envSelect">Environment</label>
+                <select id="envSelect"></select>
+                <button type="button" id="editEnvBtn" class="btn-sm" aria-expanded="false" aria-haspopup="dialog">Variables</button>
             </div>
+            <button type="button" id="gotoBtn" class="wb-goto" title="Go to a server, tool or saved request" aria-keyshortcuts="Meta+K Control+K">
+                <span class="icon icon-search" aria-hidden="true"></span><span class="wb-goto-label">Go to…</span><kbd>⌘K</kbd>
+            </button>
+            <button type="button" class="status-bar" id="statusBar" title="Runtime controls" aria-controls="controlsPopdown">
+                <span class="status-indicator" id="sw-status" title="Service worker">●</span>
+                <span class="status-indicator" id="wasm-status" title="WASM module">●</span>
+                <span class="status-label">Runtime</span>
+            </button>
+            <button type="button" id="guideBtn" class="btn-tertiary btn-sm" title="How to try this client" aria-controls="guide">
+                <span class="icon icon-help" aria-hidden="true"></span>Guide
+            </button>
+            <button type="button" id="themeToggle" class="btn-icon btn-sm btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
+                <span class="icon icon-theme" aria-hidden="true"></span>
+            </button>
             <div id="controlsPopdown" class="controls-popdown" style="display:none;">
                 <div class="popdown-header">
-                    <h2>Runtime controls</h2>
+                    <h2>Runtime</h2>
                     <button type="button" id="closeControlsPopdown" class="btn-icon btn-tertiary" aria-label="Close">
                         <span class="icon icon-x" aria-hidden="true"></span>
                     </button>
                 </div>
                 <div class="control-group sw-controls">
-                    <h3>Service worker</h3>
+                    <h3>Service worker <span class="status-uptime" id="sw-uptime">0s</span></h3>
                     <div class="button-row">
                         <button id="start-sw" class="start"><span class="icon icon-play" aria-hidden="true"></span>Start</button>
                         <button id="stop-sw" class="btn-outline btn-danger"><span class="icon icon-power" aria-hidden="true"></span>Stop</button>
                     </div>
                 </div>
                 <div class="control-group wasm-controls">
-                    <h3>WASM module</h3>
+                    <h3>WASM module <span class="status-uptime" id="wasm-uptime">0s</span></h3>
                     <div class="button-row">
                         <button id="check-wasm">Check</button>
                         <button id="reload-wasm" class="reload"><span class="icon icon-refresh" aria-hidden="true"></span>Reload</button>
@@ -76,184 +81,97 @@
                 </div>
             </div>
         </header>
-        <div class="main-content-tabs">
-            <div class="tab-bar">
-                <button id="consoleTabBtn" class="tab-btn active">Console</button>
-                <button id="mcpTabBtn" class="tab-btn">MCP</button>
-                <button id="memoryTabBtn" class="tab-btn">Memory</button>
-                <button id="logsTabBtn" class="tab-btn">Logs<span id="logsBadge" class="tab-badge" hidden></span></button>
-                <button id="popoutLogsBtn" class="tab-btn tab-btn-icon" title="Pop out logs" aria-label="Pop out logs">
+        <main class="wb-main">
+            <!-- Layout B. Each component is one element in a named grid area (workbench.css), so a
+                 different arrangement is different grid areas, not different components. -->
+            <div id="workbench" class="wb-workbench" data-layout="b">
+                <wb-rail class="wb-area-rail" role="navigation" aria-label="Servers, saved requests and history"></wb-rail>
+                <wb-server-bar class="wb-area-bar" role="region" aria-label="Selected server"></wb-server-bar>
+                <wb-tools class="wb-area-tools" role="region" aria-label="Tools"></wb-tools>
+                <wb-request id="requestPane" class="wb-area-request wb-pane" role="region" aria-label="Request"></wb-request>
+                <wb-response id="responsePane" class="wb-area-response wb-pane" role="region" aria-label="Response"></wb-response>
+            </div>
+            <section id="appsPage" class="wb-apps" aria-labelledby="appsTitle" hidden>
+                <header class="wb-apps-head">
+                    <h2 id="appsTitle">Chat</h2>
+                    <p class="text-secondary">The first app: a conversation that goes through an MCP tool. Choose the tool under Model and tick the field your message goes to; the tool's reply joins the conversation.</p>
+                </header>
+                <div class="chat-card">
+                    <section class="chat-card-left panel" aria-label="Conversation">
+                        <div id="chatMessages" class="chat-messages"></div>
+                        <div class="chat-input-row">
+                            <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
+                            <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
+                        </div>
+                        <div id="chatEngramIdDisplay" class="chat-engram"></div>
+                    </section>
+                    <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
+                        <div class="cbus-tap-card">
+                            <div class="panel-title">Model</div>
+                            <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
+                            <div class="chat-server-select-row">
+                                <label for="chatServerSelect">Server</label>
+                                <select id="chatServerSelect"></select>
+                            </div>
+                            <div class="chat-tool-select-row">
+                                <label for="chatToolSelect">Tool</label>
+                                <select id="chatToolSelect"></select>
+                            </div>
+                            <form id="chatToolConfigForm" class="chat-tool-config"></form>
+                        </div>
+                        <div class="chat-context">
+                            <div class="panel-header">
+                                <div class="panel-title">Instructions and context</div>
+                                <button id="addImprintBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
+                                    <span class="icon icon-plus" aria-hidden="true"></span>
+                                </button>
+                            </div>
+                            <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
+                            <div id="imprintsList" class="imprints-list"></div>
+                            <div id="imprintEditor" class="imprint-editor"></div>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+        </main>
+        <wb-dock id="dock" class="wb-area-dock" role="region" aria-label="Log, trace and runs" data-open="true">
+            <div class="wb-dock-grip" title="Drag to resize" aria-hidden="true"></div>
+            <div class="wb-dock-head">
+                <div class="wb-tabs" role="tablist" aria-label="Dock">
+                    <button type="button" role="tab" class="wb-tab" data-dock-tab="log" aria-selected="true" title="Every connect, tool listing and tool call with its timing, from this page, the service worker and the WASM client. Bearer tokens are never logged.">Log<span id="logsBadge" class="tab-badge" hidden></span></button>
+                    <button type="button" role="tab" class="wb-tab" data-dock-tab="trace" aria-selected="false">Trace</button>
+                    <button type="button" role="tab" class="wb-tab" data-dock-tab="runs" aria-selected="false">Runs</button>
+                </div>
+                <div class="log-toolbar" data-dock-tools="log">
+                    <select id="logLevel" aria-label="Which entries to show">
+                        <option value="error">Errors</option>
+                        <option value="warn">Warnings and errors</option>
+                        <option value="info">Info</option>
+                        <option value="debug">Everything</option>
+                    </select>
+                    <input type="search" id="logSearch" placeholder="Filter by text or server" aria-label="Filter log entries">
+                    <span class="log-count" id="logCount"></span>
+                    <button type="button" id="copyLogsBtn" class="btn-sm btn-tertiary" title="Copy the entries shown"><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy</span></button>
+                    <button type="button" id="downloadLogsBtn" class="btn-sm btn-tertiary" title="Download every entry as JSON Lines"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
+                    <button type="button" id="clearLogsBtn" class="btn-sm btn-tertiary">Clear</button>
+                </div>
+                <span class="wb-spacer"></span>
+                <button type="button" id="popoutLogsBtn" class="btn-icon btn-sm btn-tertiary" title="Open the log in its own window" aria-label="Open the log in its own window">
                     <span class="icon icon-external-link" aria-hidden="true"></span>
                 </button>
+                <button type="button" id="dockToggle" class="btn-sm btn-tertiary" aria-expanded="true" aria-controls="dockBody">Collapse</button>
             </div>
-            <div id="consoleTab" class="tab-content active">
-                <div class="console-section">
-                    <div class="chat-card">
-                        <section class="chat-card-left panel">
-                            <div id="chatMessages" class="chat-messages"></div>
-                            <div class="chat-input-row">
-                                <input type="text" id="chatUserInput" placeholder="Type your message..." autocomplete="off" />
-                                <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
-                            </div>
-                            <div id="chatEngramIdDisplay" class="chat-engram"></div>
-                        </section>
-                        <aside class="chat-card-right panel panel-muted">
-                            <div class="cbus-tap-card">
-                                <div class="panel-title">LLM target</div>
-                                <p class="panel-subtitle">Pick a tool, then tick Target for message on the field that should receive what you type. Its reply joins the conversation.</p>
-                                <div class="chat-server-select-row">
-                                    <label for="chatServerSelect">Server</label>
-                                    <select id="chatServerSelect"></select>
-                                </div>
-                                <div class="chat-tool-select-row">
-                                    <label for="chatToolSelect">Tool</label>
-                                    <select id="chatToolSelect"></select>
-                                </div>
-                                <form id="chatToolConfigForm" class="chat-tool-config"></form>
-                            </div>
-                        </aside>
-                    </div>
+            <div class="wb-dock-body" id="dockBody">
+                <div class="wb-dock-panel" data-dock-panel="log">
+                    <div class="log-container" id="log-container" role="log" aria-label="Log entries"></div>
                 </div>
             </div>
-            <div id="mcpTab" class="tab-content" style="display:none;">
-                <div class="controls-section">
-                    <div class="control-group">
-                        <div class="section-header">
-                            <div>
-                                <h2>MCP servers</h2>
-                                <p class="section-subtitle">Adding a server connects to it and lists its tools. Servers on MCP 2026-07-28 and older revisions both work. <button type="button" class="link-button" data-open-guide>Need a server to try?</button></p>
-                            </div>
-                            <div class="mcp-controls-bar">
-                                <button id="initProtocol" class="btn-primary">Connect</button>
-                                <button id="listTools"><span class="icon icon-refresh" aria-hidden="true"></span>Refresh tools</button>
-                            </div>
-                        </div>
-                        <div class="mcp-servers-group">
-                            <div class="mcp-controls-header">
-                                <div class="add-server-controls">
-                                    <input type="text" id="serverUrl" placeholder="Server URL, e.g. http://127.0.0.1:8081 or https://huggingface.co/mcp">
-                                    <input type="text" id="serverAlias" placeholder="Alias (optional)">
-                                    <button id="addServerBtn" class="btn-primary"><span class="icon icon-plus" aria-hidden="true"></span>Add server</button>
-                                </div>
-                            </div>
-                            <div class="mcp-servers-section">
-                                <div class="servers-list-panel panel">
-                                    <div class="panel-title">Servers</div>
-                                    <div id="serversList"></div>
-                                </div>
-                                <div class="server-card-panel">
-                                    <div id="serverCard" class="server-card panel" style="display: none;">
-                                        <div class="panel-title">Server details</div>
-                                        <div class="server-card-fields autosave-group">
-                                            <label class="field"><span class="field-label">URL</span><span class="autosave-input-wrap"><input type="text" id="cardServerUrl"><span class="autosave-checkmark" id="checkmark-cardServerUrl"></span></span></label>
-                                            <label class="field"><span class="field-label">Alias</span><span class="autosave-input-wrap"><input type="text" id="cardServerAlias"><span class="autosave-checkmark" id="checkmark-cardServerAlias"></span></span></label>
-                                            <label class="field"><span class="field-label">Name</span><input type="text" id="cardServerName" disabled></label>
-                                            <label class="field"><span class="field-label">Status</span><input type="text" id="cardServerStatus" disabled></label>
-                                            <label class="field"><span class="field-label">Protocol</span><input type="text" id="cardServerProtocol" disabled></label>
-                                            <label class="field"><span class="field-label">Date added</span><input type="text" id="cardServerDateAdded" disabled></label>
-                                            <label class="field"><span class="field-label">Date modified</span><input type="text" id="cardServerDateModified" disabled></label>
-                                            <details class="static-token" id="cardStaticToken">
-                                                <summary>Use a static token instead of signing in</summary>
-                                                <label class="field"><span class="field-label">Bearer token</span><span class="autosave-input-wrap"><input type="password" id="cardServerToken" autocomplete="off" placeholder="Sent as Authorization: Bearer"><span class="autosave-checkmark" id="checkmark-cardServerToken"></span></span></label>
-                                            </details>
-                                        </div>
-                                        <div class="auth-block" id="cardAuth" hidden>
-                                            <div class="auth-text">
-                                                <span class="field-label">Sign-in</span>
-                                                <span id="cardAuthStatus" class="text-secondary"></span>
-                                            </div>
-                                            <div class="button-row">
-                                                <button type="button" id="signInBtn" class="btn-primary btn-sm">Sign in</button>
-                                                <button type="button" id="continueHereBtn" class="btn-sm" hidden>Continue in this tab</button>
-                                                <button type="button" id="copyAuthLinkBtn" class="btn-sm" hidden><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy link</span></button>
-                                                <button type="button" id="cancelSignInBtn" class="btn-outline btn-sm" hidden>Cancel</button>
-                                                <button type="button" id="signOutBtn" class="btn-outline btn-sm" hidden title="Shift-click to also forget this client's registration">Sign out</button>
-                                            </div>
-                                            <div class="auth-elsewhere" id="cardAuthElsewhere" hidden>
-                                                <input type="text" id="authLink" class="auth-link" readonly aria-label="Sign-in link" hidden>
-                                                <p id="authLinkHint" class="text-secondary" hidden>Press ⌘C or Ctrl+C to copy the link, then open it in another tab.</p>
-                                                <details class="auth-paste">
-                                                    <summary>Signing in from another browser?</summary>
-                                                    <p class="text-secondary">Open the link there and sign in. You'll land on a page that says it isn't where you started; copy its address and paste it here.</p>
-                                                    <div class="auth-paste-row">
-                                                        <input type="text" id="authCallbackUrl" spellcheck="false" autocomplete="off" aria-label="The address sign-in sent you to">
-                                                        <button type="button" id="finishSignInBtn" class="btn-primary btn-sm">Finish signing in</button>
-                                                    </div>
-                                                    <p id="authPasteError" class="text-error" hidden></p>
-                                                </details>
-                                            </div>
-                                        </div>
-                                        <p id="cardServerError" class="server-error text-error" hidden></p>
-                                        <div class="connection-info" id="cardConnection" hidden></div>
-                                        <div class="panel-actions">
-                                            <!--<button id="saveServerBtn">Save</button>-->
-                                            <button id="deleteServerBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete server</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="tools-display panel">
-                                    <div class="panel-header">
-                                        <div class="panel-title">Available tools <span id="toolCount" class="text-secondary"></span></div>
-                                        <button type="button" id="downloadToolsBtn" class="btn-sm btn-tertiary" title="Download the server's details and tool list as JSON" hidden><span class="icon icon-download" aria-hidden="true"></span>Download</button>
-                                    </div>
-                                    <input type="search" id="toolFilter" class="tool-filter" placeholder="Filter by name, title or description" aria-label="Filter tools" hidden>
-                                    <div id="toolsList"></div>
-                                    <details id="hiddenTools" class="hidden-tools" hidden><summary></summary><ul></ul></details>
-                                </div>
-                            </div>
-                            <div class="tool-cards-row">
-                                <div id="toolCard" class="tool-card panel"></div>
-                                <div id="toolResultCard" class="tool-result-card panel"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div id="memoryTab" class="tab-content" style="display:none;">
-                <div class="memory-section three-panel-memory">
-                    <div class="memory-panel memory-panel-middle panel">
-                        <div class="panel-header">
-                            <div class="panel-title">Imprints</div>
-                            <button id="addImprintBtn" class="btn-icon btn-sm" title="Add imprint" aria-label="Add imprint">
-                                <span class="icon icon-plus" aria-hidden="true"></span>
-                            </button>
-                        </div>
-                        <div id="imprintsList" class="imprints-list"></div>
-                    </div>
-                    <div class="memory-panel memory-panel-right panel">
-                        <div class="panel-title">Imprint editor</div>
-                        <div id="imprintEditor" class="imprint-editor"></div>
-                    </div>
-                </div>
-            </div>
-            <div id="logsTab" class="tab-content" style="display:none;">
-                <div class="log-section">
-                    <div class="control-group">
-                        <div class="log-header">
-                            <div>
-                                <h2>Logs</h2>
-                                <p class="section-subtitle">Every connect, tool listing and tool call with its timing, from this page, the service worker and the WASM client. Choose Everything to add each HTTP request and response. Bearer tokens are never logged.</p>
-                            </div>
-                            <div class="log-toolbar">
-                                <select id="logLevel" aria-label="Which entries to show">
-                                    <option value="error">Errors</option>
-                                    <option value="warn">Warnings and errors</option>
-                                    <option value="info">Info</option>
-                                    <option value="debug">Everything</option>
-                                </select>
-                                <input type="search" id="logSearch" placeholder="Filter by text or server" aria-label="Filter log entries">
-                                <button type="button" id="copyLogsBtn" title="Copy the entries shown"><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy</span></button>
-                                <button type="button" id="downloadLogsBtn" title="Download every entry as JSON Lines"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
-                                <button type="button" id="clearLogsBtn" class="btn-outline">Clear</button>
-                            </div>
-                        </div>
-                        <div class="log-container" id="log-container" role="log"></div>
-                        <p class="log-count" id="logCount"></p>
-                    </div>
-                </div>
-            </div>
-        </div>
+        </wb-dock>
     </div>
+
+    <wb-sheet id="sheet" hidden></wb-sheet>
+    <wb-palette id="palette" hidden></wb-palette>
+    <p id="wbStatus" class="wb-status" role="status" hidden></p>
 
     <aside id="guide" class="guide-drawer" aria-labelledby="guideTitle" hidden>
         <div class="guide-header">
@@ -262,7 +180,7 @@
                 <span class="icon icon-x" aria-hidden="true"></span>
             </button>
         </div>
-        <p class="guide-intro">This page is the whole MCP client: Rust compiled to WebAssembly, running in a service worker. Pick a server, then follow the steps. The guide stays open while you work.</p>
+        <p class="guide-intro">This page is the whole MCP client: Rust compiled to WebAssembly, running in a service worker. Pick a server, then follow the steps. The guide stays open while you work. You can also add a server with + beside Servers: paste its URL, or your work email to find your company's Glean.</p>
 
         <section class="guide-section">
             <h3>1. Pick a server</h3>
@@ -327,23 +245,24 @@
 
         <section class="guide-section">
             <h3>2. Check the connection</h3>
-            <p>The server details show its status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake.</p>
-            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code> and <code>count</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the Logs tab says why.</p>
+            <p>The bar above the tools shows the server's status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake. Info has everything the server said about itself.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code> and <code>ticket</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
         </section>
 
         <section class="guide-section">
-            <h3>3. Call a tool</h3>
-            <p>Click a tool under Available tools, fill in its fields and choose Call tool. The reply appears beside it, and Raw JSON shows the whole result. Optional fields left empty aren't sent.</p>
+            <h3>3. Run a tool</h3>
+            <p>Click a tool, fill in its fields and choose Run (or press ⌘↵ or Ctrl+Enter). The result appears beside it; JSON has the whole reply. Optional fields left empty aren't sent.</p>
+            <p>Pre-fill fills the fields from what you last sent, a saved request or the tool's schema, and fields take <code>{{variables}}</code> from the environment in the top bar. Save keeps a request; run it again from Saved on the left to see what changed.</p>
         </section>
 
         <section class="guide-section">
             <h3>4. Chat through a tool</h3>
-            <p>On the Console tab, choose a server and tool under LLM target and tick Target for message on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
+            <p>Open Apps in the top bar. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
         </section>
 
         <section class="guide-section">
-            <h3>5. Read the logs</h3>
-            <p>The Logs tab lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Choose Everything to see every HTTP request and response. Copy or Download them to share a problem.</p>
+            <h3>5. Read the log</h3>
+            <p>The dock at the bottom lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Trace has every HTTP request and response, and Runs every call. Copy or Download the log to share a problem.</p>
         </section>
 
         <section class="guide-section">
@@ -354,9 +273,9 @@
                 <dt>HTTP 404 or 405</dt>
                 <dd>The URL isn't the MCP endpoint, which often ends in <code>/mcp</code>.</dd>
                 <dt>HTTP 401</dt>
-                <dd>The server wants a token. Paste it into Bearer token in the server details, then choose Connect.</dd>
+                <dd>The server wants you to sign in, or a token. Choose Sign in in the bar above the tools, or paste a token under Info, then choose Connect.</dd>
                 <dt>Old behavior after a rebuild</dt>
-                <dd>Reload the page; the Logs tab should show "Loaded the WASM module" with the new build time. If it doesn't, open the runtime controls from the status pill and reload the WASM module.</dd>
+                <dd>Reload the page; the log should show "Loaded the WASM module" with the new build time. If it doesn't, open Runtime in the top bar and reload the WASM module.</dd>
             </dl>
         </section>
     </aside>
@@ -366,7 +285,7 @@
         // window would restart it and drop every open tab's connections.
         const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
 
-        // The Logs tab: entries from this page, the service worker and the WASM client, kept in
+        // The dock's Log: entries from this page, the service worker and the WASM client, kept in
         // a capped buffer and filtered by level and text.
         class LogPanel {
             static LEVELS = ['debug', 'info', 'warn', 'error'];
@@ -379,6 +298,7 @@
                 this.countLabel = document.getElementById('logCount');
                 this.badge = document.getElementById('logsBadge');
                 this.entries = [];
+                this.listeners = new Set();
                 this.nodes = new WeakMap();
                 this.searchText = new WeakMap();
                 this.unseenErrors = 0;
@@ -437,7 +357,14 @@
                     if (stick) this.scrollToBottom();
                 }
                 this.updateCount();
+                this.listeners.forEach(listener => listener(entry));
                 return entry;
+            }
+
+            // Calls `listener` with every entry added from now on, until `signal` aborts.
+            onAdd(listener, signal) {
+                this.listeners.add(listener);
+                signal?.addEventListener('abort', () => this.listeners.delete(listener));
             }
 
             matches(entry) {
@@ -597,8 +524,19 @@
             label._flashTimer = setTimeout(() => { label.textContent = label.dataset.label; }, 1500);
         }
 
+        // The client's controller: the service worker and WASM runtime, the server list, sign-in
+        // and tool calls. It draws nothing itself; the Workbench's components (public/workbench/)
+        // listen for these events and call its methods:
+        //   servers  a server was added, changed or deleted      { url }
+        //   select   the selected server changed                 { url }
+        //   tools    a server's tool list arrived                { url }
+        //   auth     sign-in started, moved on or ended          { url, pasteError }
+        //   run      a call the Workbench shows is under way, done, or never sent
+        //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
+        //   recorded the worker saved a run in history           (the run's summary)
         class ChatShell {
             constructor() {
+                this.events = new EventTarget();
                 this.logPanel = new LogPanel();
                 this.swStatus = document.getElementById('sw-status');
                 this.wasmStatus = document.getElementById('wasm-status');
@@ -614,7 +552,12 @@
                 this.isInitialized = false;
                 this.servers = this.loadServers();
                 this.pendingConnects = new Map();
-                this.pendingCall = null;
+                // Tool calls waiting for the worker's answer, by run id: { resolve, timer, show }.
+                this.pendingRuns = new Map();
+                // The run the response pane shows or waits for.
+                this.shownRunId = null;
+                // The Workbench (public/workbench/) once it has loaded; it fills in {{variables}}.
+                this.workbench = null;
                 // Sign-in status per server URL, as the worker reports it (never the tokens).
                 this.authStatus = {};
                 // The sign-in in progress: { url, popup }.
@@ -635,19 +578,17 @@
                 this.setupEventListeners();
                 this.startUptimeCounter();
 
-                // Initialize MCP Server URL from localStorage
-                const serverUrl = localStorage.getItem('mcpServerUrl') || 'http://localhost:8081';
-                const serverUrlInput = document.getElementById('mcpServerUrl');
-                if (serverUrlInput) {
-                    serverUrlInput.value = serverUrl;
-                }
-                // Select the server in the list if it exists
-                if (serverUrl && this.servers[serverUrl]) {
-                    this.selectedServerUrl = serverUrl;
-                    this.updateToolsList(this.servers[serverUrl].tools || []);
-                }
+                // The server the Workbench showed last time, if it's still in the list.
+                const lastServer = localStorage.getItem('mcpServerUrl');
+                if (lastServer && this.servers[lastServer]) this.selectedServerUrl = lastServer;
+            }
 
-                this.updateServersList();
+            on(type, listener, signal) {
+                this.events.addEventListener(type, event => listener(event.detail), { signal });
+            }
+
+            emit(type, detail = {}) {
+                this.events.dispatchEvent(new CustomEvent(type, { detail }));
             }
 
             startUptimeCounter() {
@@ -768,18 +709,7 @@
                     'unload-wasm': () => this.unloadWasm(),
                     'reload-wasm': () => this.reloadWasm(),
                     'stop-sw': () => this.stopServiceWorker(),
-                    'start-sw': () => this.startServiceWorker(),
-                    'listTools': async () => {
-                        const url = this.selectedServerUrl;
-                        if (!url) {
-                            this.log({ level: 'ERROR', message: 'No server selected', timestamp: new Date().toISOString() });
-                            return;
-                        }
-                        this.requestTools(url, { refresh: true });
-                    },
-                    'addServerBtn': () => this.handleAddServer(),
-                    'saveServerBtn': () => this.handleSaveServer(),
-                    'deleteServerBtn': () => this.handleDeleteServer()
+                    'start-sw': () => this.startServiceWorker()
                 };
 
                 Object.entries(buttons).forEach(([id, handler]) => {
@@ -800,18 +730,6 @@
                         });
                     }
                 });
-
-                document.getElementById('toolFilter').addEventListener('input', () => this.filterTools());
-                document.getElementById('downloadToolsBtn').addEventListener('click', () => this.exportToolList());
-
-                // Sign-in opens its window straight from the click, so pop-up blockers allow it.
-                document.getElementById('signInBtn').addEventListener('click', () => this.signIn(this.selectedServerUrl));
-                document.getElementById('cancelSignInBtn').addEventListener('click', () => this.cancelSignIn());
-                document.getElementById('signOutBtn').addEventListener('click', event => this.signOut(this.selectedServerUrl, { forgetClient: event.shiftKey }));
-                document.getElementById('continueHereBtn').addEventListener('click', () => this.continueSignInHere());
-                document.getElementById('copyAuthLinkBtn').addEventListener('click', () => this.copySignInLink());
-                document.getElementById('finishSignInBtn').addEventListener('click', () => this.finishSignInFromPaste());
-                document.getElementById('authCallbackUrl').placeholder = `${new URL('oauth-callback.html', location.href).href}?code=…`;
             }
 
             // The sign-in window has to open during a click, or pop-up blockers stop it. It shows
@@ -827,8 +745,8 @@
             }
 
             // Asks the worker to start signing in; it answers with auth_redirect or auth_error.
-            // Without a pop-up (blocked, or a browser that has none) the card offers other ways to
-            // open the sign-in page.
+            // Without a pop-up (blocked, or a browser that has none) the server bar offers other
+            // ways to open the sign-in page.
             signIn(url, popup = this.openSignInWindow()) {
                 if (!url || !this.servers[url]) {
                     try { popup?.close(); } catch { /* already closed */ }
@@ -837,9 +755,9 @@
                 if (popup?.closed) popup = null;
                 try { popup.document.body.textContent = 'Finding where to sign in…'; } catch { /* none, or on another origin */ }
                 this.signingIn = { url, popup, authorizationUrl: null };
-                // The card's "needs you to sign in" error has done its job.
+                // The "needs you to sign in" error has done its job.
                 this.updateServer(url, { lastError: null });
-                this.renderAuth(url);
+                this.emit('auth', { url });
                 this.log({ level: 'info', message: popup ? 'Starting sign-in' : 'Starting sign-in without a pop-up window', server: url });
                 const sent = this.postToWorker({ type: 'auth-start', url, wwwAuthenticate: this.servers[url].wwwAuthenticate || undefined });
                 if (!sent) this.cancelSignIn();
@@ -849,7 +767,7 @@
                 const url = this.signingIn?.url;
                 try { this.signingIn?.popup?.close(); } catch { /* already closed */ }
                 this.signingIn = null;
-                if (url) this.renderAuth(url);
+                if (url) this.emit('auth', { url });
             }
 
             // Leaves for the sign-in page in this tab. oauth-callback.html brings the browser back
@@ -863,53 +781,44 @@
                 location.assign(authorizationUrl);
             }
 
+            // Copies the sign-in link. Some embedded browsers refuse clipboard access; then
+            // `copied` is false and the server bar shows the link to copy by hand.
             async copySignInLink() {
                 const link = this.signingIn?.authorizationUrl;
-                if (!link) return;
-                const input = document.getElementById('authLink');
+                if (!link) return { copied: false, link: null };
                 try {
                     await navigator.clipboard.writeText(link);
-                    flashLabel(document.getElementById('copyAuthLinkBtn'), 'Copied');
+                    return { copied: true, link };
                 } catch {
-                    // Some embedded browsers refuse clipboard access; leave the link selected instead.
-                    input.value = link;
-                    input.hidden = false;
-                    document.getElementById('authLinkHint').hidden = false;
-                    input.focus();
-                    input.select();
+                    return { copied: false, link };
                 }
             }
 
             // For a sign-in finished in another browser: that browser's callback page shows its
-            // address, and the worker here holds the sign-in it belongs to.
-            finishSignInFromPaste() {
-                const error = document.getElementById('authPasteError');
-                const fail = text => {
-                    error.textContent = text;
-                    error.hidden = false;
-                };
-                error.hidden = true;
+            // address, and the worker here holds the sign-in it belongs to. Returns what's wrong
+            // with the pasted address, or null once it's on its way to the worker.
+            finishSignInFromPaste(text) {
                 const expected = new URL('oauth-callback.html', location.href);
                 let pasted;
                 try {
-                    pasted = new URL(document.getElementById('authCallbackUrl').value.trim());
+                    pasted = new URL(String(text ?? '').trim());
                 } catch {
-                    return fail(`Paste the whole address, starting with ${expected.origin}.`);
+                    return `Paste the whole address, starting with ${expected.origin}.`;
                 }
                 if (pasted.origin !== expected.origin || pasted.pathname !== expected.pathname) {
-                    return fail(`That isn't the address sign-in sends you back to, which starts with ${expected.href}.`);
+                    return `That isn't the address sign-in sends you back to, which starts with ${expected.href}.`;
                 }
                 if (!pasted.searchParams.has('state')) {
-                    return fail('That address has no sign-in response in it. Copy it from the page you landed on after signing in.');
+                    return 'That address has no sign-in response in it. Copy it from the page you landed on after signing in.';
                 }
                 this.postToWorker({ type: 'auth-callback', query: pasted.search });
+                return null;
             }
 
             signOut(url, { forgetClient = false } = {}) {
                 if (!url) return;
                 this.postToWorker({ type: 'auth-signout', url, forgetClient });
                 if (this.servers[url]) this.updateServer(url, { status: 'unknown', tools: [], needsSignIn: true });
-                if (url === this.selectedServerUrl) this.updateToolsList([]);
             }
 
             handleAuthMessage(message) {
@@ -926,11 +835,7 @@
                     }
                     case 'auth_callback_done':
                         // Only a pasted address gets this here; the callback page handles its own.
-                        if (!message.ok) {
-                            const error = document.getElementById('authPasteError');
-                            error.textContent = message.error?.message || 'Sign-in failed';
-                            error.hidden = false;
-                        }
+                        if (!message.ok) this.emit('auth', { url, pasteError: message.error?.message || 'Sign-in failed' });
                         return;
                     case 'auth_error':
                         if (mine) this.cancelSignIn();
@@ -948,38 +853,7 @@
                         this.authStatus[url] = message.status;
                         break;
                 }
-                if (url === this.selectedServerUrl) this.renderAuth(url);
-            }
-
-            renderAuth(url) {
-                const server = this.servers[url];
-                if (!server) return;
-                const status = this.authStatus[url];
-                const signingIn = this.signingIn?.url === url;
-                const signedIn = !!status?.signedIn;
-                const linkReady = signingIn && !!this.signingIn.authorizationUrl;
-                document.getElementById('cardAuth').hidden = !(server.needsSignIn || signedIn || signingIn);
-                document.getElementById('cardAuthStatus').textContent = !signingIn
-                    ? (signedIn ? describeSignIn(status) : 'This server needs you to sign in.')
-                    : !linkReady ? 'Finding where to sign in…'
-                    : this.signingIn.popup ? "Finish signing in in the pop-up window. If it didn't open, continue in this tab or copy the link."
-                    : "This browser didn't open a pop-up window. Continue in this tab, or copy the link to sign in in another tab or browser.";
-                document.getElementById('signInBtn').hidden = signingIn || signedIn;
-                document.getElementById('continueHereBtn').hidden = !linkReady;
-                document.getElementById('copyAuthLinkBtn').hidden = !linkReady;
-                document.getElementById('cancelSignInBtn').hidden = !signingIn;
-                document.getElementById('signOutBtn').hidden = signingIn || !signedIn;
-                // The card redraws often; reset these only when they appear or go away.
-                const elsewhere = document.getElementById('cardAuthElsewhere');
-                if (elsewhere.hidden !== !linkReady) {
-                    elsewhere.hidden = !linkReady;
-                    document.getElementById('authLink').hidden = true;
-                    document.getElementById('authLinkHint').hidden = true;
-                    document.getElementById('authPasteError').hidden = true;
-                    document.getElementById('authCallbackUrl').value = '';
-                }
-                // A static token takes precedence over signing in, so show it when it's set.
-                if (server.bearerToken) document.getElementById('cardStaticToken').open = true;
+                this.emit('auth', { url });
             }
 
             startPeriodicWasmChecks() {
@@ -1164,21 +1038,28 @@
                             server.rejectedTools = message.rejected || [];
                             this.saveServers();
                         }
-                        if (message.url === this.selectedServerUrl) {
-                            this.updateToolsList(message.tools);
-                        }
+                        this.emit('tools', { url: message.url });
                         renderTapServerSelect();
                         renderTapToolSelect();
                         break;
                     }
-                    case 'tool_result':
-                        // Only show in ToolResultsCard if not for the current chat engramId (i.e., not for console/chat flow)
-                        if (!message.engramId || message.engramId !== chatEngramId) {
-                            this.pendingCall = null;
-                            this.renderToolResultCard(message);
+                    case 'tool_result': {
+                        const pending = message.run?.id ? this.pendingRuns.get(message.run.id) : null;
+                        if (pending) {
+                            clearTimeout(pending.timer);
+                            this.pendingRuns.delete(message.run.id);
+                            if (pending.show && this.shownRunId === message.run.id) this.emit('run', { phase: 'done', runId: message.run.id, message });
+                            pending.resolve(message);
+                        } else if (!message.run && (!message.engramId || message.engramId !== chatEngramId)) {
+                            // Calls the worker turned away before they ran, such as tool calls from
+                            // replies over the rate limit. Chat replies show in the chat instead.
+                            this.emit('run', { phase: 'done', message });
                         }
-                        // Otherwise, ignore (it will show in chat via cbus_message)
                         return;
+                    }
+                    case 'run_recorded':
+                        this.emit('recorded', message.run);
+                        break;
                     case 'bootrom':
                         // Suppress warning; handled elsewhere (e.g., via Promise)
                         break;
@@ -1351,208 +1232,62 @@
                 this.updateServer(url, changes);
             }
 
-            // Applies changes to a stored server and refreshes whatever shows it.
+            // Applies changes to a stored server and tells whatever shows it.
             updateServer(url, changes) {
                 const server = this.servers[url];
                 if (!server) return;
                 Object.assign(server, changes, { date_modified: new Date().toISOString() });
                 this.saveServers();
-                this.updateServersList();
-                if (this.selectedServerUrl === url) {
-                    this.showServerCard(url);
-                }
+                this.emit('servers', { url });
             }
 
-            updateServersList() {
-                const serversList = document.getElementById('serversList');
-                serversList.innerHTML = '';
-                const serversArr = Object.values(this.servers);
-                if (serversArr.length === 0) {
-                    serversList.innerHTML = '<div class="empty-state">No servers yet. <button type="button" class="link-button" data-open-guide>Try one from the guide</button></div>';
-                }
-                serversArr.forEach(server => {
-                    const serverItem = document.createElement('div');
-                    serverItem.className = 'server-item';
-                    if (server.url === this.selectedServerUrl) {
-                        serverItem.classList.add('selected');
-                    }
-                    // Priority: alias > name > url
-                    let displayName = server.url;
-                    if (server.name && server.name.trim()) {
-                        displayName = server.name;
-                    }
-                    if (server.alias && server.alias.trim()) {
-                        displayName = server.alias;
-                    }
-                    const state = { connected: 'healthy', failed: 'unhealthy' }[server.status] || 'unknown';
-                    serverItem.innerHTML = `
-                        <div class="server-row">
-                            <span class="status-indicator ${state}" title="${escapeHtml(server.status || 'not connected')}"></span>
-                            <div class="server-name" title="${escapeHtml(server.url)}">${escapeHtml(displayName)}</div>
-                        </div>
-                    `;
-                    serverItem.addEventListener('click', () => {
-                        this.selectedServerUrl = server.url;
-                        this.setServerUrl(server.url);
-                        this.showServerCard(server.url);
-                        this.updateToolsList(server.tools || []);
-                        this.updateServersList();
-                    });
-                    serversList.appendChild(serverItem);
-                });
-                // Hide card if no server selected
-                if (!this.selectedServerUrl || !this.servers[this.selectedServerUrl]) {
-                    this.hideServerCard();
-                }
+            selectServer(url) {
+                if (!this.servers[url] || url === this.selectedServerUrl) return;
+                this.selectedServerUrl = url;
+                localStorage.setItem('mcpServerUrl', url);
+                this.emit('select', { url });
+                this.postToWorkerQuietly({ type: 'auth-status', url });
             }
 
-            showServerCard(url) {
-                const server = this.servers[url];
-                if (!server) return;
-                const card = document.getElementById('serverCard');
-                card.style.display = 'block';
-                document.getElementById('cardServerName').value = server.name;
-                document.getElementById('cardServerAlias').value = server.alias || '';
-                document.getElementById('cardServerUrl').value = server.url;
-                document.getElementById('cardServerStatus').value = server.status;
-                document.getElementById('cardServerProtocol').value = server.protocolVersion
-                    ? `${server.protocolVersion} (${server.era})`
-                    : 'Not connected yet';
-                document.getElementById('cardServerToken').value = server.bearerToken || '';
-                document.getElementById('cardServerDateAdded').value = server.date_added;
-                document.getElementById('cardServerDateModified').value = server.date_modified;
-                const errorLine = document.getElementById('cardServerError');
-                errorLine.textContent = server.lastError || '';
-                errorLine.hidden = !server.lastError;
-                this.renderAuth(url);
-                this.renderConnectionInfo(server);
-                if (this.shownCardUrl !== url) {
-                    this.shownCardUrl = url;
-                    this.postToWorkerQuietly({ type: 'auth-status', url });
-                }
-                // Setup autosave for alias, url and token
-                this.initAutosaveGroup(card.querySelector('.autosave-group'), (fields) => {
-                    if (!this.selectedServerUrl) return;
-                    let server = this.servers[this.selectedServerUrl];
-                    if (!server) return;
-                    const newUrl = fields.cardServerUrl.trim();
-                    const newAlias = fields.cardServerAlias.trim();
-                    const newToken = fields.cardServerToken.trim();
-                    let urlChanged = false;
-                    if (newUrl && newUrl !== server.url) {
-                        // Re-key the server object; the new address has to be connected again.
-                        navigator.serviceWorker.controller?.postMessage({ type: 'forget-mcp', url: server.url });
-                        this.servers[newUrl] = { ...server, url: newUrl, status: 'unknown', protocolVersion: null, era: null, tools: [] };
-                        delete this.servers[server.url];
-                        this.selectedServerUrl = newUrl;
-                        this.setServerUrl(newUrl);
-                        server = this.servers[newUrl];
-                        urlChanged = true;
-                    }
-                    server.alias = newAlias;
-                    server.bearerToken = newToken || undefined;
-                    server.date_modified = new Date().toISOString();
-                    this.saveServers();
-                    this.updateServersList();
-                    this.showServerCard(server.url);
-                    if (urlChanged) {
-                        this.log({ level: 'INFO', message: `Server URL changed to ${newUrl}`, timestamp: new Date().toISOString() });
-                    }
-                });
-            }
-
-            // What the server said about itself when it connected.
-            renderConnectionInfo(server) {
-                const panel = document.getElementById('cardConnection');
-                panel.hidden = server.status !== 'connected';
-                if (panel.hidden) return;
-                const info = server.serverInfo || {};
-                const rows = [];
-                if (info.name || info.title) {
-                    const label = [info.title || info.name, info.version].filter(Boolean).join(' ');
-                    rows.push(['Server', escapeHtml(label) + (info.title && info.name && info.title !== info.name ? ` <span class="text-secondary">(${escapeHtml(info.name)})</span>` : '')]);
-                }
-                const capabilities = Object.entries(server.capabilities || {}).map(([name, details]) => {
-                    const flags = details && typeof details === 'object' ? Object.keys(details).filter(flag => details[flag] === true) : [];
-                    return `<span class="badge">${escapeHtml(name)}${flags.length ? ` <span class="text-secondary">${escapeHtml(flags.join(', '))}</span>` : ''}</span>`;
-                });
-                rows.push(['Capabilities', capabilities.length ? `<span class="badge-row">${capabilities.join('')}</span>` : '<span class="text-secondary">None declared</span>']);
-                if (server.bearerToken) rows.push(['Credentials', 'Static token']);
-                else if (this.authStatus[server.url]?.signedIn) rows.push(['Credentials', 'Signed in (OAuth)']);
-                if (info.websiteUrl && /^https?:\/\//i.test(info.websiteUrl)) {
-                    rows.push(['Website', `<a href="${escapeHtml(info.websiteUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(info.websiteUrl)}</a>`]);
-                }
-                panel.innerHTML = `
-                    <h3 class="subsection-title">Connection</h3>
-                    <dl class="info-list">${rows.map(([term, value]) => `<dt>${term}</dt><dd>${value}</dd>`).join('')}</dl>
-                    ${server.instructions ? `<details class="instructions"><summary>Instructions from the server</summary><p>${escapeHtml(server.instructions)}</p></details>` : ''}
-                `;
-            }
-
-            hideServerCard() {
-                const card = document.getElementById('serverCard');
-                card.style.display = 'none';
-            }
-
-            updateToolsList(tools) {
-                const toolsList = document.getElementById('toolsList');
-                const filter = document.getElementById('toolFilter');
-                const server = this.servers[this.selectedServerUrl];
-                toolsList.innerHTML = '';
-                tools = tools || [];
-                filter.hidden = tools.length < 2;
-                document.getElementById('downloadToolsBtn').hidden = !tools.length && !server?.rejectedTools?.length;
-                this.renderHiddenTools(server?.rejectedTools || []);
-                if (tools.length === 0) {
-                    document.getElementById('toolCount').textContent = '';
-                    toolsList.innerHTML = '<div class="empty-state">No tools available.</div>';
-                    this.renderToolCard(null);
-                    this.renderToolResultCard(null);
-                    return;
-                }
-                tools.forEach(tool => {
-                    const toolItem = document.createElement('div');
-                    toolItem.className = 'tool-item';
-                    toolItem.dataset.tool = tool.name;
-                    toolItem.dataset.search = [tool.name, tool.title, tool.annotations?.title, tool.description].filter(Boolean).join(' ').toLowerCase();
-                    const title = toolTitle(tool);
-                    toolItem.innerHTML = `
-                        <div class="tool-item-head"><span class="tool-name">${escapeHtml(tool.name)}</span>${toolBadges(tool)}</div>
-                        ${title ? `<div class="tool-item-title">${escapeHtml(title)}</div>` : ''}
-                    `;
-                    toolItem.onclick = () => {
-                        toolsList.querySelectorAll('.tool-item.selected').forEach(item => item.classList.remove('selected'));
-                        toolItem.classList.add('selected');
-                        this.renderToolCard(tool);
-                        this.renderToolResultCard(null);
+            // Saves a server's address, alias and static token. A new address is another server
+            // to connect to, so the old one's session is dropped. Returns the server's address.
+            updateServerDetails(url, { url: newUrl = url, alias, bearerToken } = {}) {
+                let server = this.servers[url];
+                if (!server) return url;
+                if (newUrl && newUrl !== url && !this.servers[newUrl]) {
+                    this.postToWorkerQuietly({ type: 'forget-mcp', url });
+                    this.servers[newUrl] = {
+                        ...server, url: newUrl, status: 'unknown', protocolVersion: null, era: null,
+                        tools: [], rejectedTools: [], lastError: null, needsSignIn: false,
                     };
-                    toolsList.appendChild(toolItem);
-                });
-                this.filterTools();
-                this.renderToolCard(null);
-                this.renderToolResultCard(null);
-            }
-
-            filterTools() {
-                const query = document.getElementById('toolFilter').value.trim().toLowerCase();
-                const items = [...document.querySelectorAll('#toolsList .tool-item')];
-                let shown = 0;
-                for (const item of items) {
-                    item.hidden = !!query && !item.dataset.search.includes(query);
-                    if (!item.hidden) shown++;
+                    delete this.servers[url];
+                    server = this.servers[newUrl];
+                    this.log({ level: 'info', message: `Server address changed to ${newUrl}`, server: newUrl });
                 }
-                document.getElementById('toolCount').textContent = query ? `${shown} of ${items.length}` : String(items.length);
+                if (alias !== undefined) server.alias = alias;
+                if (bearerToken !== undefined) server.bearerToken = bearerToken || undefined;
+                server.date_modified = new Date().toISOString();
+                this.saveServers();
+                if (server.url !== url && this.selectedServerUrl === url) {
+                    this.selectedServerUrl = server.url;
+                    localStorage.setItem('mcpServerUrl', server.url);
+                    this.emit('select', { url: server.url });
+                }
+                this.emit('servers', { url: server.url });
+                return server.url;
             }
 
-            // Tools the client won't call, with the reason (also logged when the list arrives).
-            renderHiddenTools(rejected) {
-                const section = document.getElementById('hiddenTools');
-                section.hidden = !rejected.length;
-                if (!rejected.length) return;
-                section.querySelector('summary').textContent = `${rejected.length} hidden ${rejected.length === 1 ? 'tool' : 'tools'}`;
-                section.querySelector('ul').innerHTML = rejected
-                    .map(tool => `<li><code>${escapeHtml(tool.name ?? '(unnamed)')}</code>: ${escapeHtml(tool.reason || 'no reason given')}</li>`)
-                    .join('');
+            deleteServer(url) {
+                if (!this.servers[url]) return;
+                this.postToWorkerQuietly({ type: 'forget-mcp', url });
+                delete this.servers[url];
+                this.saveServers();
+                if (this.selectedServerUrl === url) {
+                    this.selectedServerUrl = null;
+                    localStorage.removeItem('mcpServerUrl');
+                    this.emit('select', { url: null });
+                }
+                this.emit('servers', { url });
             }
 
             // Everything the inspector knows about a server, as a JSON download.
@@ -1582,153 +1317,86 @@
                 return report;
             }
 
-            // Recursive input field renderer for tool schemas
-            renderInputField(key, prop, isRequired) {
+            // How a schema property is edited: a select for enums and booleans, a text input for
+            // strings and numbers (so {{variables}} fit), a list for arrays of simple values, nested
+            // fields for objects with properties, and JSON text for everything else.
+            fieldKind(prop = {}) {
+                const type = schemaType(prop);
+                if (Array.isArray(prop.enum)) return 'enum';
+                if (type === 'boolean') return 'boolean';
+                if (type === 'integer' || type === 'number') return 'number';
+                if (type === 'object') return prop.properties ? 'object' : 'json';
+                if (type === 'array') {
+                    const items = prop.items && !Array.isArray(prop.items) ? prop.items : null;
+                    return items && ['enum', 'boolean', 'number', 'string'].includes(this.fieldKind(items)) ? 'list' : 'json';
+                }
+                return 'string';
+            }
+
+            // The control for one simple value. `path` names it: `filters.owner`, `tags[]`.
+            renderValueInput(prop, path, isRequired) {
+                const name = `name="${escapeHtml(path)}"`;
+                const unset = `<option value="">${isRequired ? 'Choose…' : '(not set)'}</option>`;
+                switch (this.fieldKind(prop)) {
+                    case 'enum':
+                        return `<select ${name}>${unset}${prop.enum.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>`;
+                    case 'boolean':
+                        return `<select ${name}>${unset}<option value="true">true</option><option value="false">false</option></select>`;
+                    case 'number':
+                        return `<input type="text" ${name} inputmode="${schemaType(prop) === 'integer' ? 'numeric' : 'decimal'}" autocomplete="off" />`;
+                    default:
+                        return `<input type="text" ${name} autocomplete="off" />`;
+                }
+            }
+
+            // A labelled field for one schema property; objects nest their properties' fields.
+            renderInputField(key, prop, isRequired, path = key) {
                 const inputCard = document.createElement('div');
                 inputCard.className = 'tool-input-card';
                 // Names, types and descriptions come from the server, so they're escaped.
-                const name = escapeHtml(key);
-                let label = `<label><strong>${name}</strong> (${escapeHtml(prop.type || 'string')})`;
+                let label = `<label><strong>${escapeHtml(key)}</strong> (${escapeHtml(schemaType(prop) || 'string')})`;
                 if (isRequired) label += '<span class="required-mark">*</span>';
                 label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
                 label += '</label>';
-                const unset = `<option value="">${isRequired ? 'Choose…' : '(not set)'}</option>`;
 
-                if (Array.isArray(prop.enum)) {
-                    const options = prop.enum.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
-                    inputCard.innerHTML = `${label}<select name="${name}">${unset}${options}</select>`;
-                } else if (prop.type === 'boolean') {
-                    inputCard.innerHTML = `${label}<select name="${name}">${unset}<option value="true">true</option><option value="false">false</option></select>`;
-                } else if (prop.type === 'object' && !prop.properties) {
-                    inputCard.innerHTML = `${label}<textarea name="${name}" placeholder="{}" rows="3" class="mono"></textarea>`;
-                } else if (prop.type === 'string') {
-                    inputCard.innerHTML = `${label}<input type="text" name="${name}" />`;
-                } else if (prop.type === 'integer' || prop.type === 'number') {
-                    inputCard.innerHTML = `${label}<input type="number" name="${name}" ${prop.type === 'number' ? 'step="any"' : ''} />`;
-                } else if (prop.type === 'array' && prop.items) {
-                    inputCard.innerHTML = `${label}<div class="array-inputs"></div><button type="button" class="add-array-item btn-sm"><span class="icon icon-plus" aria-hidden="true"></span>Add item</button>`;
-                    const arrayInputs = inputCard.querySelector('.array-inputs');
-                    inputCard.querySelector('.add-array-item').onclick = () => {
-                        arrayInputs.appendChild(this.renderInputField(key + '[]', prop.items, false));
+                const kind = this.fieldKind(prop);
+                if (kind === 'json') {
+                    const placeholder = schemaType(prop) === 'array' ? '[]' : '{}';
+                    inputCard.innerHTML = `${label}<textarea name="${escapeHtml(path)}" placeholder="${placeholder}" rows="3" class="mono"></textarea>`;
+                } else if (kind === 'list') {
+                    inputCard.innerHTML = `${label}<div class="array-inputs" data-path="${escapeHtml(path)}"></div><button type="button" class="add-array-item btn-sm"><span class="icon icon-plus" aria-hidden="true"></span>Add item</button>`;
+                    const list = inputCard.querySelector('.array-inputs');
+                    // fillToolForm adds items with values through this too.
+                    list.addItem = (value = '') => {
+                        const item = document.createElement('div');
+                        item.className = 'array-item';
+                        item.innerHTML = `${this.renderValueInput(prop.items, `${path}[]`, false)}<button type="button" class="btn-icon btn-tertiary btn-sm remove-array-item" aria-label="Remove item"><span class="icon icon-x" aria-hidden="true"></span></button>`;
+                        item.querySelector('[name]').value = value === null || value === undefined ? '' : String(value);
+                        item.querySelector('.remove-array-item').onclick = () => {
+                            const form = item.closest('form');
+                            item.remove();
+                            form?.dispatchEvent(new Event('input', { bubbles: true }));
+                        };
+                        list.appendChild(item);
+                        return item;
                     };
-                } else if (prop.type === 'object' && prop.properties) {
+                    inputCard.querySelector('.add-array-item').onclick = () => list.addItem().querySelector('[name]').focus();
+                } else if (kind === 'object') {
                     inputCard.innerHTML = `${label}<div class="object-inputs"></div>`;
                     const objectInputs = inputCard.querySelector('.object-inputs');
                     Object.entries(prop.properties).forEach(([subKey, subProp]) => {
-                        objectInputs.appendChild(this.renderInputField(subKey, subProp, (prop.required || []).includes(subKey)));
+                        objectInputs.appendChild(this.renderInputField(subKey, subProp, (prop.required || []).includes(subKey), `${path}.${subKey}`));
                     });
                 } else {
-                    inputCard.innerHTML = `${label}<input type="text" name="${name}" />`;
+                    inputCard.innerHTML = `${label}${this.renderValueInput(prop, path, isRequired)}`;
                 }
                 return inputCard;
-            }
-
-            renderToolCard(tool) {
-                const toolCard = document.getElementById('toolCard');
-                toolCard.innerHTML = '';
-                if (!tool) {
-                    toolCard.innerHTML = '<div class="tool-card-inner"><span class="text-secondary">Select a tool to view details and call it.</span></div>';
-                    return;
-                }
-                toolCard.style.display = 'block';
-                const card = document.createElement('form');
-                card.className = 'tool-card-inner';
-                card.onsubmit = (e) => {
-                    e.preventDefault();
-                    this.handleCallTool(tool, card);
-                };
-                const title = toolTitle(tool);
-                const schemaBlock = (label, value) => value
-                    ? `<details class="tool-raw-json tool-schema"><summary>${label}</summary><pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre></details>`
-                    : '';
-                card.innerHTML = `
-                    <div class="tool-card-head">
-                        <h3>${escapeHtml(tool.name)}</h3>
-                        ${toolBadges(tool)}
-                    </div>
-                    ${title ? `<div class="tool-card-title">${escapeHtml(title)}</div>` : ''}
-                    <div class="tool-description">${escapeHtml(tool.description || '')}</div>
-                    <div class="tool-input-schema"></div>
-                    <button type="submit" class="call-tool-btn btn-primary">Call tool</button>
-                    <div class="tool-schemas">
-                        ${schemaBlock('Input schema', tool.inputSchema || tool.input_schema)}
-                        ${schemaBlock('Output schema', tool.outputSchema)}
-                        ${schemaBlock('Definition (raw JSON)', tool)}
-                    </div>
-                `;
-                toolCard.appendChild(card);
-                // Render input schema if present
-                const schema = tool.inputSchema || tool.input_schema;
-                if (schema && schema.properties) {
-                    const schemaDiv = card.querySelector('.tool-input-schema');
-                    schemaDiv.innerHTML = '<h4>Inputs</h4>';
-                    Object.entries(schema.properties).forEach(([key, prop]) => {
-                        const isRequired = (schema.required || []).includes(key);
-                        schemaDiv.appendChild(this.renderInputField(key, prop, isRequired));
-                    });
-                }
-            }
-
-            renderToolResultCard(result) {
-                const toolResultCard = document.getElementById('toolResultCard');
-                if (!result) {
-                    toolResultCard.innerHTML = '<div class="tool-result-card-inner"><span class="text-secondary">Tool output will appear here.</span></div>';
-                    return;
-                }
-                if (result.pending) {
-                    toolResultCard.innerHTML = `<div class="tool-result-card-inner" data-pending><span class="text-secondary">Calling ${escapeHtml(result.pending)}…</span></div>`;
-                    return;
-                }
-                if (result.error) {
-                    toolResultCard.innerHTML = `<div class='tool-result-card-inner error'><span class='text-error'>${escapeHtml(result.error)}</span></div>`;
-                    return;
-                }
-                // Collapsible raw JSON (collapsed by default)
-                let rawJson = `<details class='tool-raw-json'><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(result.result || result, null, 2))}</pre></details>`;
-                // Always render content card
-                let contentHtml = '';
-                let contentArr = [];
-                if (result.result && result.result.result && Array.isArray(result.result.result.content)) {
-                    contentArr = result.result.result.content;
-                } else if (result.result && Array.isArray(result.result.content)) {
-                    contentArr = result.result.content;
-                } else if (Array.isArray(result.content)) {
-                    contentArr = result.content;
-                }
-                if (contentArr.length > 0) {
-                    contentHtml = contentArr.map((item, idx) => {
-                        if (item && item.type === 'text' && typeof item.text === 'string') {
-                            const safeText = escapeHtml(item.text).replace(/\n/g, '<br>');
-                            return `<div class='tool-content-text'>${safeText}</div>`;
-                        }
-                        return `<div class='tool-content-unknown'>[Unknown content type: ${escapeHtml(JSON.stringify(item))}]</div>`;
-                    }).join('<hr class="divider">');
-                } else {
-                    contentHtml = `<div class='tool-content-empty'><span class='text-secondary'>No content to display.</span></div>`;
-                }
-                const toolResult = result.result || result;
-                let notice = '';
-                if (toolResult.resultType === 'input_required') {
-                    notice = `<div class='tool-notice'>The tool asked for more input (for example a form to fill in), which this client doesn't support yet.</div>`;
-                } else if (toolResult.isError) {
-                    notice = `<div class='tool-notice text-error'>The tool reported an error.</div>`;
-                }
-                contentHtml = `<div class='tool-content-section'>${contentHtml}</div>`;
-                toolResultCard.innerHTML = `<div class='tool-result-card-inner'>${notice}${rawJson}<div class="tool-content-header"> > result.content</div>${contentHtml}</div>`;
             }
 
             updateBuildInfo(buildInfo) {
                 const compiledInfo = document.getElementById('wasm-compiled');
                 if (compiledInfo) {
                     compiledInfo.textContent = buildInfo;
-                }
-            }
-
-            setServerUrl(url) {
-                localStorage.setItem('mcpServerUrl', url);
-                const serverUrlInput = document.getElementById('mcpServerUrl');
-                if (serverUrlInput) {
-                    serverUrlInput.value = url;
                 }
             }
 
@@ -1751,20 +1419,7 @@
                 navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
             }
 
-            handleAddServer() {
-                const url = document.getElementById('serverUrl').value.trim();
-                const alias = document.getElementById('serverAlias').value.trim();
-                if (!url) {
-                    this.log({ level: 'error', message: 'Enter a server URL to add' });
-                    return;
-                }
-                this.addServer(url, alias);
-                // Clear inputs
-                document.getElementById('serverUrl').value = '';
-                document.getElementById('serverAlias').value = '';
-            }
-
-            // Adds a server (or picks it if it's already listed), shows it on the MCP tab and connects.
+            // Adds a server (or picks it if it's already listed), shows it in the Workbench and connects.
             addServer(url, alias = '', { connect = true } = {}) {
                 if (!this.servers[url]) {
                     const now = new Date().toISOString();
@@ -1778,171 +1433,116 @@
                         status: 'unknown'
                     };
                     this.saveServers();
+                    this.emit('servers', { url });
                 }
-                this.selectedServerUrl = url;
-                this.setServerUrl(url);
-                this.updateServersList();
-                this.showServerCard(url);
-                this.updateToolsList(this.servers[url].tools || []);
-                showTab('mcp');
+                this.selectServer(url);
+                showMode('workbench');
                 if (connect) this.connectMcpServer(url);
             }
 
-            handleSaveServer() {
-                if (!this.selectedServerUrl) return;
-                const server = this.servers[this.selectedServerUrl];
-                if (!server) return;
-                server.alias = document.getElementById('cardServerAlias').value.trim();
-                server.url = document.getElementById('cardServerUrl').value.trim();
-                server.date_modified = new Date().toISOString();
-                // If URL changed, update key
-                if (server.url !== this.selectedServerUrl) {
-                    this.servers[server.url] = server;
-                    delete this.servers[this.selectedServerUrl];
-                    this.selectedServerUrl = server.url;
-                }
-                this.saveServers();
-                this.updateServersList();
-                this.showServerCard(server.url);
-            }
-
-            handleDeleteServer() {
-                if (!this.selectedServerUrl) return;
-                navigator.serviceWorker.controller?.postMessage({ type: 'forget-mcp', url: this.selectedServerUrl });
-                delete this.servers[this.selectedServerUrl];
-                this.saveServers();
-                this.selectedServerUrl = null;
-                this.updateServersList();
-                this.hideServerCard();
-                this.updateToolsList([]);
-            }
-
-            // Utility to add autosave to all inputs/textareas in a container
-            initAutosaveGroup(container, onSave) {
-                if (!container) return;
-                let debounceTimer = null;
-                let lastInputId = null;
-                const collectFields = () => {
-                    const fields = {};
-                    container.querySelectorAll('input, textarea').forEach(input => {
-                        fields[input.id] = input.value;
-                    });
-                    return fields;
-                };
-                const showCheckmark = (inputId) => {
-                    const check = document.getElementById('checkmark-' + inputId);
-                    if (check) {
-                        check.innerHTML = `<svg width='16' height='16' viewBox='0 0 20 20' aria-hidden='true'><polyline points='4,11 9,16 16,5' style='fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;'/></svg>`;
-                        check.style.display = 'inline-block';
-                        setTimeout(() => { check.style.display = 'none'; }, 1500);
+            // Glean, from a work email (asking app.glean.com where that company's Glean is) or its
+            // MCP server URL: adds the server, then signs in, or connects when already signed in.
+            // `popup` is the sign-in window, opened during the click so pop-up blockers allow it.
+            async addGleanServer(value, popup) {
+                let url = value;
+                let found = null;
+                if (/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(value)) {
+                    try {
+                        found = await findGleanServer(value);
+                    } catch (error) {
+                        try { popup?.close(); } catch { /* already closed */ }
+                        this.log({ level: 'warn', message: error.message });
+                        throw error;
                     }
-                };
-                const triggerSave = (inputId) => {
-                    if (debounceTimer) clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(() => {
-                        const before = collectFields();
-                        onSave(before);
-                        if (inputId) showCheckmark(inputId);
-                    }, 1000);
-                };
-                container.querySelectorAll('input, textarea').forEach(input => {
-                    input.removeEventListener('input', input._autosaveHandler || (()=>{}));
-                    input._autosaveHandler = (e) => {
-                        lastInputId = input.id;
-                        triggerSave(input.id);
-                    };
-                    input.addEventListener('input', input._autosaveHandler);
-                });
+                    url = found.mcpUrl;
+                    this.log({ level: 'info', message: `Glean says ${found.domain} uses ${found.queryUrl}; adding ${url}` });
+                }
+                localStorage.setItem('gleanMcpUrl', url);
+                const signedIn = this.authStatus[url]?.signedIn;
+                this.addServer(url, this.servers[url]?.alias || 'Glean', { connect: signedIn });
+                if (signedIn) {
+                    try { popup?.close(); } catch { /* already closed */ }
+                } else {
+                    this.signIn(url, popup);
+                }
+                return { url, found };
             }
 
-            handleCallTool(tool, form) {
-                const url = this.selectedServerUrl;
-                if (!url) {
-                    this.log({ level: 'error', message: 'Select a server before calling a tool' });
-                    return;
-                }
-                // Serialize form data
-                const schema = tool.inputSchema || tool.input_schema;
-                let args;
-                try {
-                    args = this.serializeToolForm(form, schema);
-                } catch (error) {
-                    this.renderToolResultCard({ error: error.message });
-                    return;
-                }
-                // Build tapConfig for this tool call
-                let tapConfig = {
-                    serverUrl: url,
-                    toolName: tool.name,
-                    args
+            // Calls a tool with its arguments as written; the Workbench fills in {{variables}}
+            // first. Resolves with the worker's tool_result (or a stand-in when the call never went
+            // out); with `show`, the response pane follows the call through 'run' events.
+            runTool({ url, tool, args, requestId = null, collectionRunId = null, show = true }) {
+                const notSent = error => {
+                    if (show) this.emit('run', { phase: 'not-sent', error });
+                    return Promise.resolve({ type: 'tool_result', error, errorKind: 'not_sent', run: null });
                 };
-                if (tool.connectedStringArg) tapConfig.connectedStringArg = tool.connectedStringArg;
-                if (tool.connectedArrayArg) tapConfig.connectedArrayArg = tool.connectedArrayArg;
-                // Generate or reuse a unique engramId for MCP tool calls
-                let mcpEngramId = sessionStorage.getItem('mcpEngramId');
-                if (!mcpEngramId) {
-                    mcpEngramId = crypto.randomUUID();
-                    sessionStorage.setItem('mcpEngramId', mcpEngramId);
+                let prepared = { sentArgs: args, environmentName: null };
+                if (this.workbench) {
+                    try {
+                        prepared = this.workbench.prepare(tool, args);
+                    } catch (error) {
+                        return notSent(error.message);
+                    }
                 }
+                const runId = crypto.randomUUID();
                 const sent = this.postToWorker({
                     type: 'call_tool',
-                    tapConfig,
-                    engramId: mcpEngramId,
+                    tapConfig: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
+                    run: { id: runId, args, requestId, collectionRunId, environmentName: prepared.environmentName },
+                    engramId: this.mcpEngramId(),
                     bearerToken: this.servers[url]?.bearerToken || undefined
                 });
-                this.renderToolResultCard(sent
-                    ? { pending: tool.name }
-                    : { error: "The service worker isn't running yet. Try again in a moment." });
-                if (!sent) return;
+                if (!sent) return notSent("The service worker isn't running yet. Try again in a moment.");
+                if (show) {
+                    this.shownRunId = runId;
+                    this.emit('run', { phase: 'pending', runId, toolName: tool.name, url });
+                }
                 // Calls time out after 120 s in the client; past that, the worker is gone.
-                const call = Symbol(tool.name);
-                this.pendingCall = call;
-                setTimeout(() => {
-                    if (this.pendingCall !== call) return;
-                    this.pendingCall = null;
-                    const error = `No answer from the service worker within 130 seconds for ${tool.name}; the browser may have stopped it. Call the tool again.`;
-                    this.renderToolResultCard({ error });
-                    this.log({ level: 'error', message: error, server: url });
-                }, 130_000);
+                return new Promise(resolve => {
+                    const timer = setTimeout(() => {
+                        this.pendingRuns.delete(runId);
+                        const error = `No answer from the service worker within 130 seconds for ${tool.name}; the browser may have stopped it. Run the tool again.`;
+                        const message = { type: 'tool_result', error, errorKind: 'timeout', run: null };
+                        if (show && this.shownRunId === runId) this.emit('run', { phase: 'done', runId, message });
+                        this.log({ level: 'error', message: error, server: url });
+                        resolve(message);
+                    }, 130_000);
+                    this.pendingRuns.set(runId, { resolve, timer, show });
+                });
+            }
+
+            // Workbench calls share one id per tab session, kept apart from the chat's.
+            mcpEngramId() {
+                let id = sessionStorage.getItem('mcpEngramId');
+                if (!id) {
+                    id = crypto.randomUUID();
+                    sessionStorage.setItem('mcpEngramId', id);
+                }
+                return id;
             }
 
             // Builds tool arguments from the form. Optional fields left empty are left out:
-            // servers often reject "" or [] where they'd accept a missing value.
-            serializeToolForm(form, schema) {
+            // servers often reject "" or [] where they'd accept a missing value. Text with
+            // {{variables}} stays text, even in number fields; the Workbench converts it once the
+            // variables are filled in.
+            serializeToolForm(form, schema, prefix = '') {
                 const result = {};
                 if (!schema || !schema.properties) return result;
                 const required = new Set(schema.required || []);
-                const isNumeric = type => type === 'integer' || type === 'number';
                 Object.entries(schema.properties).forEach(([key, prop]) => {
+                    const path = prefix ? `${prefix}.${key}` : key;
+                    const kind = this.fieldKind(prop);
                     let value;
-                    if (prop.type === 'array') {
-                        value = Array.from(form.querySelectorAll(`[name='${CSS.escape(key)}[]']`))
-                            .map(input => input.value)
-                            .filter(text => text !== '')
-                            .map(text => (isNumeric(prop.items?.type) ? Number(text) : text));
-                    } else if (prop.type === 'object' && prop.properties) {
-                        value = this.serializeToolForm(form, { properties: prop.properties, required: prop.required });
+                    if (kind === 'object') {
+                        value = this.serializeToolForm(form, prop, path);
+                    } else if (kind === 'list') {
+                        value = [...form.querySelectorAll(`[name='${CSS.escape(`${path}[]`)}']`)]
+                            .map(input => this.readFieldValue(input, prop.items, `${path}[]`))
+                            .filter(item => item !== undefined && item !== '');
                     } else {
-                        const input = form.querySelector(`[name='${CSS.escape(key)}']`);
+                        const input = form.querySelector(`[name='${CSS.escape(path)}']`);
                         if (!input) return;
-                        const text = input.value.trim();
-                        if (prop.type === 'object') {
-                            try {
-                                value = text ? JSON.parse(text) : undefined;
-                                input.style.borderColor = '';
-                                input.title = '';
-                            } catch (e) {
-                                input.style.borderColor = 'var(--theme-error)';
-                                input.title = 'Invalid JSON';
-                                throw new Error(`${key} isn't valid JSON`);
-                            }
-                        } else if (isNumeric(prop.type)) {
-                            value = text === '' ? undefined : Number(text);
-                        } else if (prop.type === 'boolean') {
-                            value = text === '' ? undefined : text === 'true';
-                        } else {
-                            value = input.value;
-                        }
+                        value = kind === 'json' ? this.readJsonField(input, path) : this.readFieldValue(input, prop, path);
                     }
                     const blank = value === undefined || value === ''
                         || (Array.isArray(value) && value.length === 0)
@@ -1951,6 +1551,69 @@
                     result[key] = value;
                 });
                 return result;
+            }
+
+            readFieldValue(input, prop, path) {
+                const kind = this.fieldKind(prop);
+                const text = input.value;
+                if (kind === 'string') return text;
+                if (text.trim() === '') return undefined;
+                if (kind === 'enum') return prop.enum.find(option => String(option) === text) ?? text;
+                if (kind === 'boolean') return text === 'true';
+                if (kind === 'number') {
+                    if (hasPlaceholder(text)) return text.trim();
+                    const number = Number(text.trim());
+                    if (Number.isNaN(number)) throw new Error(`${path} needs a number or a {{variable}}`);
+                    return number;
+                }
+                return text;
+            }
+
+            readJsonField(input, path) {
+                const text = input.value.trim();
+                input.style.borderColor = '';
+                input.title = '';
+                if (!text) return undefined;
+                // A whole {{variable}} holds the JSON itself.
+                if (isWholePlaceholder(text)) return text;
+                try {
+                    return JSON.parse(text);
+                } catch {
+                    input.style.borderColor = 'var(--theme-error)';
+                    input.title = 'Invalid JSON';
+                    throw new Error(`${path} isn't valid JSON`);
+                }
+            }
+
+            // The inverse of serializeToolForm: sets every field from `args`, clearing the ones it
+            // leaves out. Returns the arguments the schema has no field for.
+            fillToolForm(form, schema, args = {}, prefix = '') {
+                const values = args && typeof args === 'object' ? args : {};
+                const properties = schema?.properties || {};
+                const unknown = Object.keys(values).filter(key => !(key in properties)).map(key => (prefix ? `${prefix}.${key}` : key));
+                Object.entries(properties).forEach(([key, prop]) => {
+                    const path = prefix ? `${prefix}.${key}` : key;
+                    const value = values[key];
+                    const kind = this.fieldKind(prop);
+                    if (kind === 'object') {
+                        unknown.push(...this.fillToolForm(form, prop, value, path));
+                    } else if (kind === 'list') {
+                        const list = form.querySelector(`.array-inputs[data-path='${CSS.escape(path)}']`);
+                        if (!list) return;
+                        list.replaceChildren();
+                        for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) list.addItem(item);
+                    } else {
+                        const input = form.querySelector(`[name='${CSS.escape(path)}']`);
+                        if (!input) return;
+                        if (kind === 'json') {
+                            input.value = value === undefined ? '' : isWholePlaceholder(value) ? value : JSON.stringify(value, null, 2);
+                        } else {
+                            input.value = value === undefined || value === null ? '' : String(value);
+                        }
+                    }
+                });
+                if (!prefix) form.dispatchEvent(new Event('input', { bubbles: true }));
+                return unknown;
             }
         }
 
@@ -1963,6 +1626,10 @@
             for (const entry of window.opener?.logPanel?.entries || []) chatShell.logPanel.add(entry);
         } else {
             chatShell.startServiceWorker();
+            // The Workbench's components and its state (environments, saved requests, runs).
+            import('./workbench/index.js')
+                .then(({ installWorkbench }) => installWorkbench(chatShell))
+                .catch(error => chatShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }));
         }
 
         window.addEventListener('error', event => {
@@ -2002,131 +1669,38 @@
             return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
 
-        // A tool's display title when it differs from its name (2025-06-18 added title; annotations.title is older).
-        function toolTitle(tool) {
-            const title = tool.title || tool.annotations?.title;
-            return title && title !== tool.name ? title : '';
+        // A schema's type; a list like ["string", "null"] counts as its first non-null type.
+        function schemaType(prop) {
+            return Array.isArray(prop?.type) ? prop.type.find(type => type !== 'null') : prop?.type;
         }
 
-        // Badges for what a tool declares about itself. Annotations are hints from the server,
-        // not guarantees.
-        function toolBadges(tool) {
-            const hints = tool.annotations || {};
-            const meta = tool._meta || {};
-            const badges = [];
-            if (hints.readOnlyHint === true) badges.push(['read-only', 'badge-info', "Doesn't change anything (readOnlyHint)"]);
-            if (hints.destructiveHint === true && hints.readOnlyHint !== true) badges.push(['destructive', 'badge-error', 'May delete or overwrite things (destructiveHint)']);
-            if (hints.idempotentHint === true) badges.push(['idempotent', '', 'Calling it again with the same arguments has no further effect (idempotentHint)']);
-            if (hints.openWorldHint === true) badges.push(['open world', 'badge-warning', 'Reaches outside systems, such as the web (openWorldHint)']);
-            if (meta['io.modelcontextprotocol/ui'] || meta.ui?.resourceUri || meta['ui/resourceUri']) badges.push(['app', 'badge-success', 'Comes with an interactive UI (MCP Apps)']);
-            if (tool.outputSchema) badges.push(['structured output', '', 'Declares an output schema']);
-            if (!badges.length) return '';
-            return `<span class="badge-row">${badges.map(([label, kind, help]) => `<span class="badge ${kind}" title="${escapeHtml(help)}">${label}</span>`).join('')}</span>`;
-        }
+        // {{name}} placeholders, which the Workbench fills from the active environment's variables.
+        const hasPlaceholder = text => typeof text === 'string' && /\{\{\s*[A-Za-z_][\w.-]*\s*\}\}/.test(text);
+        const isWholePlaceholder = text => typeof text === 'string' && /^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text.trim());
 
-        // "Signed in with your-company-be.glean.com · mcp offline_access · expires in 59 min · renews automatically"
-        function describeSignIn(status) {
-            let host = status.issuer;
-            try { host = new URL(status.issuer).host; } catch { /* show the issuer as is */ }
-            const parts = [`Signed in with ${host}`];
-            if (status.scope) parts.push(status.scope);
-            if (status.expiresAt) {
-                const minutes = Math.round((status.expiresAt - Date.now()) / 60_000);
-                parts.push(minutes <= 0 ? 'access token expired'
-                    : minutes < 90 ? `expires in ${minutes} min`
-                    : `expires in ${Math.round(minutes / 60)} h`);
+        // The Workbench or the Apps page; the dock stays under both.
+        function showMode(mode) {
+            const apps = mode === 'apps';
+            document.body.dataset.mode = apps ? 'apps' : 'workbench';
+            document.getElementById('workbench').hidden = apps;
+            document.getElementById('appsPage').hidden = !apps;
+            document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === document.body.dataset.mode)));
+            localStorage.setItem('mode', document.body.dataset.mode);
+            if (apps) {
+                // The chat's server list may have changed while it was hidden.
+                renderTapServerSelect();
+                renderChatMessages();
+                renderEngramId();
+                subscribeToCbus();
             }
-            if (status.refreshable) parts.push('renews automatically');
-            return parts.join(' · ');
         }
-
-        document.getElementById('initProtocol').addEventListener('click', () => chatShell.connectMcpServer());
-
-        // Add after the initProtocol event listener:
-        const serverUrlInput = document.getElementById('mcpServerUrl');
-        let updateTimeout = null;
-
-        if (serverUrlInput) {
-            // Set initial state
-            serverUrlInput.closest('.url-input-container').classList.add('default');
-            
-            serverUrlInput.addEventListener('input', () => {
-                const container = serverUrlInput.closest('.url-input-container');
-                container.classList.remove('default', 'success');
-                container.classList.add('editing');
-                
-                // Clear any existing timeout
-                if (updateTimeout) {
-                    clearTimeout(updateTimeout);
-                }
-                
-                // Set new timeout to save after 2 seconds of no typing
-                updateTimeout = setTimeout(() => {
-                    const url = serverUrlInput.value.trim();
-                    if (url) {
-                        chatShell.setServerUrl(url);
-                        chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
-                        
-                        container.classList.remove('editing');
-                        container.classList.add('success');
-                        
-                        // Reset to default after 2 seconds
-                        setTimeout(() => {
-                            container.classList.remove('success');
-                            container.classList.add('default');
-                        }, 1000);
-                    }
-                }, 1000);
-            });
-            
-            // Keep the blur handler for when user clicks away
-            serverUrlInput.addEventListener('blur', () => {
-                const url = serverUrlInput.value.trim();
-                if (url) {
-                    chatShell.setServerUrl(url);
-                    chatShell.log({ level: 'INFO', message: `Updated MCP Server URL to ${url}`, timestamp: new Date().toISOString() });
-                    
-                    const container = serverUrlInput.closest('.url-input-container');
-                    container.classList.remove('editing');
-                    container.classList.add('success');
-                    
-                    // Reset to default after 2 seconds
-                    setTimeout(() => {
-                        container.classList.remove('success');
-                        container.classList.add('default');
-                    }, 2000);
-                }
-            });
-
-            // Also update on Enter key
-            serverUrlInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    serverUrlInput.blur();
-                }
-            });
-        }
-
-        const TABS = ['console', 'mcp', 'memory', 'logs'];
-        function showTab(name) {
-            for (const tab of TABS) {
-                const active = tab === name;
-                const panel = document.getElementById(`${tab}Tab`);
-                panel.classList.toggle('active', active);
-                panel.style.display = active ? 'block' : 'none';
-                document.getElementById(`${tab}TabBtn`).classList.toggle('active', active);
-            }
-            if (name === 'logs') chatShell.logPanel.markSeen();
-        }
-        for (const tab of TABS) {
-            document.getElementById(`${tab}TabBtn`).addEventListener('click', () => showTab(tab));
-        }
+        document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => showMode(button.dataset.mode)));
         document.getElementById('popoutLogsBtn').onclick = function() {
             window.open(window.location.pathname + '?logs=1', '_blank', 'width=720,height=800');
         };
         if (LOGS_ONLY) {
             document.body.classList.add('logs-only');
-            document.title = 'Logs - MCP Browser Client';
-            showTab('logs');
+            document.title = 'Log - MCP Browser Client';
         }
 
         // --- Getting started guide ---
@@ -2187,32 +1761,16 @@
                 gleanUrlInput.focus();
                 return;
             }
-            let url = value;
-            let popup;
-            if (isEmail) {
-                popup = chatShell.openSignInWindow("Looking up your company's Glean…");
-                gleanNote('gleanStatus', "Looking up your company's Glean…");
-                try {
-                    const found = await findGleanServer(value);
-                    url = found.mcpUrl;
-                    gleanUrlInput.value = url;
-                    gleanNote('gleanStatus', `${found.domain} uses the Glean at ${found.queryUrl}. Signing in to its default MCP server.`);
-                    chatShell.log({ level: 'info', message: `Glean says ${found.domain} uses ${found.queryUrl}; adding ${url}` });
-                } catch (error) {
-                    try { popup?.close(); } catch { /* already closed */ }
-                    gleanNote('gleanStatus', null);
-                    gleanNote('gleanUrlError', error.message);
-                    chatShell.log({ level: 'warn', message: error.message });
-                    return;
-                }
-            }
-            localStorage.setItem('gleanMcpUrl', url);
-            const signedIn = chatShell.authStatus[url]?.signedIn;
-            chatShell.addServer(url, chatShell.servers[url]?.alias || 'Glean', { connect: signedIn });
-            if (signedIn) {
-                try { popup?.close(); } catch { /* already closed */ }
-            } else {
-                chatShell.signIn(url, popup);
+            // Opened now, during the click; a URL opens it inside addGleanServer, still in the click.
+            const popup = isEmail ? chatShell.openSignInWindow("Looking up your company's Glean…") : undefined;
+            if (isEmail) gleanNote('gleanStatus', "Looking up your company's Glean…");
+            try {
+                const { url, found } = await chatShell.addGleanServer(value, popup);
+                gleanUrlInput.value = url;
+                gleanNote('gleanStatus', found ? `${found.domain} uses the Glean at ${found.queryUrl}. Signing in to its default MCP server.` : null);
+            } catch (error) {
+                gleanNote('gleanStatus', null);
+                gleanNote('gleanUrlError', error.message);
             }
         });
 
@@ -2335,7 +1893,7 @@
                 const inputRow = document.querySelector('.chat-input-row');
                 inputRow.parentNode.insertBefore(engramDiv, inputRow.nextSibling);
             }
-            engramDiv.innerHTML = `<span>Engram</span> <span class="mono">${chatEngramId}</span> <button id="newEngramBtn" class="btn-sm btn-outline" title="Start new engram">New</button>`;
+            engramDiv.innerHTML = `<span>Conversation</span> <span class="mono">${chatEngramId}</span> <button id="newEngramBtn" class="btn-sm btn-outline" title="Start a new conversation">New conversation</button>`;
             // Attach handler for New button
             const newBtn = document.getElementById('newEngramBtn');
             if (newBtn) {
@@ -2400,14 +1958,7 @@
             } else if (msg.type === 'cbus_queue') {
                 chatMessages = msg.queue;
                 renderChatMessages();
-            } else if (msg.type === 'tool_result') {
-                // Only show in tool result card if not for the current chat engramId (i.e., not for console/chat flow)
-                // if (!msg.engramId || msg.engramId !== chatEngramId) {
-                //     renderToolResultCard(msg);
-                // }
-                // // Otherwise, ignore (it will show in chat via cbus_message)
             }
-            // ...existing handlers...
         });
         // Always show send button, but disable/grey it out if input is empty/whitespace
         function updateSendBtnState() {
@@ -2440,16 +1991,8 @@
                 document.getElementById('chatSendBtn').click();
             }
         });
-        // On tab switch to Console, rerender server/tool select/config/messages/engramId
-        document.getElementById('consoleTabBtn').addEventListener('click', function() {
-            renderTapServerSelect();      // For CBus Tap card
-            renderMcpServerSelect();      // For MCP page
-            renderChatMessages();
-            renderEngramId();
-        });
-        // Initial render
-        renderTapServerSelect();      // For CBus Tap card
-        renderMcpServerSelect();      // For MCP page
+        // Initial render; showMode('apps') draws these again.
+        renderTapServerSelect();
         renderChatMessages();
         renderEngramId();
 
@@ -2515,14 +2058,15 @@
             const listDiv = document.getElementById('imprintsList');
             listDiv.innerHTML = '';
             if (!imprints.length) {
-                listDiv.innerHTML = '<div class="empty-state">No imprints yet.</div>';
+                listDiv.innerHTML = '<div class="empty-state">No context yet.</div>';
                 return;
             }
             imprints.forEach((imprint, idx) => {
                 const item = document.createElement('div');
                 item.className = 'imprint-list-item' + (selectedImprintIdx === idx ? ' selected' : '');
+                const name = imprint.id === 'bootrom' ? 'Instructions (built in)' : imprint.name || '(no name)';
                 item.innerHTML = `
-                    <span class="imprint-name">${escapeHtml(imprint.name || '(no name)')}</span>
+                    <span class="imprint-name">${escapeHtml(name)}</span>
                     <span class="imprint-timestamp">${new Date(imprint.timestamp).toLocaleString()}</span>
                 `;
                 item.onclick = () => {
@@ -2538,7 +2082,7 @@
             const editorDiv = document.getElementById('imprintEditor');
             editorDiv.innerHTML = '';
             if (selectedImprintIdx === null || !imprints[selectedImprintIdx]) {
-                editorDiv.innerHTML = '<div class="text-secondary">Select an imprint to edit or preview.</div>';
+                editorDiv.innerHTML = '<div class="text-secondary">Select an entry to see or edit it.</div>';
                 return;
             }
             const imprint = imprints[selectedImprintIdx];
@@ -2550,7 +2094,7 @@
                     <textarea rows="12" disabled>${escapeHtml(imprint.text || '')}</textarea>
                     <label>Timestamp</label>
                     <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
-                    <div class="field-help">This imprint is read-only (bootrom instructions).</div>
+                    <div class="field-help">These are the built-in instructions, so they can't be edited.</div>
                 `;
                 return;
             }
@@ -2573,7 +2117,7 @@
                 const newName = form.querySelector('#editImprintName').value.trim();
                 const newText = form.querySelector('#editImprintText').value;
                 if (!newName) {
-                    alert('Imprint name is required.');
+                    alert('Give it a name.');
                     return;
                 }
                 imprints[selectedImprintIdx].name = newName;
@@ -2584,7 +2128,7 @@
                 syncImprintsToServiceWorker();
             };
             form.querySelector('#deleteImprintBtn').onclick = () => {
-                if (confirm('Delete this imprint?')) {
+                if (confirm('Delete this context?')) {
                     imprints.splice(selectedImprintIdx, 1);
                     selectedImprintIdx = null;
                     saveImprintsToStorage();
@@ -2602,7 +2146,7 @@
             addImprintBtn.onclick = () => {
                 const newImprint = {
                     id: generateImprintId(),
-                    name: 'Untitled Imprint',
+                    name: 'Untitled context',
                     text: '',
                     timestamp: Date.now()
                 };
@@ -2722,7 +2266,7 @@
                             <input type="text" name="${name}" />
                             <label class="cbus-checkbox-label">
                                 <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${name}" />
-                                <span class="cbus-checkbox-text">Target for message</span>
+                                <span class="cbus-checkbox-text">Your message goes here</span>
                             </label>
                             <div class="cbus-message-warning" style="display:none;"></div>`;
                         setTimeout(() => {
@@ -2809,9 +2353,9 @@
                         inputCard.innerHTML = `${label}
                             <label class="cbus-checkbox-label">
                                 <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${name}" />
-                                <span class="cbus-checkbox-text">Target for [context]</span>
+                                <span class="cbus-checkbox-text">The conversation goes here</span>
                             </label>
-                            <div class="field-help">When connected, this field will receive the full conversation as an array of messages (excluding the latest message).</div>`;
+                            <div class="field-help">This field gets the conversation so far as a list of messages, without the newest one.</div>`;
                         setTimeout(() => {
                             const cb = inputCard.querySelector(`.assign-cbus-array[data-field='${CSS.escape(key)}']`);
                             if (tapConfig.connectedArrayArg === key) {
@@ -2879,22 +2423,6 @@
             navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
         }
 
-        // --- MCP Page Logic ---
-        function renderMcpServerSelect() {
-            const select = document.getElementById('mcpServerSelect');
-            if (!select) return;
-            renderServerSelect(select, chatShell.selectedServerUrl, chatShell.servers || {});
-            // Update chatShell.selectedServerUrl to match select value
-            chatShell.selectedServerUrl = select.value;
-        }
-        // Replace all calls to renderChatServerSelect() with the appropriate new function
-        // For CBus Tap card: renderTapServerSelect()
-        // For MCP page: renderMcpServerSelect()
-        // Initial render for MCP page
-        if (document.getElementById('mcpServerSelect')) {
-            renderMcpServerSelect();
-        }
-
         function onConnectToCbusChanged(field, checked) {
             console.debug(`[page] ${field} ${checked ? 'now receives' : 'no longer receives'} chat messages`);
         }
@@ -2931,22 +2459,8 @@
                 }, { once: true });
             }
         }
-        // Subscribe on page load
+        // Subscribe on page load; showMode('apps') subscribes again.
         subscribeToCbus();
-        // Subscribe again when switching to Console tab
-        const consoleTabBtn = document.getElementById('consoleTabBtn');
-        if (consoleTabBtn) {
-            consoleTabBtn.addEventListener('click', function() {
-                subscribeToCbus();
-            });
-        }
-
-        // Add a no-op renderToolResultCard to prevent ReferenceError
-        function renderToolResultCard(data) {
-            console.log("renderToolResultCard");
-            console.log(JSON.stringify(data));
-            // No-op: intentionally left blank to prevent errors
-        }
 
         function sendTapConfigToServiceWorker() {
             const tapConfig = loadCbusTapConfig();
@@ -2980,6 +2494,10 @@
                 servers: getServersFromLocalStorage()
             });
         }
+
+        // Back where you were: the Workbench, or the Apps page. Last, since the chat's state
+        // above has to exist first.
+        if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
     </script>
 
     <!-- Styles moved to styles.css -->

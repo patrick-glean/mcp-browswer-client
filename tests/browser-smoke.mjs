@@ -10,9 +10,11 @@
 // setup.sh creates. Exits non-zero if any check fails.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,7 +24,10 @@ const HOST = 'http://127.0.0.1';
 const PORTS = {
     app: 18080, modern: 18081, sse: 18082, legacy: 18083, legacySse: 18084, dual: 18085, reference: 18086,
     strictLegacy: 18087, token: 18088, strictModern: 18089, oauth: 18090, oauthWrongIss: 18091,
-    oauthNoExpiry: 18092, devtools: 19222,
+    oauthNoExpiry: 18092,
+    // Chosen per run (see freePort), so a Chrome from an earlier run that's still exiting
+    // can't answer for this one.
+    devtools: null,
 };
 const TOKEN = 'smoke-secret-token';
 // A CORS policy written before 2026-07-28: no Mcp-Method, Mcp-Name or Mcp-Param-* headers.
@@ -60,6 +65,61 @@ function start(name, command, args) {
 
 function mock(name, port, ...flags) {
     return start(name, PYTHON, ['test_mcp_server.py', '--port', String(port), ...flags]);
+}
+
+const MIME_TYPES = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json',
+    '.wasm': 'application/wasm',
+    '.svg': 'image/svg+xml',
+    '.woff2': 'font/woff2',
+};
+
+// Serves public/ the way `npm start` does, without the dependency. Python's http.server resets
+// connections when many requests arrive at once, as the page's and worker's modules do.
+function serveApp(port) {
+    const root = join(ROOT, 'public');
+    const app = { label: 'app', output: '' };
+    const server = createHttpServer((request, response) => {
+        let file = normalizePath(join(root, decodeURIComponent(new URL(request.url, HOST).pathname)));
+        let status = 200;
+        try {
+            if (!file.startsWith(root)) throw new Error('outside public/');
+            if (statSync(file).isDirectory()) file = join(file, 'index.html');
+            response.writeHead(200, { 'Content-Type': MIME_TYPES[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+            createReadStream(file).on('error', () => response.destroy()).pipe(response);
+        } catch {
+            status = 404;
+            response.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
+        }
+        app.output += `${request.method} ${request.url} -> ${status}\n`;
+    });
+    app.kill = () => server.close();
+    children.push(app);
+    server.listen(port, '127.0.0.1');
+}
+
+function freePort() {
+    return new Promise((resolve, reject) => {
+        const server = createServer();
+        server.on('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            const { port } = server.address();
+            server.close(() => resolve(port));
+        });
+    });
+}
+
+// Chrome keeps writing to its profile while it shuts down, so wait for it before deleting that.
+async function stopChrome(chrome) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+    const exited = new Promise(resolve => chrome.once('exit', resolve));
+    chrome.kill();
+    const force = setTimeout(() => chrome.kill('SIGKILL'), 5000);
+    await exited;
+    clearTimeout(force);
 }
 
 function stopAll() {
@@ -280,7 +340,7 @@ async function main() {
         throw new Error('--reference needs the venv: run ./setup.sh or npm run setup:python');
     }
 
-    start('app', PYTHON, ['-m', 'http.server', String(PORTS.app), '--bind', '127.0.0.1', '--directory', 'public']);
+    serveApp(PORTS.app);
     mock('modern', PORTS.modern, '--mode', 'modern');
     mock('modern+sse', PORTS.sse, '--mode', 'modern', '--sse');
     mock('legacy', PORTS.legacy, '--mode', 'legacy');
@@ -302,6 +362,7 @@ async function main() {
         await waitForHttp(`${HOST}:${port}/`);
     }
 
+    PORTS.devtools = await freePort();
     const profile = mkdtempSync(join(tmpdir(), 'mcp-smoke-'));
     const chrome = spawn(CHROME, [
         '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -340,11 +401,11 @@ async function main() {
         check('logs: the worker reports the WASM build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -398,7 +459,7 @@ async function main() {
         })()`);
         check('inspector: tools show their titles and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 3)', inspector.filtered);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 4)', inspector.filtered);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden), inspector.hidden);
@@ -415,7 +476,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 3 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 4 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
@@ -504,6 +565,210 @@ async function main() {
         check('opening the app in a second tab keeps the first tab\'s connections',
             !!secondReady && !!afterTab?.includes('Echo: after a second tab') && !retried, afterTab);
         secondTab.close();
+
+        // The sandbox: Pre-fill, variables, saved requests and collections, the history of every
+        // call with what changed, and export and import. It reloads the page near the end.
+        await page.waitFor(`!!chatShell.sandbox`, 10000);
+        const openTool = (url, tool) => page.run(`(() => {
+            document.getElementById('mcpTabBtn').click();
+            document.querySelector('.view-switch-btn[data-view="tools"]').click();
+            [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(url)}).closest('.server-item').click();
+            [...document.querySelectorAll('#toolsList .tool-item')].find(el => el.dataset.tool === ${JSON.stringify(tool)}).click();
+        })()`);
+        const field = name => `document.querySelector('#toolCard [name="${name}"]').value`;
+        const setField = (name, value) => page.run(`(() => {
+            const input = document.querySelector('#toolCard [name="${name}"]');
+            input.value = ${JSON.stringify(value)};
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        const prefillFrom = async source => {
+            await page.run(`document.querySelector('#toolCard .prefill-menu').open = true`);
+            await page.waitFor(`!!document.querySelector('#toolCard [data-prefill-source="${source}"]:not([disabled])')`, 5000);
+            await page.run(`document.querySelector('#toolCard [data-prefill-source="${source}"]').click()`);
+        };
+        // The result card once the run is in, as text.
+        const shownResult = `(() => {
+            const card = document.getElementById('toolResultCard');
+            const text = card.innerText.trim();
+            return text && !card.querySelector('[data-pending]') ? text.replace(/\\s+/g, ' ') : null;
+        })()`;
+        const submitToolCard = async () => {
+            await page.run(`(() => {
+                document.getElementById('toolResultCard').innerHTML = '';
+                document.querySelector('#toolCard form').requestSubmit();
+            })()`);
+            return page.waitFor(shownResult);
+        };
+        const showView = view => page.run(`document.querySelector('.view-switch-btn[data-view="${view}"]').click()`);
+        const savedItem = name => `[...document.querySelectorAll('#savedList .saved-item')].find(li => li.querySelector('.saved-name')?.textContent === ${JSON.stringify(name)})`;
+        const runSaved = async name => {
+            await page.run(`(() => {
+                document.getElementById('toolResultCard').innerHTML = '';
+                ${savedItem(name)}.querySelector('[data-run-request]').click();
+            })()`);
+            return page.waitFor(`document.querySelector('#toolResultCard .run-summary') && ${shownResult}`);
+        };
+
+        await openTool(modernUrl, 'echo');
+        await prefillFrom('schema');
+        const echoFromSchema = await page.waitFor(`${field('text')} || null`, 5000);
+        await openTool(modernUrl, 'count');
+        await prefillFrom('schema');
+        const countFromSchema = await page.waitFor(`${field('n')} || null`, 5000);
+        check('pre-fill: From the schema fills in examples and defaults', echoFromSchema === 'hello' && countFromSchema === '3', `${echoFromSchema}, ${countFromSchema}`);
+
+        await page.run(`(() => {
+            document.getElementById('editEnvBtn').click();
+            const rows = () => document.querySelectorAll('#envVariables .env-variable');
+            const set = (row, name, value) => {
+                row.querySelector('.env-variable-name').value = name;
+                row.querySelector('.env-variable-value').value = value;
+            };
+            set(rows()[0], 'greeting', 'hi');
+            document.getElementById('addVariableBtn').click();
+            set(rows()[1], 'n', '2');
+            document.getElementById('envVariables').dispatchEvent(new Event('input', { bubbles: true }));
+            document.getElementById('closeEnvEditor').click();
+        })()`);
+        await openTool(modernUrl, 'count');
+        await prefillFrom('schema');
+        const nFromVariable = await page.waitFor(`${field('n')} || null`, 5000);
+        const nPreview = await page.waitFor(`(() => {
+            const preview = document.querySelector('#toolCard .sends-preview');
+            return preview.querySelector('pre').textContent.includes('"n": 2') && preview.querySelector('summary').textContent;
+        })()`, 5000);
+        const countedTo = await submitToolCard();
+        check('variables: a number field takes {{n}} and sends it as a number',
+            nFromVariable === '{{n}}' && /1 variable from Default/.test(nPreview || '') && !!countedTo?.includes('Counted to 2'), `${nFromVariable}; ${nPreview}; ${countedTo}`);
+
+        await openTool(modernUrl, 'echo');
+        await setField('text', '{{greeting}} world');
+        const greetingPreview = await page.waitFor(`document.querySelector('#toolCard .sends-preview pre').textContent.includes('"hi world"')`, 5000);
+        const greeted = await submitToolCard();
+        check('variables: {{greeting}} world goes out as "hi world", as the preview showed', !!greetingPreview && !!greeted?.includes('Echo: hi world'), greeted);
+        await setField('text', '{{nope}}');
+        const unknownVariable = await submitToolCard();
+        check('variables: an unknown variable stops the call and names itself', /\{\{nope\}\} isn't a variable/.test(unknownVariable || ''), unknownVariable);
+
+        await openTool(modernUrl, 'echo');
+        await page.run(`document.querySelector('#toolCard [data-prefill-best]').click()`);
+        const lastSentText = await page.waitFor(`${field('text')} || null`, 5000);
+        check('pre-fill: one click brings back what you last sent, variables and all', lastSentText === '{{greeting}} world', lastSentText);
+
+        const saveAs = async (name, collection) => {
+            await page.run(`document.querySelector('#toolCard [data-save-request]').click()`);
+            await page.waitFor(`!!document.querySelector('#toolCard .save-request:not([hidden]) [data-save-name]')`, 5000);
+            await page.run(`(() => {
+                const panel = document.querySelector('#toolCard .save-request');
+                panel.querySelector('[data-save-name]').value = ${JSON.stringify(name)};
+                const select = panel.querySelector('[data-save-collection]');
+                const existing = [...select.options].find(option => option.textContent === ${JSON.stringify(collection)});
+                select.value = existing ? existing.value : '__new';
+                select.dispatchEvent(new Event('change'));
+                if (!existing) panel.querySelector('[data-save-new-collection]').value = ${JSON.stringify(collection)};
+                panel.querySelector('[data-save-confirm]').click();
+            })()`);
+            return page.waitFor(`(() => {
+                const note = document.querySelector('#toolCard .tool-toolbar-note').textContent;
+                return note.startsWith('Saved as') ? note : null;
+            })()`, 5000);
+        };
+        const savedGreeting = await saveAs('Greeting', 'Smoke');
+        await openTool(modernUrl, 'ticket');
+        await prefillFrom('schema');
+        const savedTicket = await saveAs('Next ticket', 'Smoke');
+        await showView('saved');
+        const savedNames = await page.waitFor(`(() => {
+            const names = [...document.querySelectorAll('#savedList .saved-group')].filter(group => group.querySelector('.saved-group-name')?.textContent === 'Smoke')
+                .flatMap(group => [...group.querySelectorAll('.saved-name')].map(el => el.textContent));
+            return names.length === 2 ? names.join(', ') : null;
+        })()`, 5000);
+        await page.run(`${savedItem('Greeting')}.querySelector('[data-open-request]').click()`);
+        const reopened = await page.waitFor(`document.querySelector('#toolCard h3')?.textContent === 'echo' && ${field('text')}`, 5000);
+        check('saved requests: saved into a collection and opened again',
+            savedGreeting === 'Saved as Greeting.' && savedTicket === 'Saved as Next ticket.' && savedNames === 'Greeting, Next ticket' && reopened === '{{greeting}} world',
+            `${savedNames}; ${reopened}`);
+        await openTool(modernUrl, 'echo');
+        await page.run(`document.querySelector('#toolCard .prefill-menu').open = true`);
+        await page.waitFor(`[...document.querySelectorAll('#toolCard [data-prefill-source]')].some(item => item.textContent === 'Saved: Greeting')`, 5000);
+        await page.run(`[...document.querySelectorAll('#toolCard [data-prefill-source]')].find(item => item.textContent === 'Saved: Greeting').click()`);
+        const fromSavedMenu = await page.waitFor(`(() => {
+            const note = document.querySelector('#toolCard .tool-toolbar-note').textContent;
+            return /^Filled from Greeting/.test(note) ? ${field('text')} : null;
+        })()`, 5000);
+        check('pre-fill: the menu offers saved requests for the tool', fromSavedMenu === '{{greeting}} world', fromSavedMenu);
+        await showView('saved');
+        await page.waitFor(`!!${savedItem('Greeting')}`, 5000);
+
+        await runSaved('Greeting');
+        const greetingAgain = await runSaved('Greeting');
+        check('Run again: a saved request whose result is the same says so', /Same as the last run/.test(greetingAgain || '') && !!greetingAgain?.includes('Echo: hi world'), greetingAgain);
+        await runSaved('Next ticket');
+        const ticketAgain = await runSaved('Next ticket');
+        await page.run(`document.querySelector('#toolResultCard [data-show-changes]')?.click()`);
+        const ticketDiff = await page.waitFor(`document.querySelector('#toolResultCard .run-diff:not([hidden]) .diff')?.innerText`, 5000);
+        check('Run again: a changed result says so, and Show changes has the lines that differ',
+            /Changed since the last run/.test(ticketAgain || '') && /^- .*"text": "T-\d+"/m.test(ticketDiff || '') && /^\+ .*"text": "T-\d+"/m.test(ticketDiff || ''),
+            (ticketDiff || ticketAgain || '').replace(/\s+/g, ' ').slice(0, 160));
+
+        await page.run(`[...document.querySelectorAll('#savedList .saved-group')].find(group => group.querySelector('.saved-group-name')?.textContent === 'Smoke').querySelector('[data-run-collection]').click()`);
+        const collectionSummary = await page.waitFor(`[...document.querySelectorAll('#savedList .collection-run-summary')].map(el => el.textContent).find(text => text.startsWith('Ran ')) || null`, 20000);
+        check('Run all: runs the collection and sums up what changed', collectionSummary === 'Ran 2: 1 same, 1 changed, 0 failed', collectionSummary);
+
+        await showView('history');
+        const historySources = await page.waitFor(`(() => {
+            const items = [...document.querySelectorAll('#historyList .history-item')];
+            return items.length ? [...new Set(items.map(item => item.dataset.source))].sort().join(', ') : null;
+        })()`, 5000);
+        check('history: every call is there, the chat\'s and Run all\'s included',
+            ['chat', 'collection', 'sandbox'].every(source => (historySources || '').includes(source)), historySources);
+        await page.run(`document.querySelector('#historyList .history-item').click()`);
+        const openedRun = await page.waitFor(`(() => {
+            const button = document.querySelector('#toolCard .call-tool-btn');
+            return button?.textContent === 'Run again' && /From history/.test(document.getElementById('toolResultCard').innerText)
+                ? document.querySelector('#toolCard h3').textContent + ' ' + ${field('prefix')} : null;
+        })()`, 5000);
+        check('history: an entry opens with its arguments and result, ready to run again', openedRun === 'ticket T-', openedRun);
+
+        const historyCount = await page.run(`document.querySelectorAll('#historyList .history-item').length`);
+        await page.send('Page.reload');
+        await page.waitFor(`typeof chatShell !== 'undefined' && !!chatShell.sandbox && !!chatShell.serviceWorker`, 20000);
+        await page.run(`document.getElementById('mcpTabBtn').click()`);
+        await showView('history');
+        const historyAfterReload = await page.waitFor(`document.querySelectorAll('#historyList .history-item').length || null`, 5000);
+        check('history: kept after a reload', historyAfterReload === historyCount, `${historyAfterReload} of ${historyCount} runs`);
+
+        const exportFolder = mkdtempSync(join(tmpdir(), 'mcp-smoke-export-'));
+        await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: exportFolder });
+        await showView('saved');
+        await page.waitFor(`!!${savedItem('Greeting')}`, 5000);
+        await page.run(`document.getElementById('exportSandboxBtn').click()`);
+        let exportFile;
+        for (let i = 0; i < 50 && !exportFile; i++) {
+            exportFile = readdirSync(exportFolder).find(name => name.endsWith('.json'));
+            if (!exportFile) await sleep(100);
+        }
+        const exported = exportFile ? JSON.parse(readFileSync(join(exportFolder, exportFile), 'utf8')) : null;
+        await page.run(`${savedItem('Greeting')}.querySelector('[data-delete-request]').click()`);
+        await page.waitFor(`!${savedItem('Greeting')}`, 5000);
+        const { root } = (await page.send('DOM.getDocument')).result;
+        const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importSandboxInput' })).result;
+        await page.send('DOM.setFileInputFiles', { nodeId, files: [join(exportFolder, exportFile || 'missing.json')] });
+        const imported = await page.waitFor(`/^Imported/.test(document.getElementById('sandboxStatus').textContent) && !!${savedItem('Greeting')} && document.getElementById('sandboxStatus').textContent`, 5000);
+        rmSync(exportFolder, { recursive: true, force: true });
+        check('export and import: an export brings back a deleted request',
+            exported?.requests?.length === 2 && exported.environments?.[0]?.variables?.greeting === 'hi' && /^Imported 2 saved requests, 1 collection and 1 environment/.test(imported || ''),
+            imported || exportFile || 'no export');
+
+        await showView('history');
+        await page.run(`(() => {
+            const clear = document.getElementById('clearHistoryBtn');
+            clear.click();
+            clear.click();
+        })()`);
+        const cleared = await page.waitFor(`/No calls yet/.test(document.getElementById('historyList').textContent)`, 5000);
+        check('history: Clear history empties it', !!cleared);
+        await showView('tools');
 
         const tokenUrl = `${HOST}:${PORTS.token}/`;
         const locked = await addAndConnect(page, tokenUrl, 'needs a token');
@@ -737,6 +1002,24 @@ async function main() {
                 gitmcp?.status === 'connected' && gitmcp.era === 'legacy', gitmcp ? `${gitmcp.version} ${gitmcp.era} ${gitmcp.error || ''}` : 'no answer');
         }
 
+        // Calls made with a static token or after signing in are in history, without the tokens.
+        const sandboxDump = await page.run(`new Promise((resolve, reject) => {
+            const open = indexedDB.open('mcp_sandbox');
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const names = ['runs', 'requests', 'environments'];
+                const tx = open.result.transaction(names);
+                const dump = {};
+                for (const name of names) tx.objectStore(name).getAll().onsuccess = event => { dump[name] = event.target.result; };
+                tx.oncomplete = () => resolve(JSON.stringify(dump));
+            };
+        })`);
+        const storedRuns = JSON.parse(sandboxDump || '{}').runs || [];
+        check('the sandbox store has the calls but never a token',
+            storedRuns.some(run => run.serverUrl === tokenUrl) && storedRuns.some(run => run.serverUrl === oauthUrl)
+                && !sandboxDump.includes(TOKEN) && secrets.every(secret => !sandboxDump.includes(secret)),
+            `${storedRuns.length} runs`);
+
         check('no uncaught page errors', page.exceptions.length === 0, page.exceptions.join(' | '));
     } finally {
         if (page && results.some(r => !r.ok)) {
@@ -753,8 +1036,7 @@ async function main() {
             }
         }
         page?.close();
-        chrome.kill();
-        await sleep(300);
+        await stopChrome(chrome);
         rmSync(profile, { recursive: true, force: true });
     }
 

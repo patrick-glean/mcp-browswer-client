@@ -76,7 +76,7 @@ Page-to-worker messages and the replies the worker broadcasts:
 | --- | --- |
 | `{type: 'connect-mcp', url, bearerToken?}` (`initialize-mcp` still works) | `mcp_server_connected {url, info}` or `mcp_server_error {url, action, error}` |
 | `{type: 'list_tools', url, refresh?, bearerToken?}` | `tools_list {url, tools, rejected, ttlMs, fromCache}` or `mcp_server_error` |
-| `{type: 'call_tool', tapConfig, engramId, bearerToken?}` | `tool_result {result}` or `tool_result {error, errorKind}` |
+| `{type: 'call_tool', tapConfig, engramId, bearerToken?, run?}` | `tool_result {result, run}` or `tool_result {error, errorKind, run}`, plus `run_recorded {run}` to every page |
 | `{type: 'forget-mcp', url}` | none |
 | `{type: 'auth-start', url, wwwAuthenticate?}` | `auth_redirect {url, authorizationUrl, issuer}` or `auth_error {url, error}`, to the sender only |
 | `{type: 'auth-callback', query}` (the callback's query string, from `oauth-callback.html` or pasted into a page) | `auth_callback_done {ok, url?, error?, unknownState?}` to the sender, then `auth_complete {url, status}` or `auth_error {url, error}` to every page. `unknownState` means no sign-in in this browser has that `state`: it was started in another browser, expired, or was used already |
@@ -86,6 +86,16 @@ Page-to-worker messages and the replies the worker broadcasts:
 `status` is `{signedIn, issuer?, scope?, expiresAt?, refreshable?, clientId?}`: pages learn whether they're signed in, never the tokens. MCP calls get their credentials in the worker: a static `bearerToken` wins, otherwise the stored access token, refreshed first when it expires within a minute. When a server turns down an OAuth token with `auth_required`, the worker refreshes it once and retries (`withAuth` in `sw.js`). Refreshes for one server run one at a time, because refresh tokens may rotate.
 
 The worker handles every message inside `event.waitUntil()` so a long call keeps it alive. It logs only a message's type and target, never its payload, so bearer tokens and authorization codes stay out of the logs.
+
+### Runs (the sandbox's history)
+
+Every tool call becomes a run, whichever part of the client made it: `handleToolCall` in `sw.js` records it at its one success point and its one failure point (`recordRun`), in the `runs` store of `public/sandbox/store.js`. Chat calls and tool calls found in replies are recorded too, with `source` `chat` or `reply`.
+
+- **What the page sends:** `call_tool`'s `tapConfig.args` are the arguments to send, with `{{variables}}` already filled in by the page (`public/sandbox/template.js`, which knows the tool's schema). `run` is `{id, args, requestId?, collectionRunId?, environmentName?}`: the page's id for the run, so it can wait for this answer; the arguments as written; the saved request and Run all it came from; and the environment whose variables it used.
+- **What comes back:** `tool_result.run` and `run_recorded.run` are `{id, startedAt, durationMs, outcome, changed, previousRunId}`, and `run_recorded` adds `source`, `serverUrl`, `toolName`, `requestId` and `errorKind` for History. `outcome` is `ok`, `tool_error` (`isError` results) or `failed`. `changed` is `true` or `false` against the previous run of the same request, or `null` for the first.
+- **Comparing:** runs of a saved request compare with each other, and other calls with earlier calls of the same tool and sent arguments (`compareKey`). Results are compared by a SHA-256 of their JSON with keys sorted and every `_meta` removed (`resultHash`, `public/sandbox/runs.js`).
+- **Storage:** the store keeps the newest 500 runs. Arguments or results over 256 KB of JSON are kept as the start of their text (`argsText`, `sentArgsText`, `resultText`) with `truncated` set.
+- **Failures:** recording failures are logged as warnings and never fail the call.
 
 ## Logging
 

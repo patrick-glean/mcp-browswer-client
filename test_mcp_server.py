@@ -48,7 +48,7 @@ TOOLS = [
         "description": "Echoes back the input text.",
         "inputSchema": {
             "type": "object",
-            "properties": {"text": {"type": "string", "description": "Text to echo back."}},
+            "properties": {"text": {"type": "string", "description": "Text to echo back.", "examples": ["hello"]}},
             "required": ["text"],
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
@@ -70,7 +70,7 @@ TOOLS = [
         "description": "Counts to n (1-10). With --sse the reply streams in while it counts.",
         "inputSchema": {
             "type": "object",
-            "properties": {"n": {"type": "integer", "description": "How far to count."}},
+            "properties": {"n": {"type": "integer", "description": "How far to count.", "default": 3}},
             "required": ["n"],
         },
         "outputSchema": {
@@ -79,6 +79,16 @@ TOOLS = [
             "required": ["counted"],
         },
         "annotations": {"readOnlyHint": True, "idempotentHint": True},
+    },
+    {
+        "name": "ticket",
+        "title": "Next ticket",
+        "description": "Hands out the next ticket number, so every call returns something new.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"prefix": {"type": "string", "description": "Text before the number.", "default": "T-"}},
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": False},
     },
     {
         "name": "broken_header",
@@ -348,6 +358,11 @@ class Handler(BaseHTTPRequestHandler):
             steps = max(1, min(int(args.get("n", 3)), 10))
             text = f"Counted to {steps}"
             result["structuredContent"] = {"counted": steps}
+        elif name == "ticket":
+            with self.server.lock:
+                self.server.tickets += 1
+                number = self.server.tickets
+            text = f"{args.get('prefix', 'T-')}{number}"
         else:
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")
@@ -622,6 +637,7 @@ def main():
     server.omit_expires_in = args.omit_expires_in
     server.oauth_clients, server.oauth_codes, server.oauth_access, server.oauth_refresh = {}, {}, {}, {}
     server.sessions = {}
+    server.tickets = 0
     server.lock = threading.Lock()
     url = f"http://{args.host}:{args.port}"
     features = [args.mode] + (["SSE replies"] if args.sse else []) + (["bearer token required"] if args.token else [])
@@ -631,7 +647,7 @@ def main():
     print(f"  Browser origins allowed: {', '.join(server.allowed_origins)}", flush=True)
     if args.allow_headers:
         print(f"  CORS preflights allow only: {args.allow_headers}", flush=True)
-    print(f"  In the client, add {url} on the MCP tab (the Guide has a button for it). Ctrl+C stops the server.", flush=True)
+    print(f"  In the client, add {url} on the Sandbox tab (the Guide has a button for it). Ctrl+C stops the server.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

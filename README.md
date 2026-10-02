@@ -6,6 +6,8 @@ A browser client for MCP (the Model Context Protocol). Its protocol logic is Rus
 
 Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.io/mcp-browswer-client/). The Guide (top right, and open on your first visit) has one-click buttons for public MCP servers that need no account, such as Hugging Face and Microsoft Learn. Choose one, click a tool, fill in its fields and choose Call tool. The Logs tab shows what happened.
 
+The [Sandbox](#sandbox) tab is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed.
+
 For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your Glean MCP server URL) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
 
 ## Prerequisites
@@ -37,6 +39,13 @@ For servers that need an account, the client signs in with OAuth, as desktop MCP
 │   ├── logger.js          # The worker's structured logger
 │   ├── authStore.js       # IndexedDB storage for sign-ins: registered clients, tokens, sign-ins in progress
 │   ├── chatStorage.js     # IndexedDB storage for conversations
+│   ├── sandbox/           # The Sandbox tab: saved requests, environments, history (ES modules)
+│   │   ├── ui.js          # Pre-fill, Save, the Saved and History views, Run all, export and import
+│   │   ├── store.js       # IndexedDB storage (mcp_sandbox), shared by the page and the worker
+│   │   ├── runs.js        # What counts as the same request and a changed result
+│   │   ├── template.js    # {{variable}} resolution with type conversion
+│   │   ├── prefill.js     # Field values from a tool's schema
+│   │   └── diff.js        # The line diff behind Show changes
 │   ├── index.html         # Web interface, including the Guide and the Logs tab
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── styles.css         # UI styles (Glean design language)
@@ -159,7 +168,7 @@ Not supported yet: client ID metadata documents (the spec's preferred alternativ
 
 ### Inspecting a server
 
-The MCP tab doubles as an inspector, in the spirit of the MCP Inspector but without installing anything:
+The Sandbox tab doubles as an inspector, in the spirit of the MCP Inspector but without installing anything:
 
 - **Connection**: once connected, the server details show the protocol and era, the server's name and version, the capabilities it declared, how you're authenticated and the server's instructions.
 - **Tools**: the count, a filter on name, title and description, each tool's title, and badges for its annotations (read-only, destructive, idempotent, open world), MCP Apps UI and an output schema. Annotations are hints from the server, not guarantees.
@@ -173,18 +182,51 @@ Known constraints:
 - **Local servers**: from a public site such as GitHub Pages, Chrome 142+ asks the user before it lets the page reach `localhost` ("Apps on device").
 - **Not yet supported**: `input_required` results (elicitation), `subscriptions/listen`, resources and prompts in the UI, and the deprecated 2024-11-05 HTTP+SSE transport.
 
+## Sandbox
+
+The Sandbox tab is a workbench for MCP servers: try their tools, keep the calls that work, and run them again to see what changed. Saved requests are also what apps will be built from next.
+
+- **Pre-fill.** One click fills a tool's fields from what you last sent to it, or else your newest saved request for it, or else its schema. The menu beside it picks a source:
+  - what you last sent
+  - any saved request for the tool
+  - the schema: each field's `const`, `default` or first `examples` value. Required fields without one get the first enum choice, the minimum (or 1) for numbers, and false for booleans. A field named like a variable gets that variable.
+  - nothing (clears the fields)
+- **Environments and variables.** Choose an environment in the tab's header and edit its variables under Variables.
+  - Write `{{name}}` in any field, number fields included.
+  - A field that is exactly one variable gets the variable's value converted to the field's type: a number, true or false, or JSON for objects and arrays. Text around variables stays text.
+  - A call with an unknown variable doesn't go out, and says which variable.
+  - Sends, under the fields, shows the arguments as they'll go out.
+- **Saved requests.** Save keeps the tool, its arguments as written (variables and all) and a name, optionally in a collection.
+  - The Saved view lists them by collection. Open one to fill its tool card, choose ▶ to run it, or rename and delete it from its menu.
+  - A tool card opened from a saved request runs as that request, and Save updates it (or Save as new).
+- **What changed.** Each result says whether it's the same as the last run of the same request or has changed, with Show changes for a line diff.
+  - A saved request's runs compare with each other. Other calls compare with earlier calls of the same tool with the same arguments.
+  - `_meta` is ignored, since servers put request IDs and timings there.
+- **Run all** runs a collection's requests in the order they were saved, then sums up how many were the same, changed or failed. Each line opens that run.
+- **History** lists every tool call, wherever it came from: this tab, Run all, the Console's chat, and tool calls found in chat replies.
+  - Open one to see its arguments and result, then Run again or Save it.
+  - Only the selected server narrows the list.
+- **Export and Import**, on the Saved view, move saved requests, collections and environments as one JSON file. History isn't exported.
+
+Everything stays in this browser, in IndexedDB (`mcp_sandbox`), shared by its tabs.
+
+- History keeps the newest 500 calls with their results, which include whatever the servers sent back. Results over 256 KB keep only their start. Clear history, on the History view, deletes it.
+- Tokens never go into the sandbox: arguments are stored as written, and credentials travel separately. Variables are plain text, so keep secrets out of them.
+
 ## Testing
 
 ### A five-minute check
 
 With `npm start` and `npm run start:mock-mcp` running, open http://localhost:8080:
 
-1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or paste `http://127.0.0.1:8081` on the MCP tab and choose Add server). The server details should show status `connected` and protocol `2026-07-28 (modern)`, and Available tools should list `echo`, `echo_region` and `count`. The mock also offers `broken_header`, which clients must hide.
+1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or paste `http://127.0.0.1:8081` on the Sandbox tab and choose Add server). The server details should show status `connected` and protocol `2026-07-28 (modern)`, and Available tools should list `echo`, `echo_region`, `count` and `ticket`. The mock also offers `broken_header`, which clients must hide.
 2. **Call a tool.** Choose `echo`, type `hi` into `text` and choose Call tool. The result reads `Echo: hi`.
 3. **Header parameters.** Call `echo_region` with region `Zürich`. The result reads `Echo from Zürich: …`; the mock checks that the `Mcp-Param-Region` header carried the same value, base64-encoded because it isn't ASCII.
-4. **Logs.** On the Logs tab you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 3 tools in 5 ms`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Choose Everything to add each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
+4. **Logs.** On the Logs tab you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 4 tools in 5 ms`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Choose Everything to add each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
 5. **Chat through a tool.** On the Console tab, choose the mock and `echo` under LLM target, tick Target for message on `text`, and send `hello`. The reply `Echo: hello` joins the conversation.
-6. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the Logs tab explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
+6. **Save and run again.** Choose `ticket`, then Pre-fill (the schema gives `prefix` its default, `T-`) and Save. On the Saved view, run it twice with ▶. The second result says Changed since the last run, and Show changes has the line that differs, because `ticket` returns the next number every time. A saved `echo` says Same as the last run.
+7. **Variables.** Under Variables, add `greeting` = `hi`. Call `echo` with text `{{greeting}} world`; Sends shows `"hi world"`, and so does the result. The History view lists every call so far, including the chat's.
+8. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the Logs tab explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
 
 ### More server behaviors
 
@@ -230,8 +272,10 @@ Glean only sends CORS headers to page origins on its allowlist, so from an origi
 
 ```bash
 npm run start:glean   # serves public/ on http://127.0.0.1:8888 (after ./setup.sh or npm install)
-python3 -m http.server 8888 --bind 127.0.0.1 --directory public   # the same, with nothing to install
+npx --yes http-server public -a 127.0.0.1 -p 8888 -c-1   # the same, without installing the project's dependencies
 ```
+
+Avoid `python3 -m http.server` for the app: it resets connections when the page and the worker load their modules at the same time, which can stop the service worker from starting.
 
 Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. Glean shows the client under Third party apps and MCP as "MCP Browser Client", where you can revoke it.
 
@@ -256,7 +300,7 @@ npm run test:browser -- --reference  # plus the official Python SDK server
 npm run test:public                  # plus the public servers above (needs internet)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the inspector views and download; a worker restart, a second tab, the logs pop-out, the Guide; and what the Logs tab records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the inspector views and download; the sandbox (each Pre-fill source, variables in text and number fields, saved requests and collections, Run again and Run all with what changed, history including the chat's calls and after a reload, export and import, and no tokens in its store); a worker restart, a second tab, the logs pop-out, the Guide; and what the Logs tab records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 ## Logs
 
