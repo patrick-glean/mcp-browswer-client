@@ -70,7 +70,6 @@ export class WbRequest extends WbElement {
                 <nav class="wb-crumb" aria-label="This request"></nav>
                 <div class="wb-title-row">
                     <h2 class="wb-request-title">${escapeHtml(title || tool.name)}</h2>
-                    ${toolBadges(tool)}
                     <span class="wb-spacer"></span>
                     <div class="wb-request-actions">
                         <div class="split-button">
@@ -84,6 +83,7 @@ export class WbRequest extends WbElement {
                         <button type="submit" form="requestForm" class="btn-primary btn-sm" id="runBtn" title="Run (⌘↵ or Ctrl+Enter)" aria-keyshortcuts="Meta+Enter Control+Enter"><span class="icon icon-play" aria-hidden="true"></span>Run</button>
                     </div>
                 </div>
+                ${toolBadges(tool)}
                 ${tool.description ? `<div class="wb-description"><p data-description>${escapeHtml(tool.description)}</p><button type="button" class="link-button" data-more-description hidden>More</button></div>` : ''}
                 <p class="wb-request-note text-secondary" aria-live="polite"></p>
                 <div class="save-request" hidden></div>

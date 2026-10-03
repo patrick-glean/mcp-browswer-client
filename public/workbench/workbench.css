@@ -251,6 +251,25 @@ kbd {
     .wb-goto {
         min-width: 0;
     }
+
+    .wb-apps .chat-card {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .wb-dock-head {
+        flex-wrap: wrap;
+        height: auto;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+
+    .wb-dock-head .log-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .wb-dock-head .log-toolbar input[type='search'] {
+        width: 140px;
+    }
 }
 
 /* ---------- Shared pieces ---------- */
@@ -356,6 +375,47 @@ kbd {
 .wb-more {
     font-size: 1rem;
     line-height: 1;
+}
+
+/* <details> menus: their summary is the button, so it needs the button look itself. */
+summary.btn-sm,
+summary.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: var(--radius-full);
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    user-select: none;
+}
+
+summary.btn-icon.btn-sm {
+    width: 24px;
+    padding: 0;
+}
+
+summary.btn-sm:not(.btn-tertiary) {
+    background: var(--theme-background-mid);
+}
+
+summary.btn-sm:hover,
+summary.btn-icon:hover,
+details[open] > summary.btn-sm,
+details[open] > summary.btn-icon {
+    background: var(--theme-feedback-hover);
+}
+
+.split-button > button {
+    border-right: 1px solid var(--theme-border-dark);
+}
+
+.split-button summary.btn-sm {
+    padding: 0 7px;
+    border-radius: 0 var(--radius-full) var(--radius-full) 0;
 }
 
 .wb-caret {

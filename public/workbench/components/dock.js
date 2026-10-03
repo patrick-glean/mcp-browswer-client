@@ -144,7 +144,7 @@ export class WbDock extends WbElement {
                         ? `<span class="badge badge-error">${escapeHtml(run.errorKind || 'failed')}</span>`
                         : run.outcome === 'tool_error' ? '<span class="badge badge-error">tool error</span>' : verdictChip(run);
                     return `
-                        <tr class="history-item" data-open-run="${escapeHtml(run.id)}" data-source="${escapeHtml(run.source)}" tabindex="0">
+                        <tr class="wb-run-row" data-open-run="${escapeHtml(run.id)}" data-source="${escapeHtml(run.source)}" tabindex="0">
                             <td>${escapeHtml(timeAgo(run.startedAt))}</td>
                             <td class="mono">${escapeHtml(run.toolName)}</td>
                             <td>${escapeHtml(this.workbench.serverLabel(run.serverUrl))}</td>

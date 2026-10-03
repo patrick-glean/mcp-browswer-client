@@ -177,7 +177,7 @@ pub fn http_error(reply: &HttpReply) -> McpError {
     let (kind, message) = match status {
         401 => (
             ErrorKind::AuthRequired,
-            "The server needs you to sign in (HTTP 401). Choose Sign in in the server details, or set a static token there if the server uses one.".to_string(),
+            "The server needs you to sign in (HTTP 401). Choose Sign in, or set a static token in the server's details if it uses one.".to_string(),
         ),
         403 => (
             ErrorKind::Http,

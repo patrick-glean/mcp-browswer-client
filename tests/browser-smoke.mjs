@@ -271,10 +271,22 @@ function connectionState(url) {
     })()`;
 }
 
-// Adding a server connects to it.
+// Page snippets for the Workbench's parts.
+const showWorkbench = `document.querySelector('[data-mode="workbench"]').click()`;
+const serverRow = url => `document.querySelector('#serverList .wb-server[data-url="' + CSS.escape(${JSON.stringify(url)}) + '"]')`;
+const toolRow = tool => `document.querySelector('#toolList .wb-tool[data-tool="' + CSS.escape(${JSON.stringify(tool)}) + '"]')`;
+// The response pane's text once the run is in.
+const shownResult = `(() => {
+    const pane = document.getElementById('responsePane');
+    const text = pane.innerText.trim();
+    return text && !pane.querySelector('[data-pending]') ? text.replace(/\\s+/g, ' ') : null;
+})()`;
+
+// Adding a server (with + beside Servers) connects to it.
 async function addAndConnect(page, url, alias, ms) {
     await page.run(`(() => {
-        document.getElementById('mcpTabBtn').click();
+        ${showWorkbench};
+        if (document.getElementById('addServerForm').hidden) document.getElementById('addServerToggle').click();
         document.getElementById('serverUrl').value = ${JSON.stringify(url)};
         document.getElementById('serverAlias').value = ${JSON.stringify(alias)};
         document.getElementById('addServerBtn').click();
@@ -290,27 +302,28 @@ async function toolNames(page, url, ms) {
     return names || [];
 }
 
+// Picks the server and tool, fills in the fields and runs it, as a person would.
 async function callTool(page, url, tool, values, ms = 20000) {
     await page.run(`(() => {
-        document.getElementById('mcpTabBtn').click();
-        const item = [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(url)});
-        item.closest('.server-item').click();
-        const toolItem = [...document.querySelectorAll('#toolsList .tool-item')].find(el => el.dataset.tool === ${JSON.stringify(tool)});
-        toolItem.click();
+        ${showWorkbench};
+        ${serverRow(url)}.click();
+        ${toolRow(tool)}.click();
         for (const [name, value] of Object.entries(${JSON.stringify(values)})) {
-            document.querySelector('#toolCard [name="' + name + '"]').value = value;
+            document.querySelector('#requestForm [name="' + name + '"]').value = value;
         }
-        document.getElementById('toolResultCard').innerHTML = '';
-        document.querySelector('#toolCard form').requestSubmit();
+        document.getElementById('responsePane').innerHTML = '';
+        document.getElementById('requestForm').requestSubmit();
     })()`);
-    return page.waitFor(`(() => {
-        const card = document.getElementById('toolResultCard');
-        const text = card.innerText.trim();
-        return text && !card.querySelector('[data-pending]') ? text.replace(/\\s+/g, ' ') : null;
-    })()`, ms);
+    return page.waitFor(shownResult, ms);
 }
 
-// The Logs tab's entries, for checks that the right things were (and weren't) logged.
+// Opens a dock tab (clicking an open tab would collapse the dock).
+const showDock = tab => `(() => {
+    const button = document.querySelector('[data-dock-tab="${tab}"]');
+    if (button.getAttribute('aria-selected') !== 'true') button.click();
+})()`;
+
+// The log's entries, for checks that the right things were (and weren't) logged.
 const entries = `chatShell.logPanel.entries`;
 
 // Chooses Sign in on the selected server's card, as a click (pop-up windows need one), then waits
@@ -380,8 +393,14 @@ async function main() {
         const healthy = await page.waitFor(`
             document.getElementById('sw-status').classList.contains('healthy') &&
             document.getElementById('wasm-status').classList.contains('healthy') &&
-            !!chatShell.serviceWorker`);
-        check('app loads with the service worker and WASM running', !!healthy);
+            !!chatShell.serviceWorker && !!chatShell.workbench`);
+        check('app loads with the service worker, WASM and the Workbench running', !!healthy);
+        const frame = await page.run(`(() => {
+            const areas = ['wb-rail', 'wb-server-bar', 'wb-tools', 'wb-request', 'wb-response', 'wb-dock']
+                .filter(name => customElements.get(name) && document.querySelector(name)?.getBoundingClientRect().width > 0);
+            return areas.join(', ');
+        })()`);
+        check('Workbench: every part of layout B is on the page', frame === 'wb-rail, wb-server-bar, wb-tools, wb-request, wb-response, wb-dock', frame);
 
         const firstVisit = await page.run(`!document.getElementById('guide').hidden`);
         check('the guide opens on the first visit', firstVisit);
@@ -434,37 +453,56 @@ async function main() {
         // The inspector views of the modern mock: echo has a title and annotations, count an output
         // schema, and broken_header is hidden.
         const inspector = await page.run(`(() => {
-            document.getElementById('mcpTabBtn').click();
-            [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(modernUrl)}).closest('.server-item').click();
-            const item = name => document.querySelector('#toolsList .tool-item[data-tool="' + name + '"]');
-            const badges = name => [...item(name).querySelectorAll('.badge')].map(b => b.textContent);
+            ${showWorkbench};
+            ${serverRow(modernUrl)}.click();
+            const item = name => document.querySelector('#toolList .wb-tool[data-tool="' + name + '"]');
+            // The request pane's title and badges for a tool.
+            const described = name => {
+                item(name).click();
+                const pane = document.getElementById('requestPane');
+                return [pane.querySelector('.wb-request-title').textContent, ...[...pane.querySelectorAll('.badge')].map(b => b.textContent)];
+            };
             const filter = document.getElementById('toolFilter');
             filter.value = 'region';
-            filter.dispatchEvent(new Event('input'));
-            const visible = [...document.querySelectorAll('#toolsList .tool-item')].filter(el => !el.hidden).map(el => el.dataset.tool);
+            filter.dispatchEvent(new Event('input', { bubbles: true }));
+            const visible = [...document.querySelectorAll('#toolList .wb-tool')].map(el => el.dataset.tool);
             const count = document.getElementById('toolCount').textContent;
             filter.value = '';
-            filter.dispatchEvent(new Event('input'));
-            item('count').click();
+            filter.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('[data-hint-filter="writes"]').click();
+            const writes = [...document.querySelectorAll('#toolList .wb-tool')].map(el => el.dataset.tool).join(', ');
+            document.querySelector('[data-hint-filter="all"]').click();
+            const hints = ['echo', 'echo_region', 'ticket'].map(name => name + ' ' + item(name).querySelector('.wb-hints').textContent).join('; ');
+            const echo = described('echo').join(', ');
+            const countBadges = described('count').slice(1).join(', ');
+            const schemas = [...document.querySelectorAll('#requestPane .tool-schema summary')].map(s => s.textContent).join(', ');
             const hidden = document.getElementById('hiddenTools');
-            const connection = document.getElementById('cardConnection');
+            document.getElementById('serverInfoBtn').click();
+            const connection = document.getElementById('serverConnection')?.innerText.replace(/\\s+/g, ' ') || '';
+            document.querySelector('wb-sheet [data-close-sheet]').click();
             return {
-                echo: [item('echo').querySelector('.tool-item-title')?.textContent, ...badges('echo')].join(', '),
-                count: badges('count').join(', '),
+                echo, count: countBadges, schemas, hints, writes, connection,
                 filtered: visible.join(', ') + ' (' + count + ')',
-                schemas: [...document.querySelectorAll('#toolCard .tool-schema summary')].map(s => s.textContent).join(', '),
-                hidden: hidden.hidden ? '' : hidden.innerText.replace(/\\s+/g, ' '),
-                connection: connection.hidden ? '' : connection.innerText.replace(/\\s+/g, ' '),
+                hidden: hidden ? hidden.innerText.replace(/\\s+/g, ' ') : '',
             };
         })()`);
-        check('inspector: tools show their titles and annotation badges',
+        check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
+        check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
         check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 4)', inspector.filtered);
+        check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
-        check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden), inspector.hidden);
-        check('inspector: the server card shows what the server said about itself',
+        check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
+        check('inspector: Info shows what the server said about itself',
             /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities tools/.test(inspector.connection), inspector.connection);
+        // The mock has too few tools to be grouped, so the grouping is checked on GitHub's names.
+        const groups = await page.run(`import('./workbench/components/tools.js').then(({ groupTools }) => {
+            const names = ['get_me', 'list_issues', 'get_issue', 'create_issue', 'add_issue_comment', 'list_pull_requests', 'get_pull_request',
+                'create_pull_request', 'merge_pull_request', 'list_branches', 'create_branch', 'search_code'];
+            return groupTools(names.map(name => ({ name }))).map(([word, members]) => word + ' ' + members.length).join(', ');
+        })`);
+        check('inspector: big servers\' tools are grouped by what they work on', groups === 'branch 2, issue 4, pull request 4, other 2', groups);
         const downloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-downloads-'));
         await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads });
         await page.run(`document.getElementById('downloadToolsBtn').click()`);
@@ -480,11 +518,12 @@ async function main() {
             downloaded || 'no file');
 
         const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
-        check('console tool picker is populated', !!picker, picker);
+        check('the Chat app\'s tool picker is populated', !!picker, picker);
 
-        // The README's chat walkthrough: pick a server and tool, target a field, send a message.
+        // The README's chat walkthrough: open Apps, pick a server and tool, tick the field your
+        // message goes to, send a message.
         await page.run(`(() => {
-            document.getElementById('consoleTabBtn').click();
+            document.querySelector('[data-mode="apps"]').click();
             const server = document.getElementById('chatServerSelect');
             server.value = ${JSON.stringify(modernUrl)};
             server.dispatchEvent(new Event('change'));
@@ -502,7 +541,9 @@ async function main() {
             document.getElementById('chatSendBtn').click();
         })()`);
         const chatted = await page.waitFor(`[...document.querySelectorAll('#chatMessages .chat-msg.tool')].some(m => m.textContent.includes('Echo: hello from the console'))`);
-        check('the console sends a message through the chosen tool', !!chatted);
+        const appsShown = await page.run(`!document.getElementById('appsPage').hidden && document.getElementById('workbench').hidden`);
+        check('the Chat app sends a message through the chosen tool', !!chatted && appsShown);
+        await page.run(showWorkbench);
 
         const trace = await page.run(`${entries}.some(e => e.source === 'wasm' && e.level === 'debug' && e.message.startsWith('→ server/discover'))`);
         check('logs: the WASM client traces each HTTP request', trace);
@@ -566,48 +607,41 @@ async function main() {
             !!secondReady && !!afterTab?.includes('Echo: after a second tab') && !retried, afterTab);
         secondTab.close();
 
-        // The sandbox: Pre-fill, variables, saved requests and collections, the history of every
+        // The Workbench: Pre-fill, variables, saved requests and collections, the history of every
         // call with what changed, and export and import. It reloads the page near the end.
-        await page.waitFor(`!!chatShell.sandbox`, 10000);
         const openTool = (url, tool) => page.run(`(() => {
-            document.getElementById('mcpTabBtn').click();
-            document.querySelector('.view-switch-btn[data-view="tools"]').click();
-            [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(url)}).closest('.server-item').click();
-            [...document.querySelectorAll('#toolsList .tool-item')].find(el => el.dataset.tool === ${JSON.stringify(tool)}).click();
+            ${showWorkbench};
+            ${serverRow(url)}.click();
+            ${toolRow(tool)}.click();
         })()`);
-        const field = name => `document.querySelector('#toolCard [name="${name}"]').value`;
+        const field = name => `document.querySelector('#requestForm [name="${name}"]').value`;
         const setField = (name, value) => page.run(`(() => {
-            const input = document.querySelector('#toolCard [name="${name}"]');
+            const input = document.querySelector('#requestForm [name="${name}"]');
             input.value = ${JSON.stringify(value)};
             input.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
         const prefillFrom = async source => {
-            await page.run(`document.querySelector('#toolCard .prefill-menu').open = true`);
-            await page.waitFor(`!!document.querySelector('#toolCard [data-prefill-source="${source}"]:not([disabled])')`, 5000);
-            await page.run(`document.querySelector('#toolCard [data-prefill-source="${source}"]').click()`);
+            await page.run(`document.querySelector('#requestPane .prefill-menu').open = true`);
+            await page.waitFor(`!!document.querySelector('#requestPane [data-prefill-source="${source}"]:not([disabled])')`, 5000);
+            await page.run(`document.querySelector('#requestPane [data-prefill-source="${source}"]').click()`);
         };
-        // The result card once the run is in, as text.
-        const shownResult = `(() => {
-            const card = document.getElementById('toolResultCard');
-            const text = card.innerText.trim();
-            return text && !card.querySelector('[data-pending]') ? text.replace(/\\s+/g, ' ') : null;
-        })()`;
-        const submitToolCard = async () => {
+        const submitRequest = async () => {
             await page.run(`(() => {
-                document.getElementById('toolResultCard').innerHTML = '';
-                document.querySelector('#toolCard form').requestSubmit();
+                document.getElementById('responsePane').innerHTML = '';
+                document.getElementById('requestForm').requestSubmit();
             })()`);
             return page.waitFor(shownResult);
         };
-        const showView = view => page.run(`document.querySelector('.view-switch-btn[data-view="${view}"]').click()`);
+        const requestNote = `document.querySelector('#requestPane .wb-request-note').textContent`;
         const savedItem = name => `[...document.querySelectorAll('#savedList .saved-item')].find(li => li.querySelector('.saved-name')?.textContent === ${JSON.stringify(name)})`;
         const runSaved = async name => {
             await page.run(`(() => {
-                document.getElementById('toolResultCard').innerHTML = '';
+                document.getElementById('responsePane').innerHTML = '';
                 ${savedItem(name)}.querySelector('[data-run-request]').click();
             })()`);
-            return page.waitFor(`document.querySelector('#toolResultCard .run-summary') && ${shownResult}`);
+            return page.waitFor(`document.querySelector('#responsePane .run-summary') && ${shownResult}`);
         };
+        const runRows = `[...document.querySelectorAll('#runsList tr[data-open-run]')]`;
 
         await openTool(modernUrl, 'echo');
         await prefillFrom('schema');
@@ -628,38 +662,40 @@ async function main() {
             document.getElementById('addVariableBtn').click();
             set(rows()[1], 'n', '2');
             document.getElementById('envVariables').dispatchEvent(new Event('input', { bubbles: true }));
-            document.getElementById('closeEnvEditor').click();
+            document.querySelector('wb-sheet [data-close-sheet]').click();
         })()`);
         await openTool(modernUrl, 'count');
         await prefillFrom('schema');
         const nFromVariable = await page.waitFor(`${field('n')} || null`, 5000);
         const nPreview = await page.waitFor(`(() => {
-            const preview = document.querySelector('#toolCard .sends-preview');
-            return preview.querySelector('pre').textContent.includes('"n": 2') && preview.querySelector('summary').textContent;
+            const preview = document.getElementById('sendsPreview');
+            return preview.querySelector('pre').textContent.includes('"n": 2') && preview.querySelector('.wb-sends-head').textContent;
         })()`, 5000);
-        const countedTo = await submitToolCard();
+        const countedTo = await submitRequest();
         check('variables: a number field takes {{n}} and sends it as a number',
             nFromVariable === '{{n}}' && /1 variable from Default/.test(nPreview || '') && !!countedTo?.includes('Counted to 2'), `${nFromVariable}; ${nPreview}; ${countedTo}`);
 
         await openTool(modernUrl, 'echo');
         await setField('text', '{{greeting}} world');
-        const greetingPreview = await page.waitFor(`document.querySelector('#toolCard .sends-preview pre').textContent.includes('"hi world"')`, 5000);
-        const greeted = await submitToolCard();
+        const greetingPreview = await page.waitFor(`document.querySelector('#sendsPreview pre').textContent.includes('"hi world"')`, 5000);
+        const resolvedHint = await page.waitFor(`document.querySelector('#requestForm .wb-resolved')?.textContent`, 5000);
+        const greeted = await submitRequest();
         check('variables: {{greeting}} world goes out as "hi world", as the preview showed', !!greetingPreview && !!greeted?.includes('Echo: hi world'), greeted);
+        check('variables: the field shows what {{greeting}} world becomes', resolvedHint === '→ hi world · from Default', resolvedHint);
         await setField('text', '{{nope}}');
-        const unknownVariable = await submitToolCard();
+        const unknownVariable = await submitRequest();
         check('variables: an unknown variable stops the call and names itself', /\{\{nope\}\} isn't a variable/.test(unknownVariable || ''), unknownVariable);
 
         await openTool(modernUrl, 'echo');
-        await page.run(`document.querySelector('#toolCard [data-prefill-best]').click()`);
+        await page.run(`document.querySelector('#requestPane [data-prefill-best]').click()`);
         const lastSentText = await page.waitFor(`${field('text')} || null`, 5000);
         check('pre-fill: one click brings back what you last sent, variables and all', lastSentText === '{{greeting}} world', lastSentText);
 
         const saveAs = async (name, collection) => {
-            await page.run(`document.querySelector('#toolCard [data-save-request]').click()`);
-            await page.waitFor(`!!document.querySelector('#toolCard .save-request:not([hidden]) [data-save-name]')`, 5000);
+            await page.run(`document.querySelector('#requestPane [data-save-request]').click()`);
+            await page.waitFor(`!!document.querySelector('#requestPane .save-request:not([hidden]) [data-save-name]')`, 5000);
             await page.run(`(() => {
-                const panel = document.querySelector('#toolCard .save-request');
+                const panel = document.querySelector('#requestPane .save-request');
                 panel.querySelector('[data-save-name]').value = ${JSON.stringify(name)};
                 const select = panel.querySelector('[data-save-collection]');
                 const existing = [...select.options].find(option => option.textContent === ${JSON.stringify(collection)});
@@ -669,80 +705,120 @@ async function main() {
                 panel.querySelector('[data-save-confirm]').click();
             })()`);
             return page.waitFor(`(() => {
-                const note = document.querySelector('#toolCard .tool-toolbar-note').textContent;
+                const note = ${requestNote};
                 return note.startsWith('Saved as') ? note : null;
             })()`, 5000);
         };
         const savedGreeting = await saveAs('Greeting', 'Smoke');
+        const crumb = await page.run(`document.querySelector('#requestPane .wb-crumb').innerText.replace(/\\s+/g, ' ')`);
+        check('saved requests: the request pane says which saved request it shows', crumb.endsWith('echo › Greeting'), crumb);
         await openTool(modernUrl, 'ticket');
         await prefillFrom('schema');
         const savedTicket = await saveAs('Next ticket', 'Smoke');
-        await showView('saved');
         const savedNames = await page.waitFor(`(() => {
             const names = [...document.querySelectorAll('#savedList .saved-group')].filter(group => group.querySelector('.saved-group-name')?.textContent === 'Smoke')
                 .flatMap(group => [...group.querySelectorAll('.saved-name')].map(el => el.textContent));
             return names.length === 2 ? names.join(', ') : null;
         })()`, 5000);
         await page.run(`${savedItem('Greeting')}.querySelector('[data-open-request]').click()`);
-        const reopened = await page.waitFor(`document.querySelector('#toolCard h3')?.textContent === 'echo' && ${field('text')}`, 5000);
-        check('saved requests: saved into a collection and opened again',
+        const reopened = await page.waitFor(`document.querySelector('#requestPane .wb-crumb-tool')?.textContent === 'echo' && ${field('text')}`, 5000);
+        check('saved requests: saved into a collection in the rail and opened again',
             savedGreeting === 'Saved as Greeting.' && savedTicket === 'Saved as Next ticket.' && savedNames === 'Greeting, Next ticket' && reopened === '{{greeting}} world',
             `${savedNames}; ${reopened}`);
         await openTool(modernUrl, 'echo');
-        await page.run(`document.querySelector('#toolCard .prefill-menu').open = true`);
-        await page.waitFor(`[...document.querySelectorAll('#toolCard [data-prefill-source]')].some(item => item.textContent === 'Saved: Greeting')`, 5000);
-        await page.run(`[...document.querySelectorAll('#toolCard [data-prefill-source]')].find(item => item.textContent === 'Saved: Greeting').click()`);
+        await page.run(`document.querySelector('#requestPane .prefill-menu').open = true`);
+        await page.waitFor(`[...document.querySelectorAll('#requestPane [data-prefill-source]')].some(item => item.textContent === 'Saved: Greeting')`, 5000);
+        await page.run(`[...document.querySelectorAll('#requestPane [data-prefill-source]')].find(item => item.textContent === 'Saved: Greeting').click()`);
         const fromSavedMenu = await page.waitFor(`(() => {
-            const note = document.querySelector('#toolCard .tool-toolbar-note').textContent;
+            const note = ${requestNote};
             return /^Filled from Greeting/.test(note) ? ${field('text')} : null;
         })()`, 5000);
         check('pre-fill: the menu offers saved requests for the tool', fromSavedMenu === '{{greeting}} world', fromSavedMenu);
-        await showView('saved');
         await page.waitFor(`!!${savedItem('Greeting')}`, 5000);
 
         await runSaved('Greeting');
         const greetingAgain = await runSaved('Greeting');
         check('Run again: a saved request whose result is the same says so', /Same as the last run/.test(greetingAgain || '') && !!greetingAgain?.includes('Echo: hi world'), greetingAgain);
+        const verdictChip = await page.waitFor(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent`, 5000);
+        check('saved requests: the rail shows how the last run of each went', verdictChip === 'same', verdictChip);
         await runSaved('Next ticket');
         const ticketAgain = await runSaved('Next ticket');
-        await page.run(`document.querySelector('#toolResultCard [data-show-changes]')?.click()`);
-        const ticketDiff = await page.waitFor(`document.querySelector('#toolResultCard .run-diff:not([hidden]) .diff')?.innerText`, 5000);
-        check('Run again: a changed result says so, and Show changes has the lines that differ',
+        await page.run(`document.querySelector('#responsePane [data-show-changes]')?.click()`);
+        const ticketDiff = await page.waitFor(`document.querySelector('#responsePane .diff')?.innerText`, 5000);
+        check('Run again: a changed result says so, and Changes has the lines that differ',
             /Changed since the last run/.test(ticketAgain || '') && /^- .*"text": "T-\d+"/m.test(ticketDiff || '') && /^\+ .*"text": "T-\d+"/m.test(ticketDiff || ''),
             (ticketDiff || ticketAgain || '').replace(/\s+/g, ' ').slice(0, 160));
+        await page.run(`document.querySelector('#responsePane [data-response-tab="runs"]').click()`);
+        const runsOfTicket = await page.waitFor(`document.querySelectorAll('#responsePane tr[data-open-run]').length || null`, 5000);
+        check('Run again: the Runs tab lists every run of the saved request', runsOfTicket === 2, `${runsOfTicket} runs`);
 
         await page.run(`[...document.querySelectorAll('#savedList .saved-group')].find(group => group.querySelector('.saved-group-name')?.textContent === 'Smoke').querySelector('[data-run-collection]').click()`);
-        const collectionSummary = await page.waitFor(`[...document.querySelectorAll('#savedList .collection-run-summary')].map(el => el.textContent).find(text => text.startsWith('Ran ')) || null`, 20000);
-        check('Run all: runs the collection and sums up what changed', collectionSummary === 'Ran 2: 1 same, 1 changed, 0 failed', collectionSummary);
+        const collectionSummary = await page.waitFor(`(() => {
+            const text = document.querySelector('#responsePane .collection-run-summary')?.textContent || '';
+            return text.startsWith('Ran ') ? text : null;
+        })()`, 20000);
+        const reportRows = await page.run(`document.querySelectorAll('#responsePane tr[data-open-run]').length`);
+        check('Run all: runs the collection and sums up what changed', collectionSummary === 'Ran 2: 1 same, 1 changed, 0 failed' && reportRows === 2, `${collectionSummary}; ${reportRows} rows`);
 
-        await showView('history');
+        await page.run(showDock('runs'));
         const historySources = await page.waitFor(`(() => {
-            const items = [...document.querySelectorAll('#historyList .history-item')];
-            return items.length ? [...new Set(items.map(item => item.dataset.source))].sort().join(', ') : null;
+            const rows = ${runRows};
+            return rows.length ? [...new Set(rows.map(row => row.dataset.source))].sort().join(', ') : null;
         })()`, 5000);
-        check('history: every call is there, the chat\'s and Run all\'s included',
-            ['chat', 'collection', 'sandbox'].every(source => (historySources || '').includes(source)), historySources);
-        await page.run(`document.querySelector('#historyList .history-item').click()`);
+        check('history: every call is in the dock\'s Runs, the chat\'s and Run all\'s included',
+            ['chat', 'collection', 'workbench'].every(source => (historySources || '').includes(source)), historySources);
+        const recent = await page.run(`document.querySelectorAll('#recentRuns [data-open-run]').length`);
+        check('history: the rail lists the most recent runs', recent === 6, `${recent} runs`);
+        await page.run(`${runRows}[0].click()`);
         const openedRun = await page.waitFor(`(() => {
-            const button = document.querySelector('#toolCard .call-tool-btn');
-            return button?.textContent === 'Run again' && /From history/.test(document.getElementById('toolResultCard').innerText)
-                ? document.querySelector('#toolCard h3').textContent + ' ' + ${field('prefix')} : null;
+            return /From history/.test(document.getElementById('responsePane').innerText)
+                ? document.querySelector('#requestPane .wb-crumb-tool').textContent + ' ' + ${field('prefix')} : null;
         })()`, 5000);
-        check('history: an entry opens with its arguments and result, ready to run again', openedRun === 'ticket T-', openedRun);
+        check('history: a run opens with its arguments and result, ready to run again', openedRun === 'ticket T-', openedRun);
 
-        const historyCount = await page.run(`document.querySelectorAll('#historyList .history-item').length`);
+        const historyCount = await page.run(`${runRows}.length`);
         await page.send('Page.reload');
-        await page.waitFor(`typeof chatShell !== 'undefined' && !!chatShell.sandbox && !!chatShell.serviceWorker`, 20000);
-        await page.run(`document.getElementById('mcpTabBtn').click()`);
-        await showView('history');
-        const historyAfterReload = await page.waitFor(`document.querySelectorAll('#historyList .history-item').length || null`, 5000);
+        await page.waitFor(`typeof chatShell !== 'undefined' && !!chatShell.workbench && !!chatShell.serviceWorker`, 20000);
+        await page.run(showDock('runs'));
+        const historyAfterReload = await page.waitFor(`${runRows}.length || null`, 5000);
         check('history: kept after a reload', historyAfterReload === historyCount, `${historyAfterReload} of ${historyCount} runs`);
+
+        // Keyboard: Go to (Ctrl+K) opens a tool, Ctrl+Enter runs it, Ctrl+S opens Save.
+        const key = (key, extra = {}) => `document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true, ...${JSON.stringify(extra)} }))`;
+        await page.run(key('k', { ctrlKey: true }));
+        await page.waitFor(`!document.getElementById('palette').hidden && !!document.querySelector('#paletteResults [data-index]')`, 5000);
+        await page.run(`(() => {
+            const input = document.getElementById('paletteInput');
+            input.value = 'echo_region';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        })()`);
+        const wentTo = await page.waitFor(`document.getElementById('palette').hidden && document.querySelector('#requestPane .wb-crumb-tool')?.textContent`, 5000);
+        check('keyboard: Go to finds a tool and opens it', wentTo === 'echo_region', wentTo);
+        await page.run(`(() => {
+            document.querySelector('#requestForm [name="region"]').value = 'Bern';
+            document.querySelector('#requestForm [name="text"]').value = 'keys';
+            document.getElementById('responsePane').innerHTML = '';
+            ${key('Enter', { ctrlKey: true })};
+        })()`);
+        const keyed = await page.waitFor(shownResult, 10000);
+        await page.run(key('s', { ctrlKey: true }));
+        const saveOpened = await page.waitFor(`!!document.querySelector('#requestPane .save-request:not([hidden]) [data-save-name]')`, 5000);
+        await page.run(`document.querySelector('#requestPane [data-save-cancel]').click()`);
+        check('keyboard: Ctrl+Enter runs the request and Ctrl+S opens Save', !!keyed?.includes('Echo from Bern: keys') && !!saveOpened, keyed);
+
+        // The dock collapses to its tabs and stays that way.
+        await page.run(`document.getElementById('dockToggle').click()`);
+        const collapsed = await page.run(`document.getElementById('dock').dataset.open === 'false' && document.getElementById('dockBody').offsetHeight === 0 && JSON.parse(localStorage.getItem('workbenchDock')).open === false`);
+        await page.run(`document.getElementById('dockToggle').click()`);
+        await page.run(showDock('trace'));
+        const traced = await page.waitFor(`document.querySelectorAll('#traceList .log-entry').length || null`, 5000);
+        check('dock: collapses and remembers it, and Trace lists the HTTP requests', collapsed && traced > 0, `${traced} trace entries`);
 
         const exportFolder = mkdtempSync(join(tmpdir(), 'mcp-smoke-export-'));
         await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: exportFolder });
-        await showView('saved');
         await page.waitFor(`!!${savedItem('Greeting')}`, 5000);
-        await page.run(`document.getElementById('exportSandboxBtn').click()`);
+        await page.run(`document.getElementById('exportSavedBtn').click()`);
         let exportFile;
         for (let i = 0; i < 50 && !exportFile; i++) {
             exportFile = readdirSync(exportFolder).find(name => name.endsWith('.json'));
@@ -752,34 +828,38 @@ async function main() {
         await page.run(`${savedItem('Greeting')}.querySelector('[data-delete-request]').click()`);
         await page.waitFor(`!${savedItem('Greeting')}`, 5000);
         const { root } = (await page.send('DOM.getDocument')).result;
-        const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importSandboxInput' })).result;
+        const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importSavedInput' })).result;
         await page.send('DOM.setFileInputFiles', { nodeId, files: [join(exportFolder, exportFile || 'missing.json')] });
-        const imported = await page.waitFor(`/^Imported/.test(document.getElementById('sandboxStatus').textContent) && !!${savedItem('Greeting')} && document.getElementById('sandboxStatus').textContent`, 5000);
+        const imported = await page.waitFor(`/^Imported/.test(document.getElementById('wbStatus').textContent) && !!${savedItem('Greeting')} && document.getElementById('wbStatus').textContent`, 5000);
         rmSync(exportFolder, { recursive: true, force: true });
         check('export and import: an export brings back a deleted request',
-            exported?.requests?.length === 2 && exported.environments?.[0]?.variables?.greeting === 'hi' && /^Imported 2 saved requests, 1 collection and 1 environment/.test(imported || ''),
+            exported?.format === 'mcp-workbench' && exported.requests?.length === 2 && exported.environments?.[0]?.variables?.greeting === 'hi' && /^Imported 2 saved requests, 1 collection and 1 environment/.test(imported || ''),
             imported || exportFile || 'no export');
 
-        await showView('history');
+        await page.run(showDock('runs'));
         await page.run(`(() => {
             const clear = document.getElementById('clearHistoryBtn');
             clear.click();
             clear.click();
         })()`);
-        const cleared = await page.waitFor(`/No calls yet/.test(document.getElementById('historyList').textContent)`, 5000);
-        check('history: Clear history empties it', !!cleared);
-        await showView('tools');
+        const cleared = await page.waitFor(`/No calls yet/.test(document.getElementById('runsList').textContent) && /No runs yet/.test(document.getElementById('recentRuns').textContent)`, 5000);
+        check('history: Clear history empties it, in the dock and the rail', !!cleared);
+        await page.run(showDock('log'));
 
         const tokenUrl = `${HOST}:${PORTS.token}/`;
         const locked = await addAndConnect(page, tokenUrl, 'needs a token');
         check('a server that needs a token says so', locked?.status === 'failed' && /sign in|static token/i.test(locked.error || ''), locked?.error);
         await page.run(`(() => {
-            const input = document.getElementById('cardServerToken');
+            document.getElementById('serverInfoBtn').click();
+            const input = document.getElementById('serverTokenField');
             input.value = ${JSON.stringify(TOKEN)};
             input.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
         await page.waitFor(`chatShell.servers[${JSON.stringify(tokenUrl)}]?.bearerToken === ${JSON.stringify(TOKEN)}`, 5000);
-        await page.run(`document.getElementById('initProtocol').click()`);
+        await page.run(`(() => {
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            document.getElementById('initProtocol').click();
+        })()`);
         const unlocked = await page.waitFor(connectionState(tokenUrl));
         check('with a bearer token it connects', unlocked?.status === 'connected', JSON.stringify(unlocked));
         const withToken = await callTool(page, tokenUrl, 'echo', { text: 'with a token' });
@@ -791,17 +871,18 @@ async function main() {
         // the protected resource metadata at its well-known address.
         const oauthUrl = `${HOST}:${PORTS.oauth}/`;
         const needsSignIn = await addAndConnect(page, oauthUrl, 'OAuth mock');
-        const offered = await page.run(`!document.getElementById('cardAuth').hidden && !document.getElementById('signInBtn').hidden`);
+        const offered = await page.run(`!document.getElementById('authPanel').hidden && !document.getElementById('signInBtn').hidden
+            && /Sign in/.test(${serverRow(`${HOST}:${PORTS.oauth}/`)}.textContent)`);
         check('a server that needs sign-in says so and offers Sign in',
             needsSignIn?.status === 'failed' && /sign in/i.test(needsSignIn.error || '') && offered, needsSignIn?.error);
         const signedIn = await signIn(page, `chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`);
         check('signing in through the pop-up window connects', !!signedIn,
             signedIn ? '' : await page.run(`chatShell.servers[${JSON.stringify(oauthUrl)}]?.lastError`));
         const shown = await page.run(`(() => {
-            const visible = [...document.querySelectorAll('#cardAuth button')].filter(b => b.offsetParent).map(b => b.textContent);
-            return document.getElementById('cardAuthStatus').textContent + ' [' + visible.join(', ') + ']';
+            const visible = [...document.querySelectorAll('#authPanel button')].filter(b => b.offsetParent).map(b => b.textContent);
+            return document.getElementById('authStatus').textContent + ' [' + visible.join(', ') + ']';
         })()`);
-        check('the server card says who you signed in with and offers only Sign out',
+        check('the server bar says who you signed in with and offers only Sign out',
             shown.includes(`Signed in with 127.0.0.1:${PORTS.oauth}`) && shown.includes('renews automatically') && shown.endsWith('[Sign out]'), shown);
         const missingSteps = await page.run(`(() => {
             const said = ${entries}.filter(e => e.server === ${JSON.stringify(oauthUrl)} && e.level === 'info').map(e => e.message);
@@ -914,22 +995,23 @@ async function main() {
         await page.send('Fetch.disable');
         await page.run(`document.getElementById('closeGuide').click()`);
 
-        // Browsers without pop-ups (embedded ones, or a strict blocker): the card offers to
+        // Browsers without pop-ups (embedded ones, or a strict blocker): the server bar offers to
         // continue in this tab, or to open the copied link in another tab or browser.
         const signInWithoutPopup = async () => {
             await page.run(`(() => {
                 window.realOpen ??= window.open;
                 window.open = () => null;
-                [...document.querySelectorAll('.server-name')].find(el => el.title === ${JSON.stringify(oauthUrl)}).closest('.server-item').click();
+                ${showWorkbench};
+                ${serverRow(oauthUrl)}.click();
                 if (!document.getElementById('signOutBtn').hidden) document.getElementById('signOutBtn').click();
             })()`);
             await page.waitFor(`!document.getElementById('signInBtn').hidden`, 5000);
             await page.send('Runtime.evaluate', { expression: `document.getElementById('signInBtn').click()`, userGesture: true });
-            return page.waitFor(`!document.getElementById('cardAuthElsewhere').hidden && chatShell.signingIn?.authorizationUrl`);
+            return page.waitFor(`!document.getElementById('authElsewhere').hidden && chatShell.signingIn?.authorizationUrl`);
         };
         const link = await signInWithoutPopup();
-        const noPopupStatus = await page.run(`document.getElementById('cardAuthStatus').textContent`);
-        check('without a pop-up, the card offers to continue in this tab or copy the link',
+        const noPopupStatus = await page.run(`document.getElementById('authStatus').textContent`);
+        check('without a pop-up, the server bar offers to continue in this tab or copy the link',
             !!link && /didn't open a pop-up window/.test(noPopupStatus), noPopupStatus);
         await page.send('Runtime.evaluate', { expression: `window.realOpen(${JSON.stringify(link)}, '_blank', 'noopener')`, userGesture: true });
         const fromTab = await page.waitFor(`chatShell.servers[${JSON.stringify(oauthUrl)}]?.status === 'connected'`);
@@ -946,7 +1028,7 @@ async function main() {
         check('in another browser, the callback page offers its address to take back',
             /oauth-callback\.html\?code=.+&state=/.test(landed || ''), (landed || 'nothing').replace(/code=[^&]+/, 'code=…'));
         const pasteInto = address => page.run(`(() => {
-            document.querySelector('#cardAuthElsewhere details').open = true;
+            document.querySelector('#authElsewhere details').open = true;
             document.getElementById('authCallbackUrl').value = ${JSON.stringify(address)};
             document.getElementById('finishSignInBtn').click();
             const error = document.getElementById('authPasteError');
@@ -1003,7 +1085,7 @@ async function main() {
         }
 
         // Calls made with a static token or after signing in are in history, without the tokens.
-        const sandboxDump = await page.run(`new Promise((resolve, reject) => {
+        const storeDump = await page.run(`new Promise((resolve, reject) => {
             const open = indexedDB.open('mcp_sandbox');
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
@@ -1014,16 +1096,16 @@ async function main() {
                 tx.oncomplete = () => resolve(JSON.stringify(dump));
             };
         })`);
-        const storedRuns = JSON.parse(sandboxDump || '{}').runs || [];
-        check('the sandbox store has the calls but never a token',
+        const storedRuns = JSON.parse(storeDump || '{}').runs || [];
+        check('the Workbench store has the calls but never a token',
             storedRuns.some(run => run.serverUrl === tokenUrl) && storedRuns.some(run => run.serverUrl === oauthUrl)
-                && !sandboxDump.includes(TOKEN) && secrets.every(secret => !sandboxDump.includes(secret)),
+                && !storeDump.includes(TOKEN) && secrets.every(secret => !storeDump.includes(secret)),
             `${storedRuns.length} runs`);
 
         check('no uncaught page errors', page.exceptions.length === 0, page.exceptions.join(' | '));
     } finally {
         if (page && results.some(r => !r.ok)) {
-            // The client's own Logs tab usually says what went wrong.
+            // The client's own log usually says what went wrong.
             try {
                 const log = await page.run(`JSON.stringify(${entries})`);
                 const file = join(tmpdir(), `mcp-smoke-log-${Date.now()}.json`);

@@ -214,7 +214,7 @@ fn is_secret(name: &str) -> bool {
     SECRET_FIELDS.iter().any(|secret| secret.eq_ignore_ascii_case(name))
 }
 
-/// The message itself when it's small enough to pretty-print in the Logs tab, otherwise the
+/// The message itself when it's small enough to pretty-print in the page's log, otherwise the
 /// start of its text.
 pub fn loggable_body(message: &Value, text: &str) -> Value {
     if text.len() <= MAX_LOGGED_BODY {

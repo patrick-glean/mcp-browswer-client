@@ -647,7 +647,7 @@ def main():
     print(f"  Browser origins allowed: {', '.join(server.allowed_origins)}", flush=True)
     if args.allow_headers:
         print(f"  CORS preflights allow only: {args.allow_headers}", flush=True)
-    print(f"  In the client, add {url} on the Sandbox tab (the Guide has a button for it). Ctrl+C stops the server.", flush=True)
+    print(f"  In the client, add {url} with + beside Servers (the Guide has a button for it). Ctrl+C stops the server.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -87,19 +87,20 @@ Page-to-worker messages and the replies the worker broadcasts:
 
 The worker handles every message inside `event.waitUntil()` so a long call keeps it alive. It logs only a message's type and target, never its payload, so bearer tokens and authorization codes stay out of the logs.
 
-### Runs (the sandbox's history)
+### Runs (the Workbench's history)
 
-Every tool call becomes a run, whichever part of the client made it: `handleToolCall` in `sw.js` records it at its one success point and its one failure point (`recordRun`), in the `runs` store of `public/sandbox/store.js`. Chat calls and tool calls found in replies are recorded too, with `source` `chat` or `reply`.
+Every tool call becomes a run, whichever part of the client made it: `handleToolCall` in `sw.js` records it at its one success point and its one failure point (`recordRun`), in the `runs` store of `public/workbench/store.js`. Workbench calls have `source` `workbench` (or `collection` from Run all; runs saved before the rename say `sandbox`), chat calls `chat` and tool calls found in replies `reply`.
 
-- **What the page sends:** `call_tool`'s `tapConfig.args` are the arguments to send, with `{{variables}}` already filled in by the page (`public/sandbox/template.js`, which knows the tool's schema). `run` is `{id, args, requestId?, collectionRunId?, environmentName?}`: the page's id for the run, so it can wait for this answer; the arguments as written; the saved request and Run all it came from; and the environment whose variables it used.
-- **What comes back:** `tool_result.run` and `run_recorded.run` are `{id, startedAt, durationMs, outcome, changed, previousRunId}`, and `run_recorded` adds `source`, `serverUrl`, `toolName`, `requestId` and `errorKind` for History. `outcome` is `ok`, `tool_error` (`isError` results) or `failed`. `changed` is `true` or `false` against the previous run of the same request, or `null` for the first.
-- **Comparing:** runs of a saved request compare with each other, and other calls with earlier calls of the same tool and sent arguments (`compareKey`). Results are compared by a SHA-256 of their JSON with keys sorted and every `_meta` removed (`resultHash`, `public/sandbox/runs.js`).
+- **What the page sends:** `call_tool`'s `tapConfig.args` are the arguments to send, with `{{variables}}` already filled in by the page (`public/workbench/template.js`, which knows the tool's schema). `run` is `{id, args, requestId?, collectionRunId?, environmentName?}`: the page's id for the run, so it can wait for this answer; the arguments as written; the saved request and Run all it came from; and the environment whose variables it used.
+- **What comes back:** `tool_result.run` and `run_recorded.run` are `{id, startedAt, durationMs, outcome, changed, previousRunId}`, and `run_recorded` adds `source`, `serverUrl`, `toolName`, `requestId` and `errorKind` for the history views. `outcome` is `ok`, `tool_error` (`isError` results) or `failed`. `changed` is `true` or `false` against the previous run of the same request, or `null` for the first.
+- **Comparing:** runs of a saved request compare with each other, and other calls with earlier calls of the same tool and sent arguments (`compareKey`). Results are compared by a SHA-256 of their JSON with keys sorted and every `_meta` removed (`resultHash`, `public/workbench/runs.js`).
+- **In the page:** `ChatShell` turns these messages into events for the Workbench's components: `run` (`pending`, `done` or `not-sent`, for the call the response pane shows) and `recorded` (every `run_recorded`). See the README's Workbench section for how the components fit together.
 - **Storage:** the store keeps the newest 500 runs. Arguments or results over 256 KB of JSON are kept as the start of their text (`argsText`, `sentArgsText`, `resultText`) with `truncated` set.
 - **Failures:** recording failures are logged as warnings and never fail the call.
 
 ## Logging
 
-Every log entry, wherever it starts, has the same shape and ends up in each open page's Logs tab:
+Every log entry, wherever it starts, has the same shape and ends up in each open page's log (the Workbench's dock):
 
 ```js
 { time, level: 'debug' | 'info' | 'warn' | 'error', source: 'page' | 'worker' | 'wasm', message, server?, detail? }
@@ -236,14 +237,14 @@ Write messages as sentences someone can act on, and put structured data in `deta
    npm run test:browser   # the real UI in headless Chrome against the mock servers
    ```
 
-2. **Reload the page**. Each load checks the worker's scripts, and `build.js` (written by `wasm-build.sh`) changes with every build, so a new worker installs and takes over. The Logs tab shows "Installing the service worker for WASM build …" followed by "Loaded the WASM module" with the new build time.
+2. **Reload the page**. Each load checks the worker's scripts, and `build.js` (written by `wasm-build.sh`) changes with every build, so a new worker installs and takes over. The log shows "Installing the service worker for WASM build …" followed by "Loaded the WASM module" with the new build time.
 
 3. **If the old build is still running**: open DevTools → Application → Service workers and choose Unregister, then reload. Clear site data as well if saved servers or chat history get in the way.
 
 ## Debugging Tips
 
 1. **Logs**:
-   - The Logs tab has entries from the page, the worker and the WASM client. Choose Everything to see each HTTP request and reply.
+   - The dock's Log has entries from the page, the worker and the WASM client. Choose Everything, or open Trace, to see each HTTP request and reply.
    - The worker's own console is at `chrome://inspect/#service-workers`; debug entries show at DevTools' Verbose level.
    - `python3 test_mcp_server.py --verbose` prints what arrives at the mock, headers included.
 

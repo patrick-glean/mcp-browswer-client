@@ -1,6 +1,6 @@
 // Structured logging for the service worker. Every entry is printed to the worker's console
 // (debug entries only show with DevTools' Verbose level) and handed to the sink, which sends it
-// to each open page's Logs tab.
+// to each open page's log.
 //
 // Entry: {time, level: 'debug'|'info'|'warn'|'error', source: 'worker'|'wasm', message, server?, detail?}
 

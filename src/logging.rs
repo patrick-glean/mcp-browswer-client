@@ -1,5 +1,5 @@
 //! Structured logging for the WASM module. The service worker registers a logger that shows
-//! each entry in every open page's Logs tab; until it does, entries go to the console.
+//! each entry in every open page's log; until it does, entries go to the console.
 
 use serde::Serialize;
 use serde_json::Value;

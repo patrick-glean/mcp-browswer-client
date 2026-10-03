@@ -139,6 +139,7 @@ hr.divider {
 .icon-copy { --icon: url('icons/copy.svg'); }
 .icon-download { --icon: url('icons/download.svg'); }
 .icon-help { --icon: url('icons/help-circle.svg'); }
+.icon-search { --icon: url('icons/search.svg'); }
 .icon-theme { --icon: url('icons/moon.svg'); }
 .dark-theme .icon-theme { --icon: url('icons/sun.svg'); }
 
@@ -395,26 +396,7 @@ input[type='checkbox'] {
     color: var(--theme-error);
 }
 
-/* ---------- App shell ---------- */
-
-.container {
-    display: flex;
-    flex-direction: column;
-    max-width: 1440px;
-    min-height: 100vh;
-    margin: 0 auto;
-    padding: 0 32px 32px;
-}
-
-.app-header {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    height: 64px;
-    flex: none;
-}
+/* ---------- App shell (the frame itself is in workbench/workbench.css) ---------- */
 
 .app-title {
     display: flex;
@@ -439,12 +421,6 @@ input[type='checkbox'] {
     color: var(--theme-alternate);
 }
 
-.app-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
 .status-bar {
     gap: 16px;
     border: 1px solid var(--theme-border-light);
@@ -455,12 +431,6 @@ input[type='checkbox'] {
 
 .status-bar:hover {
     background: var(--theme-hover);
-}
-
-.status-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
 }
 
 .status-label {
@@ -559,55 +529,7 @@ input[type='checkbox'] {
     overflow-wrap: anywhere;
 }
 
-/* ---------- Tabs (the kit's flush underline tabs) ---------- */
-
-.main-content-tabs {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.tab-bar {
-    display: flex;
-    align-items: flex-end;
-    gap: 32px;
-    border-bottom: 1px solid var(--theme-border-light);
-}
-
-.tab-btn {
-    position: relative;
-    height: auto;
-    min-height: 0;
-    padding: 12px 0;
-    border: none;
-    border-radius: 0;
-    background: none;
-    color: var(--theme-text-primary);
-    transition: color 200ms ease;
-}
-
-.tab-btn:hover {
-    background: none;
-    color: var(--theme-primary-highlight);
-}
-
-.tab-btn.active::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 2px;
-    background: var(--theme-primary-highlight);
-}
-
-.tab-btn-icon {
-    margin-left: auto;
-    color: var(--theme-text-secondary);
-}
-
-/* Errors logged while the Logs tab was hidden. */
+/* Errors logged while the dock's Log was hidden. */
 .tab-badge {
     min-width: 18px;
     height: 18px;
@@ -645,11 +567,7 @@ input[type='checkbox'] {
     color: var(--theme-link-hover);
 }
 
-.tab-content {
-    padding-top: 24px;
-}
-
-/* ---------- Panels and section headers ---------- */
+/* ---------- Panels ---------- */
 
 .panel {
     padding: 16px;
@@ -688,35 +606,7 @@ input[type='checkbox'] {
     margin-bottom: 0;
 }
 
-.panel-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-}
-
-.section-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.section-header h2,
-.log-header h2 {
-    font-size: 1.25rem;
-    line-height: 1.75rem;
-    letter-spacing: -0.0375rem;
-}
-
-.section-subtitle {
-    margin-top: 4px;
-    color: var(--theme-text-secondary);
-}
-
-/* Server, tool and imprint rows share the kit's menu-item look. */
-.server-item,
-.tool-item,
+/* Context entries in the Chat app have the kit's menu-item look. */
 .imprint-list-item {
     display: flex;
     flex-direction: column;
@@ -726,36 +616,20 @@ input[type='checkbox'] {
     transition: background-color 0.15s ease;
 }
 
-.server-item:hover,
-.tool-item:hover,
 .imprint-list-item:hover {
     background: var(--theme-hover);
 }
 
-.server-item.selected,
 .imprint-list-item.selected {
     background: var(--theme-selected);
     font-weight: 500;
-}
-
-.server-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-
-.server-row .server-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .empty-state {
     padding: 8px 12px;
 }
 
-/* ---------- Console ---------- */
+/* ---------- The Chat app ---------- */
 
 .chat-card {
     display: grid;
@@ -884,7 +758,7 @@ input[type='checkbox'] {
     gap: 12px;
 }
 
-/* Generated tool-argument fields (MCP tool card and the console's LLM target). */
+/* Generated tool-argument fields (the Workbench's request pane and the Chat app's Model). */
 .tool-input-card {
     display: flex;
     flex-direction: column;
@@ -928,37 +802,7 @@ input[type='checkbox'] {
     align-self: flex-start;
 }
 
-/* ---------- MCP ---------- */
-
-.mcp-controls-header {
-    margin-bottom: 16px;
-}
-
-.add-server-controls {
-    display: flex;
-    gap: 8px;
-}
-
-.add-server-controls #serverUrl {
-    flex: 2;
-}
-
-.add-server-controls #serverAlias {
-    flex: 1;
-}
-
-.add-server-controls button {
-    flex: none;
-}
-
-.mcp-controls-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-}
-
-/* ---------- Sandbox: environments ---------- */
+/* ---------- Environments ---------- */
 
 .env-picker {
     display: flex;
@@ -975,31 +819,6 @@ input[type='checkbox'] {
 .env-picker select {
     width: auto;
     min-width: 140px;
-}
-
-.env-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.env-editor .panel-subtitle {
-    margin: 0;
-}
-
-.env-editor-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.env-editor-row .field {
-    flex: 1;
-    min-width: 200px;
-    max-width: 360px;
 }
 
 .env-variables {
@@ -1020,54 +839,12 @@ input[type='checkbox'] {
     font-size: 0.8125rem;
 }
 
-/* ---------- Sandbox: Tools, Saved and History ---------- */
-
-.view-switch {
-    display: inline-flex;
-    gap: 2px;
-    margin-bottom: 12px;
-    padding: 2px;
-    border-radius: var(--radius-200);
-    background: var(--theme-background-light);
-}
-
-.view-switch-btn {
-    height: 28px;
-    min-height: 28px;
-    padding: 0 12px;
-    border-color: transparent;
-    background: transparent;
-    color: var(--theme-text-secondary);
-    font-size: 0.8125rem;
-}
-
-.view-switch-btn.active {
-    background: var(--theme-background);
-    box-shadow: var(--shadow-sm);
-    color: var(--theme-text-primary);
-}
-
-.sandbox-status {
-    margin-bottom: 8px;
-    font-size: 0.75rem;
-    overflow-wrap: anywhere;
-}
-
-.sandbox-status:not(.text-error) {
-    color: var(--theme-text-secondary);
-}
-
-.saved-group + .saved-group {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--theme-border-light);
-}
+/* ---------- Saved requests ---------- */
 
 .saved-group-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 4px;
     font-size: 0.8125rem;
 }
 
@@ -1079,15 +856,11 @@ input[type='checkbox'] {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
 }
 
-.saved-items,
-.history-items,
-.collection-run-items {
+.saved-items {
     display: flex;
     flex-direction: column;
-    gap: 2px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -1096,46 +869,18 @@ input[type='checkbox'] {
 .saved-item {
     display: flex;
     align-items: center;
-    gap: 4px;
 }
 
-.saved-open,
-.history-item,
-.collection-run-item {
+.saved-open {
     display: flex;
     flex: 1;
-    flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     justify-content: flex-start;
-    gap: 2px;
     width: 100%;
     height: auto;
-    min-width: 0;
-    padding: 6px 8px;
     border-color: transparent;
-    background: transparent;
-    font-size: 0.75rem;
     font-weight: 400;
     text-align: left;
-}
-
-.saved-open:hover:not(:disabled),
-.history-item:hover:not(:disabled),
-.collection-run-item:hover:not(:disabled) {
-    background: var(--theme-hover);
-}
-
-.saved-name {
-    font-weight: 500;
-    overflow-wrap: anywhere;
-}
-
-.saved-tool,
-.history-meta {
-    color: var(--theme-text-secondary);
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    overflow-wrap: anywhere;
 }
 
 .rename-input {
@@ -1146,48 +891,12 @@ input[type='checkbox'] {
     font-size: 0.75rem;
 }
 
-.collection-run {
-    margin: 4px 0 8px;
-    padding: 8px;
-    border-radius: var(--radius-200);
-    background: var(--theme-background-light);
-    font-size: 0.75rem;
-}
-
-.collection-run-summary {
-    margin-bottom: 4px;
-    font-weight: 500;
-}
-
-.collection-run-item {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-}
-
-.collection-run-name {
-    overflow-wrap: anywhere;
-}
-
 .history-filter {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 8px;
     color: var(--theme-text-secondary);
     font-size: 0.75rem;
-}
-
-.history-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 6px;
-}
-
-.history-tool {
-    font-family: var(--font-mono);
-    font-weight: 500;
 }
 
 /* A dropdown built on <details>: the summary is the button, .menu-list the popover. */
@@ -1249,14 +958,7 @@ input[type='checkbox'] {
     font-size: 0.75rem;
 }
 
-/* ---------- Sandbox: the tool card ---------- */
-
-.tool-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-}
+/* ---------- Request and result details ---------- */
 
 .split-button {
     display: inline-flex;
@@ -1267,19 +969,6 @@ input[type='checkbox'] {
     border-bottom-right-radius: 0;
 }
 
-.split-button summary {
-    padding: 0 6px;
-    border-left: none;
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-}
-
-.tool-toolbar-note {
-    flex: 1;
-    min-width: 160px;
-    font-size: 0.75rem;
-}
-
 .save-request {
     display: flex;
     flex-direction: column;
@@ -1288,13 +977,6 @@ input[type='checkbox'] {
     border-radius: var(--radius-200);
     background: var(--theme-background-light);
     font-size: 0.8125rem;
-}
-
-.sends-preview summary {
-    width: fit-content;
-    color: var(--theme-text-secondary);
-    font-size: 0.75rem;
-    cursor: pointer;
 }
 
 .sends-preview pre {
@@ -1324,18 +1006,11 @@ input[type='checkbox'] {
     gap: 6px;
 }
 
-/* ---------- Sandbox: the result card ---------- */
-
 .run-summary {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 10px;
-    font-size: 0.75rem;
-}
-
-.run-diff .diff-head {
-    margin-bottom: 6px;
     font-size: 0.75rem;
 }
 
@@ -1376,80 +1051,6 @@ input[type='checkbox'] {
     font-style: italic;
 }
 
-.mcp-servers-section {
-    display: grid;
-    grid-template-columns: 240px minmax(0, 3fr) minmax(0, 2fr);
-    gap: 16px;
-    align-items: start;
-}
-
-#serversList,
-#toolsList {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.tool-item {
-    gap: 2px;
-    font-size: 0.75rem;
-}
-
-.tool-item.selected {
-    background: var(--theme-selected);
-}
-
-.tool-item-head,
-.tool-card-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-}
-
-.tool-name {
-    font-family: var(--font-mono);
-    font-weight: 500;
-    overflow-wrap: anywhere;
-}
-
-.tool-item-title {
-    color: var(--theme-text-secondary);
-}
-
-.tool-filter {
-    margin-bottom: 8px;
-}
-
-.hidden-tools {
-    margin-top: 12px;
-    font-size: 0.75rem;
-}
-
-.hidden-tools summary {
-    width: fit-content;
-    color: var(--theme-warning-foreground);
-    cursor: pointer;
-}
-
-.hidden-tools ul {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin: 6px 0 0;
-    padding-left: 16px;
-    color: var(--theme-text-secondary);
-}
-
-.hidden-tools li {
-    overflow-wrap: anywhere;
-}
-
-.tool-card-title {
-    margin-top: -8px;
-    font-weight: 500;
-}
-
 .tool-schemas {
     display: flex;
     flex-direction: column;
@@ -1465,43 +1066,7 @@ input[type='checkbox'] {
     cursor: pointer;
 }
 
-.server-card-fields {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px 16px;
-}
-
-.autosave-input-wrap {
-    position: relative;
-    display: block;
-}
-
-.autosave-input-wrap input {
-    padding-right: 36px;
-}
-
-.autosave-checkmark {
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    display: none;
-    color: var(--theme-success);
-    line-height: 0;
-    transform: translateY(-50%);
-    pointer-events: none;
-}
-
-.server-error {
-    margin-top: 12px;
-    font-size: 0.75rem;
-    overflow-wrap: anywhere;
-}
-
 /* ---------- Sign-in and connection details ---------- */
-
-.static-token {
-    grid-column: 1 / -1;
-}
 
 .static-token summary,
 .instructions summary {
@@ -1576,10 +1141,6 @@ input[type='checkbox'] {
 .auth-paste .text-error {
     margin-top: 6px;
     overflow-wrap: anywhere;
-}
-
-.connection-info {
-    margin-top: 16px;
 }
 
 .subsection-title {
@@ -1700,103 +1261,31 @@ input[type='checkbox'] {
 }
 
 .tool-notice {
+    margin-bottom: 12px;
     padding: 8px 12px;
     border-radius: var(--radius-300);
     background: var(--theme-background-light);
     font-size: 0.75rem;
 }
 
-.tool-cards-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 16px;
-    margin-top: 16px;
-}
-
-.tool-card-inner,
-.tool-result-card-inner {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.tool-card-inner h3 {
-    font-size: 1rem;
-    line-height: 1.5rem;
-    letter-spacing: -0.034rem;
-}
-
-.tool-description {
-    color: var(--theme-text-secondary);
-    white-space: pre-line;
-}
-
-.tool-input-schema {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.tool-input-schema:empty {
-    display: none;
-}
-
-.tool-input-schema h4 {
-    color: var(--theme-text-secondary);
-    font-family: var(--font-body);
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.call-tool-btn {
-    align-self: flex-start;
-}
-
 .tool-raw-json summary {
+    width: fit-content;
     color: var(--theme-text-secondary);
     font-weight: 500;
-}
-
-.tool-raw-json pre,
-.tool-content-section {
-    padding: 12px 16px;
-    border-radius: var(--radius-300);
-    background: var(--theme-background-light);
+    cursor: pointer;
 }
 
 .tool-raw-json pre {
     max-height: 320px;
     margin-top: 8px;
+    padding: 12px 16px;
     overflow: auto;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
     font-size: 0.75rem;
 }
 
-.tool-content-header {
-    color: var(--theme-text-secondary);
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-}
-
-.tool-content-text {
-    word-break: break-word;
-}
-
-.tool-content-section .empty-state {
-    padding: 0;
-}
-
-.tool-result-card-inner.error {
-    color: var(--theme-error);
-}
-
-/* ---------- Memory ---------- */
-
-.three-panel-memory {
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
-}
+/* ---------- The Chat app's instructions and context ---------- */
 
 .imprints-list {
     display: flex;
@@ -1838,25 +1327,7 @@ input[type='checkbox'] {
     margin-top: 8px;
 }
 
-/* ---------- Logs ---------- */
-
-.log-section .control-group {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.log-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.log-header .section-subtitle {
-    max-width: 640px;
-}
+/* ---------- The log (in the Workbench's dock) ---------- */
 
 .log-toolbar {
     display: flex;
@@ -1874,8 +1345,6 @@ input[type='checkbox'] {
 }
 
 .log-container {
-    height: calc(100vh - 300px);
-    min-height: 360px;
     padding: 12px 16px;
     overflow-y: auto;
     border-radius: var(--radius-400);
@@ -1946,16 +1415,6 @@ input[type='checkbox'] {
     font-size: 0.75rem;
 }
 
-/* The pop-out window (?logs=1) shows only the logs. */
-body.logs-only .app-header-actions,
-body.logs-only .tab-bar {
-    display: none;
-}
-
-body.logs-only .log-container {
-    height: calc(100vh - 240px);
-}
-
 /* ---------- Getting started guide ---------- */
 
 .guide-drawer {
@@ -1975,13 +1434,6 @@ body.logs-only .log-container {
 
 .guide-drawer[hidden] {
     display: none;
-}
-
-/* Wide screens keep the app beside the guide instead of under it. */
-@media (min-width: 1200px) {
-    body.guide-open .container {
-        margin-right: 420px;
-    }
 }
 
 .guide-header {
@@ -2150,35 +1602,16 @@ body.logs-only .log-container {
 /* ---------- Narrow screens ---------- */
 
 @media (max-width: 900px) {
-    .container {
-        padding: 0 16px 16px;
-    }
-
     .status-bar .status-label {
         display: none;
     }
 
-    .chat-card,
-    .mcp-servers-section,
-    .server-card-fields,
-    .tool-cards-row,
-    .three-panel-memory {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
     .chat-card {
+        grid-template-columns: minmax(0, 1fr);
         height: auto;
     }
 
     .chat-messages {
         min-height: 320px;
-    }
-
-    .section-header {
-        flex-direction: column;
-    }
-
-    .add-server-controls {
-        flex-wrap: wrap;
     }
 }

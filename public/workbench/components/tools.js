@@ -9,26 +9,38 @@ import { WbElement } from './base.js';
 const GROUP_FROM = 13;
 const HINT_FILTERS = [['all', 'All'], ['read', 'Read-only'], ['writes', 'Writes'], ['web', 'Reaches out']];
 
-// Words from a tool name: list_issues -> list, issue; getPullRequest -> get, pull, request.
-function nameWords(name) {
-    return name
+// Verbs say what a tool does, not what it works on, so they don't name groups.
+const VERBS = new Set(['get', 'list', 'create', 'update', 'delete', 'add', 'remove', 'set', 'run', 'read', 'write', 'find',
+    'fetch', 'edit', 'upload', 'share', 'merge', 'push', 'fork', 'make', 'put', 'post', 'send', 'open', 'close']);
+
+// What a tool name could be grouped by: its nouns and pairs of them in a row.
+// list_pull_requests -> pull, request, pull request; getIssue -> issue.
+function nameTerms(name) {
+    const words = name
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
         .toLowerCase()
         .split(/[^a-z0-9]+/)
-        .filter(word => word.length > 1)
-        .map(word => (word.length > 3 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word));
+        .filter(word => word.length > 1 && !VERBS.has(word))
+        .map(word => {
+            if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+            if (/(ch|sh|x|ss)es$/.test(word)) return word.slice(0, -2);
+            return word.length > 3 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
+        });
+    const pairs = words.slice(1).map((word, index) => `${words[index]} ${word}`);
+    return [...new Set([...words, ...pairs])];
 }
 
-// Groups tools by the most common word their names share; tools that share nothing go under Other.
+// Groups tools by the term their names share most; a pair wins a tie with its words. Tools that
+// share nothing go under Other.
 export function groupTools(tools) {
-    const words = tools.map(tool => [...new Set(nameWords(tool.name))]);
+    const terms = tools.map(tool => nameTerms(tool.name));
     const counts = new Map();
-    words.flat().forEach(word => counts.set(word, (counts.get(word) || 0) + 1));
+    terms.flat().forEach(term => counts.set(term, (counts.get(term) || 0) + 1));
     const groups = new Map();
     tools.forEach((tool, index) => {
-        const best = words[index]
-            .filter(word => counts.get(word) >= 2 && counts.get(word) < tools.length)
-            .sort((a, b) => counts.get(b) - counts.get(a) || a.localeCompare(b))[0] || 'other';
+        const best = terms[index]
+            .filter(term => counts.get(term) >= 2 && counts.get(term) < tools.length)
+            .sort((a, b) => counts.get(b) - counts.get(a) || b.split(' ').length - a.split(' ').length || a.localeCompare(b))[0] || 'other';
         if (!groups.has(best)) groups.set(best, []);
         groups.get(best).push(tool);
     });
