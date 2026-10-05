@@ -129,6 +129,20 @@ async function stopChrome(chrome) {
     clearTimeout(force);
 }
 
+// Chrome can still be saving its preferences as it exits, which puts a file back into the
+// directory being removed. A profile left in the temp directory isn't a failed check.
+async function removeProfile(profile) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            rmSync(profile, { recursive: true, force: true });
+            return;
+        } catch {
+            await sleep(300);
+        }
+    }
+    notice('cleanup', `couldn't delete Chrome's profile, ${profile}`);
+}
+
 function stopAll() {
     for (const child of children) child.kill();
 }
@@ -432,10 +446,11 @@ async function main() {
         })`);
         // The default library needs no ?client=: a first visit runs on it.
         await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/${CLIENT === DEFAULT_CLIENT ? '' : `?client=${CLIENT.name}`}` });
+        // Until the navigation commits, the page is still the seed page, which has none of these.
         const healthy = await page.waitFor(`
-            document.getElementById('sw-status').classList.contains('healthy') &&
-            document.getElementById('client-status').classList.contains('healthy') &&
-            !!appShell.serviceWorker && !!appShell.workbench`);
+            !!document.getElementById('sw-status')?.classList.contains('healthy') &&
+            !!document.getElementById('client-status')?.classList.contains('healthy') &&
+            typeof appShell !== 'undefined' && !!appShell.serviceWorker && !!appShell.workbench`);
         check('app loads with the service worker, the MCP client and the Workbench running', !!healthy);
         const carriedOver = await page.waitFor(`(() => {
             const shown = [...document.querySelectorAll('#chatMessages .chat-msg')].map(m => m.textContent);
@@ -1349,7 +1364,7 @@ async function main() {
         }
         page?.close();
         await stopChrome(chrome);
-        rmSync(profile, { recursive: true, force: true });
+        await removeProfile(profile);
     }
 
     const failed = results.filter(r => !r.ok);
