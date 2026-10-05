@@ -1,6 +1,6 @@
 // What every Workbench component shares. Components render into their own element (light DOM, so
 // the app's styles apply), listen with this.lifetime so moving or removing one cleans up after
-// it, and reach the rest of the app only through ChatShell and the Workbench state.
+// it, and reach the rest of the app only through AppShell and the Workbench state.
 
 import { app } from '../app.js';
 
@@ -23,7 +23,7 @@ export class WbElement extends HTMLElement {
         this.lifetime?.abort();
     }
 
-    // Subscribes to ChatShell and Workbench events, and adds listeners on the element itself.
+    // Subscribes to AppShell and Workbench events, and adds listeners on the element itself.
     setup() {}
 
     render() {}

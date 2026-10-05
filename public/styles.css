@@ -511,6 +511,15 @@ input[type='checkbox'] {
     gap: 8px;
 }
 
+.client-choice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
 .build-info {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -607,7 +616,7 @@ input[type='checkbox'] {
 }
 
 /* Context entries in the Chat app have the kit's menu-item look. */
-.imprint-list-item {
+.context-list-item {
     display: flex;
     flex-direction: column;
     padding: 8px 12px;
@@ -616,11 +625,11 @@ input[type='checkbox'] {
     transition: background-color 0.15s ease;
 }
 
-.imprint-list-item:hover {
+.context-list-item:hover {
     background: var(--theme-hover);
 }
 
-.imprint-list-item.selected {
+.context-list-item.selected {
     background: var(--theme-selected);
     font-weight: 500;
 }
@@ -709,7 +718,7 @@ input[type='checkbox'] {
     min-height: 40px;
 }
 
-.chat-engram {
+.chat-conversation {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -718,7 +727,7 @@ input[type='checkbox'] {
     font-size: 0.75rem;
 }
 
-.chat-engram .mono {
+.chat-conversation .mono {
     color: var(--theme-text-primary);
 }
 
@@ -726,17 +735,17 @@ input[type='checkbox'] {
     overflow-y: auto;
 }
 
-.cbus-tap-card {
+.chat-model-card {
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
 
-.cbus-tap-card .panel-title {
+.chat-model-card .panel-title {
     margin-bottom: 0;
 }
 
-.cbus-tap-card .panel-subtitle {
+.chat-model-card .panel-subtitle {
     margin: -12px 0 0;
 }
 
@@ -774,7 +783,7 @@ input[type='checkbox'] {
     font-weight: 500;
 }
 
-.cbus-checkbox-label {
+.chat-field-label {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -784,7 +793,7 @@ input[type='checkbox'] {
     cursor: pointer;
 }
 
-.cbus-message-warning {
+.chat-field-warning {
     color: var(--theme-error);
     font-size: 0.75rem;
 }
@@ -1287,35 +1296,35 @@ input[type='checkbox'] {
 
 /* ---------- The Chat app's instructions and context ---------- */
 
-.imprints-list {
+.context-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
 }
 
-.imprint-timestamp {
+.context-timestamp {
     color: var(--theme-text-secondary);
     font-size: 0.75rem;
     font-weight: 400;
 }
 
-.imprint-editor,
-.imprint-editor form {
+.context-editor,
+.context-editor form {
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
 
-.imprint-editor label {
+.context-editor label {
     margin-top: 8px;
     font-weight: 500;
 }
 
-.imprint-editor label:first-child {
+.context-editor label:first-child {
     margin-top: 0;
 }
 
-.imprint-editor textarea {
+.context-editor textarea {
     min-height: 240px;
     font-family: var(--font-mono);
     font-size: 0.75rem;

@@ -5,41 +5,39 @@ alwaysApply: true
 ---
 # MCP Browser Client Project Structure
 
-This project implements a Rust WebAssembly (WASM) module that runs as a service worker, providing a connective layer for browser-based MCP (Message Control Protocol) functionality.
+MCP Browser Client is a system for testing MCP (Model Context Protocol) client libraries in the browser and building applications on them, centered on the agent loop: a model choosing tools and using them. Everything runs in a web page and a service worker shared by every tab, delivered as a static site, with nothing to install or configure locally.
 
 ## Core Components
 
-### Rust WASM Module
-- Main entry point: [src/lib.rs](mdc:src/lib.rs)
-  - Exports `alloc` and `handle_message` functions for WASM-JS interop
-  - Handles core message processing logic
+### MCP client libraries (pluggable)
+- Registry and loaders: [public/mcp-clients.js](mdc:public/mcp-clients.js) (`MCP_CLIENTS`, `loadMcpClient`)
+- The worker's active library: [public/client-runtime.js](mdc:public/client-runtime.js) (`setClient`, `ensureClient`, ...); the choice persists in Cache Storage
+- Rust/WASM library (`wasm`, default): [src/lib.rs](mdc:src/lib.rs) exports; protocol in `src/mcp/`, sign-in in `src/oauth/`
+- TypeScript SDK library (`sdk`): [sdk-client/index.js](mdc:sdk-client/index.js), an adapter over `@modelcontextprotocol/client`
+- Every library implements the same interface (JSON strings in and out, JSON `McpError` rejections), documented in [DEVELOPMENT.md](mdc:DEVELOPMENT.md)
 
 ### Service Worker
 - Implementation: [public/sw.js](mdc:public/sw.js)
-  - Manages WASM module loading and lifecycle
-  - Handles message passing between web pages and WASM
-  - Supports multi-tab operation through service worker architecture
+  - Routes page messages to the active library (`mcpClient`); never builds JSON-RPC itself
+  - Owns sign-in storage (`authStore.js`), run history (`workbench/store.js`) and conversations (`chatStorage.js`)
+  - Runs the Chat app's agent loop (`handleToolCall`, `modelArguments`, `extractJsonRpcCalls`, `runReplyToolCall`), with its built-in instructions in [public/chat-instructions.js](mdc:public/chat-instructions.js)
 
 ### Web Interface
 - Page: [public/index.html](mdc:public/index.html)
-  - The top bar, the layout, the Apps page (the Chat app) and the Guide
-  - `ChatShell`, the controller: talks to the service worker, owns servers, sign-in and tool calls, and emits events instead of drawing UI
+  - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the Chat app) and the Guide
+  - `AppShell`, the controller: talks to the service worker, owns servers, sign-in and tool calls, and emits events instead of drawing UI
 - Workbench: [public/workbench/](mdc:public/workbench/index.js)
   - One custom element per part of the screen in `components/` (rail, server bar, tools, request, response, dock, sheet, palette)
   - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`
 
 ## Build System
-- Project configuration: [Cargo.toml](mdc:Cargo.toml)
-- WASM build script: [wasm-build.sh](mdc:wasm-build.sh)
+- `npm run build` builds every library: `npm run build:wasm` ([wasm-build.sh](mdc:wasm-build.sh), [Cargo.toml](mdc:Cargo.toml)) and `npm run build:sdk` ([sdk-client/build.mjs](mdc:sdk-client/build.mjs), esbuild)
+- Each build writes a hash file (`public/build.js`, `public/build-sdk.js`) that `mcp-clients.js` imports, so a rebuild is a worker update
 
-## Key Features
-- Multi-tab support through service worker architecture
-- WASM-based message processing
-- Web component-based UI
-- Service worker-based communication layer
+## Testing and measuring
+- `npm run test:rust`, `npm run test:browser` (`--client=wasm|sdk`, `--reference`), `npm run test:browser:sdk`
+- `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
 
-## Development Workflow
-1. Modify Rust code in `src/lib.rs`
-2. Build WASM using `wasm-build.sh`
-3. Test through the web interface, and with `npm run test:browser`
-4. Service worker automatically handles WASM loading and message passing
+## Naming
+- Say "MCP client library" (or "library") for the pluggable protocol implementation, and use `client` in code: `set_client`, `client_loaded`, `client_status`, `?client=`, `--client=`
+- The Chat app's agent loop says conversation (`conversationId`), model (`set_chat_model`, `messageField`, `conversationField`), context (`set_chat_context`) and instructions (`public/chat-instructions.js`). Its first version's names (engram, CBus tap, imprints, bootrom) only survive in the code that moves old stored data over

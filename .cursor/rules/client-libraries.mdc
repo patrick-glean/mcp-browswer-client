@@ -1,0 +1,42 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# MCP Client Library Rules
+
+The app runs whichever MCP client library the page picks (Rust/WASM in `src/`, TypeScript SDK in `sdk-client/`). Follow these rules when changing a library, the worker or the page:
+
+1. **One interface for every library**:
+   - Libraries export the functions in DEVELOPMENT.md ("The interface"): MCP and sign-in calls take and return JSON strings and reject with a JSON `McpError {kind, message, status?, code?, data?}`
+   - A new capability goes into every library with the same shapes, or it isn't part of the interface
+   - Libraries store nothing and carry no app logic: the worker keeps sign-ins, runs and conversations in IndexedDB, and the Chat app's instructions are in `public/chat-instructions.js`
+   - Register a new library in `public/mcp-clients.js` and the Runtime menu's `#clientSelect`
+
+2. **Message Flow**:
+   - Page -> Service Worker -> MCP client library -> MCP server, and back
+   - Pages never speak MCP and never see tokens; the worker never builds JSON-RPC
+   - Handle errors at each step: `Result<T, JsValue>` in Rust, rejections with `McpError` in JavaScript, try/catch in the worker, error replies handled in the page
+
+3. **Testing Process**:
+   - Rebuild the library you changed (`npm run build:wasm` or `npm run build:sdk`)
+   - Run the smoke test on every library: `npm run test:browser -- --reference` and `npm run test:browser:sdk`
+   - Run `npm run bench -- --quick` after changing a library's request path
+   - In a browser: reload; if the old build still runs, the new worker is waiting (close other tabs or use skipWaiting in DevTools)
+
+4. **Status Updates**:
+   - The worker broadcasts `client_loaded` and `client_status`, and replies `client_set` to `set_client`
+   - The log says which library loaded and its build ("Loaded the … client (…)")
+
+5. **Logging**:
+   - A library's entries carry its `logSource` (`wasm`, `sdk`); debug entries are the HTTP trace
+   - Never log tokens, `Authorization` values or sign-in secrets; shorten session IDs
+
+6. **The agent loop** (Chat app, in `sw.js`):
+   - The model is an MCP tool; tool calls are JSON-RPC requests in code blocks of its reply
+   - Nothing sent to the model may contain credentials (`serversForModel` strips static tokens)
+   - Every call, including the model's and those from its replies, is recorded as a run
+
+7. **Documentation**:
+   - Update DEVELOPMENT.md for new interface functions, messages and patterns
+   - Update the README when behavior a user sees changes

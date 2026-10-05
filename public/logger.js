@@ -2,7 +2,8 @@
 // (debug entries only show with DevTools' Verbose level) and handed to the sink, which sends it
 // to each open page's log.
 //
-// Entry: {time, level: 'debug'|'info'|'warn'|'error', source: 'worker'|'wasm', message, server?, detail?}
+// Entry: {time, level: 'debug'|'info'|'warn'|'error', source: 'worker'|'wasm'|'sdk', message, server?, detail?}
+// (an MCP client library's entries carry its logSource from mcp-clients.js: 'wasm' or 'sdk'.)
 
 let sink = () => {};
 

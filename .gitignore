@@ -64,3 +64,6 @@ mcp_server.log
 
 # Rust specific
 .cargo/ 
+
+# Source maps from npm run build
+public/*.map

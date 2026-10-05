@@ -1,19 +1,28 @@
 {
   "name": "mcp-browser-client",
   "version": "0.1.0",
-  "description": "MCP Browser Client with WASM",
+  "description": "Test MCP client libraries in the browser and build agentic apps on them, with nothing to install",
+  "type": "module",
   "scripts": {
     "start": "http-server public -p 8080 -c-1",
     "start:glean": "http-server public -a 127.0.0.1 -p 8888 -c-1",
-    "build": "./wasm-build.sh",
+    "build": "npm run build:wasm && npm run build:sdk",
+    "build:wasm": "./wasm-build.sh",
+    "build:sdk": "node sdk-client/build.mjs",
     "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
     "start:mock-mcp": "python3 test_mcp_server.py",
     "start:reference-mcp": "venv/bin/python tests/reference_server.py",
     "test:rust": "cargo test --lib",
     "test:browser": "node tests/browser-smoke.mjs",
-    "test:public": "node tests/browser-smoke.mjs --public"
+    "test:browser:sdk": "node tests/browser-smoke.mjs --client=sdk",
+    "test:public": "node tests/browser-smoke.mjs --public",
+    "bench": "node tests/bench.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "http-server": "^14.1.1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.3.0"
   }
 }

@@ -3,7 +3,6 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
 
@@ -16,28 +15,16 @@ pub mod oauth;
 use error::McpError;
 
 include!("build_info.rs");
-include!("bootrom.rs");
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const METADATA_VERSION: &str = "1.0.0";
 
 static UPTIME: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Clone, Serialize)]
-struct MemoryEvent {
-    timestamp: u64,
-    text: String,
-}
-
 #[derive(Serialize)]
 struct ModuleMetadata {
     version: &'static str,
-    memory_events: Vec<MemoryEvent>,
     last_health_check: u64,
-}
-
-thread_local! {
-    static MEMORY_EVENTS: RefCell<Vec<MemoryEvent>> = RefCell::new(Vec::new());
 }
 
 #[wasm_bindgen]
@@ -74,34 +61,8 @@ pub fn set_logger(logger: js_sys::Function) {
 
 #[wasm_bindgen]
 pub fn get_metadata() -> String {
-    let metadata = ModuleMetadata {
-        version: METADATA_VERSION,
-        memory_events: MEMORY_EVENTS.with(|events| events.borrow().clone()),
-        last_health_check: get_timestamp(),
-    };
+    let metadata = ModuleMetadata { version: METADATA_VERSION, last_health_check: get_timestamp() };
     serde_json::to_string(&metadata).unwrap_or_default()
-}
-
-#[wasm_bindgen]
-pub fn add_memory_event(text: &str) {
-    let event = MemoryEvent { timestamp: get_timestamp(), text: text.to_string() };
-    MEMORY_EVENTS.with(|events| events.borrow_mut().push(event));
-}
-
-#[wasm_bindgen]
-pub fn clear_memory_events() {
-    MEMORY_EVENTS.with(|events| events.borrow_mut().clear());
-}
-
-#[wasm_bindgen]
-pub fn get_bootrom() -> String {
-    serde_json::json!({
-        "id": "bootrom",
-        "name": "BOOTROM",
-        "text": BOOTROM_DATA,
-        "timestamp": 0u64
-    })
-    .to_string()
 }
 
 /// Detects the server's protocol era and returns what it reported about itself:

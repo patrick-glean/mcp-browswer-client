@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tool-call benchmark · MCP Browser Client</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../tokens.css">
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        body { max-width: 1120px; margin: 0 auto; padding: 32px 24px; }
+        .bench-intro { max-width: 72ch; color: var(--theme-text-secondary); }
+        .bench-form { display: grid; gap: 12px; max-width: 640px; margin: 24px 0; }
+        .bench-form label { display: grid; gap: 4px; }
+        .bench-form .bench-check { display: flex; align-items: center; gap: 8px; }
+        .bench-form textarea { font-family: var(--font-mono); }
+        .bench-section { margin-top: 32px; }
+        .bench-section table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        .bench-section th, .bench-section td { padding: 6px 10px; border-bottom: 1px solid var(--theme-border-light); text-align: left; white-space: nowrap; }
+        .bench-section td:nth-child(n+4) { font-family: var(--font-mono); }
+        .bench-note { color: var(--theme-text-secondary); }
+    </style>
+</head>
+<body>
+    <h1>Tool-call benchmark</h1>
+    <p class="bench-intro">
+        Every MCP client library the app can run, the Rust/WASM one and the TypeScript SDK one, runs in this page's service
+        worker, which calls <code>call_tool</code> on them directly, as the app's worker does: it measures the client layer and
+        the HTTP exchange, without the page, the run history or the log. Every call echoes its text through the server's
+        <code>echo</code> tool. The in-memory server answers inside the worker, so its numbers are the libraries' own work alone.
+        Start a mock server first, such as <code>npm run start:mock-mcp -- --mode modern</code>.
+        <code>npm run bench</code> runs all of this headlessly against three mock servers, plus a cold start and calls through the whole app.
+    </p>
+    <form class="bench-form" id="benchForm">
+        <label>MCP servers, one per line: a label, then the URL
+            <textarea id="servers" rows="3">mock http://127.0.0.1:8081/</textarea>
+        </label>
+        <label class="bench-check"><input type="checkbox" id="memory" checked> Also the in-memory server</label>
+        <label class="bench-check"><input type="checkbox" id="quick"> Quick: a fifth of the calls and one round</label>
+        <div><button type="submit" id="runBtn">Run</button></div>
+    </form>
+    <p id="benchStatus" role="status"></p>
+    <div id="benchResults"></div>
+
+    <script type="module">
+        import * as suite from './suite.js';
+
+        // For tests/bench.mjs.
+        window.bench = suite;
+        window.benchReady = suite.ready();
+
+        const status = document.getElementById('benchStatus');
+        const escape = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+        function render(results) {
+            document.getElementById('benchResults').innerHTML = suite.tables(results).map(({ title, note, headers, rows }) => `
+                <section class="bench-section">
+                    <h2>${escape(title)}</h2>
+                    <p class="bench-note">${escape(note)}</p>
+                    <table>
+                        <thead><tr>${headers.map(h => `<th>${escape(h)}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.map(row => `<tr>${row.map(c => `<td>${escape(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>
+                </section>`).join('');
+        }
+
+        document.getElementById('benchForm').addEventListener('submit', async event => {
+            event.preventDefault();
+            const button = document.getElementById('runBtn');
+            const servers = document.getElementById('servers').value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+                const url = line.split(/\s+/).at(-1);
+                return { label: line.slice(0, -url.length).trim() || url, url };
+            });
+            const quick = document.getElementById('quick').checked;
+            button.disabled = true;
+            try {
+                const info = await window.benchReady;
+                status.textContent = `Timer resolution ${suite.formatMs(info.timerResolutionMs)}. Running…`;
+                const results = await suite.runSuite(
+                    { servers, memory: document.getElementById('memory').checked, quick, rounds: quick ? 1 : 3 },
+                    ({ done, total, run, variant }) => {
+                        status.textContent = `${done} of ${total}: ${variant}, ${run.target.label}, ${suite.formatBytes(run.bytes)}, ${run.concurrency} in flight`;
+                    },
+                );
+                render(results);
+                status.textContent = 'Done.';
+            } catch (error) {
+                status.textContent = `The benchmark failed: ${error.message}`;
+            } finally {
+                button.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

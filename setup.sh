@@ -26,13 +26,18 @@ echo "Setting up the Python virtual environment for the reference MCP server..."
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
-echo "Building the WASM module..."
+echo "Building the Rust/WASM MCP client library..."
 ./wasm-build.sh
+
+echo "Building the TypeScript SDK MCP client library..."
+npm run build:sdk
 
 echo "Setup complete! To try it:"
 echo ""
 echo "  npm start                 # the app on http://localhost:8080"
 echo "  npm run start:mock-mcp    # in a second terminal: a mock MCP server on http://127.0.0.1:8081"
 echo ""
-echo "Then open http://localhost:8080. The Guide (top right) walks through connecting and calling a tool."
-echo "Tests: npm run test:rust && npm run test:browser (README.md has the full testing guide)"
+echo "Then open http://localhost:8080. The Guide (top right) walks through connecting and calling a tool,"
+echo "and Runtime (top bar) switches the MCP client library."
+echo "Tests: npm run test:rust && npm run test:browser && npm run test:browser:sdk (README.md has the full testing guide)"
+echo "Tool-call load test of every MCP client library: npm run bench"

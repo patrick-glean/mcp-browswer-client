@@ -12,9 +12,6 @@ declare namespace wasm_bindgen {
 	 */
 	export function set_logger(logger: Function): void;
 	export function get_metadata(): string;
-	export function add_memory_event(text: string): void;
-	export function clear_memory_events(): void;
-	export function get_bootrom(): string;
 	/**
 	 * Detects the server's protocol era and returns what it reported about itself:
 	 * `{url, era, protocolVersion, serverInfo, capabilities, instructions}`.
@@ -59,9 +56,6 @@ declare interface InitOutput {
   readonly get_compiled_info: () => [number, number];
   readonly set_logger: (a: any) => void;
   readonly get_metadata: () => [number, number];
-  readonly add_memory_event: (a: number, b: number) => void;
-  readonly clear_memory_events: () => void;
-  readonly get_bootrom: () => [number, number];
   readonly connect: (a: number, b: number, c: number, d: number) => any;
   readonly list_tools: (a: number, b: number, c: number, d: number) => any;
   readonly call_tool: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
@@ -77,8 +71,8 @@ declare interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h3c5941f0d731c178: (a: number, b: number) => void;
-  readonly closure104_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure126_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure100_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure122_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

@@ -1,171 +1,126 @@
-// chatStorage.js (module)
+// The Chat app's conversations, in IndexedDB: a record per conversation and one per message, both
+// keyed by conversationId. Version 1 of the database called it engramId; opening it moves those
+// records over.
+import { logger } from './logger.js';
+
 const DB_NAME = 'chat_contexts';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CONVERSATIONS_STORE = 'conversations';
 const MESSAGES_STORE = 'messages';
 
-export function initDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+let opened = null;
 
-    req.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      console.log('[initDB] Creating or upgrading DB schema...');
-      db.createObjectStore(CONVERSATIONS_STORE, { keyPath: 'engramId' });
-      const msgStore = db.createObjectStore(MESSAGES_STORE, { keyPath: 'id' });
-      msgStore.createIndex('engramId', 'engramId');
-    };
-
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
+// The only way in, so an older database is always upgraded before anything reads it.
 export function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+    opened ??= new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = event => upgrade(request.result, request.transaction, event.oldVersion);
+        request.onblocked = () => logger.warn('Waiting for an older copy of the app to close the conversation store');
+        request.onsuccess = () => {
+            const db = request.result;
+            db.onversionchange = () => {
+                db.close();
+                opened = null;
+            };
+            resolve(db);
+        };
+        request.onerror = () => {
+            opened = null;
+            reject(request.error);
+        };
+    });
+    return opened;
 }
 
-export async function handleOp(op, engramId, data, options) {
-  switch (op) {
-    case 'init':
-      await initDB();
-      return { status: 'initialized' };
-    case 'store':
-      return storeConversation(engramId, data);
-    case 'append':
-      return appendMessage(engramId, data.message);
-    case 'load':
-      return loadConversation(engramId, options);
-    case 'list':
-      return listConversations(options);
-    case 'delete':
-      return deleteConversation(engramId);
-    case 'prune':
-      return pruneConversation(engramId, options);
-    default:
-      throw new Error(`Unknown operation: ${op}`);
-  }
+function upgrade(db, transaction, oldVersion) {
+    if (oldVersion < 1) createStores(db);
+    else if (oldVersion < 2) migrateFromVersion1(db, transaction);
 }
 
-async function storeConversation(engramId, data) {
-  const db = await openDB();
-  const tx = db.transaction([CONVERSATIONS_STORE, MESSAGES_STORE], 'readwrite');
-  const convStore = tx.objectStore(CONVERSATIONS_STORE);
-  const msgStore = tx.objectStore(MESSAGES_STORE);
-
-  convStore.put({ engramId, meta: data.meta });
-  for (const msg of data.messages) {
-    msgStore.put({ ...msg, engramId });
-  }
-  await tx.complete;
-  return { status: 'stored' };
+function createStores(db) {
+    db.createObjectStore(CONVERSATIONS_STORE, { keyPath: 'conversationId' });
+    db.createObjectStore(MESSAGES_STORE, { keyPath: 'id' }).createIndex('conversationId', 'conversationId');
 }
 
-async function appendMessage(engramId, message) {
-  const db = await openDB();
-  const tx = db.transaction(MESSAGES_STORE, 'readwrite');
-  const msgStore = tx.objectStore(MESSAGES_STORE);
-  msgStore.put({ ...message, engramId });
-  await tx.complete;
-  return { status: 'appended' };
+const renamed = ({ engramId, ...record }) => ({ ...record, conversationId: engramId });
+
+// Reads every version 1 record, recreates the stores keyed by conversationId and writes the
+// records back, all in the upgrade transaction: if any step fails, the database stays as it was.
+function migrateFromVersion1(db, transaction) {
+    const conversations = transaction.objectStore(CONVERSATIONS_STORE).getAll();
+    const messages = transaction.objectStore(MESSAGES_STORE).getAll();
+    // Requests in a transaction finish in order, so both results are in.
+    messages.onsuccess = () => {
+        db.deleteObjectStore(CONVERSATIONS_STORE);
+        db.deleteObjectStore(MESSAGES_STORE);
+        createStores(db);
+        const conversationStore = transaction.objectStore(CONVERSATIONS_STORE);
+        const messageStore = transaction.objectStore(MESSAGES_STORE);
+        for (const conversation of conversations.result) {
+            conversationStore.put({ ...renamed(conversation), meta: conversation.meta && renamed(conversation.meta) });
+        }
+        for (const message of messages.result) messageStore.put(renamed(message));
+        logger.info(`Moved ${conversations.result.length} conversation${conversations.result.length === 1 ? '' : 's'} with ${messages.result.length} message${messages.result.length === 1 ? '' : 's'} to the renamed conversation store`);
+    };
 }
 
-async function loadConversation(engramId, options = {}) {
-  if (engramId === null || engramId === undefined) {
-    return { engramId, messages: [] };
-  }
-  const db = await openDB();
-  const tx = db.transaction(MESSAGES_STORE, 'readonly');
-  const msgStore = tx.objectStore(MESSAGES_STORE);
-  const index = msgStore.index('engramId');
-  const range = IDBKeyRange.only(engramId);
+const finished = transaction => new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+});
 
-  const messages = [];
-  index.openCursor(range).onsuccess = (event) => {
-    const cursor = event.target.result;
-    if (cursor) {
-      messages.push(cursor.value);
-      cursor.continue();
-    }
-  };
-
-  await new Promise((resolve) => (tx.oncomplete = resolve));
-  return { engramId, messages };
+// Time-ordered IDs, so a conversation's messages come back in the order they were saved.
+function uuidv7() {
+    const timestamp = Date.now().toString(16).padStart(12, '0');
+    const random = crypto.getRandomValues(new Uint8Array(10));
+    const randomHex = Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
+    return [
+        timestamp.slice(0, 8),
+        timestamp.slice(8, 12),
+        '7' + randomHex.slice(0, 3),
+        (8 + (random[3] & 0x3)).toString(16) + randomHex.slice(3, 6),
+        randomHex.slice(6, 18)
+    ].join('-');
 }
 
-async function listConversations(options = {}) {
-  const db = await openDB();
-  const tx = db.transaction(CONVERSATIONS_STORE, 'readonly');
-  const convStore = tx.objectStore(CONVERSATIONS_STORE);
-  const conversations = [];
-
-  convStore.openCursor().onsuccess = (event) => {
-    const cursor = event.target.result;
-    if (cursor) {
-      conversations.push(cursor.value.meta);
-      cursor.continue();
-    }
-  };
-
-  await new Promise((resolve) => (tx.oncomplete = resolve));
-  return conversations;
+// Saves a message {text, role, timestamp, conversationId}, starting the conversation if it's new.
+export async function saveMessage(message) {
+    const db = await openDB();
+    const transaction = db.transaction([CONVERSATIONS_STORE, MESSAGES_STORE], 'readwrite');
+    const conversations = transaction.objectStore(CONVERSATIONS_STORE);
+    const existing = conversations.getKey(message.conversationId);
+    existing.onsuccess = () => {
+        if (existing.result === undefined) {
+            conversations.put({ conversationId: message.conversationId, meta: { created: Date.now(), conversationId: message.conversationId } });
+        }
+    };
+    transaction.objectStore(MESSAGES_STORE).put({ ...message, id: uuidv7(), timestamp: message.timestamp || Date.now() });
+    await finished(transaction);
 }
 
-async function deleteConversation(engramId) {
-  const db = await openDB();
-  const tx1 = db.transaction(CONVERSATIONS_STORE, 'readwrite');
-  tx1.objectStore(CONVERSATIONS_STORE).delete(engramId);
-
-  const tx2 = db.transaction(MESSAGES_STORE, 'readwrite');
-  const index = tx2.objectStore(MESSAGES_STORE).index('engramId');
-  const range = IDBKeyRange.only(engramId);
-  index.openCursor(range).onsuccess = (event) => {
-    const cursor = event.target.result;
-    if (cursor) {
-      cursor.delete();
-      cursor.continue();
-    }
-  };
-
-  await Promise.all([
-    new Promise((resolve) => (tx1.oncomplete = resolve)),
-    new Promise((resolve) => (tx2.oncomplete = resolve))
-  ]);
-
-  return { status: 'deleted' };
+export async function loadConversation(conversationId) {
+    if (conversationId === null || conversationId === undefined) return { conversationId, messages: [] };
+    const db = await openDB();
+    const transaction = db.transaction(MESSAGES_STORE, 'readonly');
+    const request = transaction.objectStore(MESSAGES_STORE).index('conversationId').getAll(IDBKeyRange.only(conversationId));
+    await finished(transaction);
+    return { conversationId, messages: request.result };
 }
 
-async function pruneConversation(engramId, options = {}) {
-  const keepLastN = options.keepLastN || 50;
-  const db = await openDB();
-  const tx = db.transaction(MESSAGES_STORE, 'readwrite');
-  const index = tx.objectStore(MESSAGES_STORE).index('engramId');
-  const range = IDBKeyRange.only(engramId);
-
-  const messages = [];
-  index.openCursor(range).onsuccess = (event) => {
-    const cursor = event.target.result;
-    if (cursor) {
-      messages.push(cursor);
-      cursor.continue();
-    }
-  };
-
-  await new Promise((resolve) => (tx.oncomplete = resolve));
-
-  const toDelete = messages.length - keepLastN;
-  if (toDelete > 0) {
-    const tx2 = db.transaction(MESSAGES_STORE, 'readwrite');
-    for (let i = 0; i < toDelete; i++) {
-      tx2.objectStore(MESSAGES_STORE).delete(messages[i].primaryKey);
-    }
-    await new Promise((resolve) => (tx2.oncomplete = resolve));
-  }
-
-  return { status: 'pruned', removed: toDelete > 0 ? toDelete : 0 };
+export async function listConversations() {
+    const db = await openDB();
+    const transaction = db.transaction(CONVERSATIONS_STORE, 'readonly');
+    const request = transaction.objectStore(CONVERSATIONS_STORE).getAll();
+    await finished(transaction);
+    return request.result.map(conversation => conversation.meta);
 }
-  
+
+export async function deleteConversation(conversationId) {
+    const db = await openDB();
+    const transaction = db.transaction([CONVERSATIONS_STORE, MESSAGES_STORE], 'readwrite');
+    transaction.objectStore(CONVERSATIONS_STORE).delete(conversationId);
+    const messages = transaction.objectStore(MESSAGES_STORE);
+    const keys = messages.index('conversationId').getAllKeys(IDBKeyRange.only(conversationId));
+    keys.onsuccess = () => keys.result.forEach(key => messages.delete(key));
+    await finished(transaction);
+}

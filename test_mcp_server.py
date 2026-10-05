@@ -153,6 +153,12 @@ def origin_matches(pattern, origin):
     return origin == pattern
 
 
+class Server(ThreadingHTTPServer):
+    # HTTP/1.0 opens a connection per request, and a browser keeps up to six open per server, so
+    # the default backlog of 5 refuses some of them under load (npm run bench).
+    request_queue_size = 128
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "MockMCP/2.0"
     label = ""
@@ -537,6 +543,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
+        if self.keeps_alive():
+            # The stream ends with its last chunk, not the connection.
+            self.send_header("Transfer-Encoding", "chunked")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
@@ -552,14 +561,23 @@ class Handler(BaseHTTPRequestHandler):
                     "params": {"progressToken": progress_token, "progress": step, "total": steps},
                 }))
         self.write_event(f"id: {request_id}\r\nevent: message\r\n" + self.sse_data(reply))
+        if self.keeps_alive():
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         print(f"POST {self.label} -> 200 (SSE)", flush=True)
 
     @staticmethod
     def sse_data(message):
         return f"data: {json.dumps(message)}"
 
+    def keeps_alive(self):
+        return self.protocol_version == "HTTP/1.1"
+
     def write_event(self, text):
-        self.wfile.write((text + "\r\n\r\n").encode("utf-8"))
+        data = (text + "\r\n\r\n").encode("utf-8")
+        if self.keeps_alive():
+            data = f"{len(data):X}\r\n".encode() + data + b"\r\n"
+        self.wfile.write(data)
         self.wfile.flush()
 
     def send_json(self, status, body, headers=None):
@@ -620,10 +638,17 @@ def main():
         help="headers CORS preflights allow, e.g. 'Content-Type, Mcp-Session-Id' "
              "(default: whatever the browser asks for)",
     )
+    parser.add_argument(
+        "--keep-alive", action="store_true",
+        help="speak HTTP/1.1 and keep connections open between requests, as most servers do, "
+             "instead of HTTP/1.0's connection per request (npm run bench)",
+    )
     parser.add_argument("--verbose", action="store_true", help="print request headers and bodies")
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if args.keep_alive:
+        Handler.protocol_version = "HTTP/1.1"
+    server = Server((args.host, args.port), Handler)
     server.mode = args.mode
     server.sse = args.sse
     server.verbose = args.verbose

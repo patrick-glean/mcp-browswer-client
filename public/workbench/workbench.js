@@ -1,5 +1,5 @@
 // The Workbench's state and the actions its components share. Components only reach each other
-// through here and through ChatShell (which owns servers, sign-in and tool calls), so any of them
+// through here and through AppShell (which owns servers, sign-in and tool calls), so any of them
 // can be moved, swapped or left out of a layout without the others noticing.
 //
 // Events, with what their detail holds:
@@ -132,7 +132,7 @@ export class Workbench {
         this.selectEnvironment(this.environments[0].id);
     }
 
-    // Fills in {{variables}} from the active environment before a call goes out. ChatShell calls
+    // Fills in {{variables}} from the active environment before a call goes out. AppShell calls
     // this for every run; it throws a TemplateError for unknown variables.
     prepare(tool, args) {
         const sentArgs = resolveArguments(args, this.variables, schemaOf(tool));
