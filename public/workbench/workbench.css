@@ -1161,10 +1161,10 @@ wb-response {
     cursor: pointer;
 }
 
-.wb-optional[open] {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+/* Margins rather than a flex gap: browsers lay out a <details> element's content in a box of its
+   own (::details-content), which the gap doesn't reach. */
+.wb-optional[open] > .tool-input-card {
+    margin-top: 14px;
 }
 
 .wb-resolved {
