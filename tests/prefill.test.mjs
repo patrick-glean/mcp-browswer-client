@@ -194,10 +194,12 @@ test('what a description says a field holds comes before guesses from its name',
         after: { type: 'string', description: 'Only notes written on or after this day, as YYYY-MM-DD.' },
         before: { type: 'string', description: 'Only notes written before this day, as YYYY-MM-DD.' },
         since: { type: 'string', description: 'Only results updated since then (ISO 8601 timestamp).' },
-        container: { type: 'string', description: 'URL of the folder to search in.' },
+        folder: { type: 'string', description: 'URL of the folder to search in.' },
+        api_version: { type: 'string', description: 'The API version to use, as YYYY-MM-DD.' },
         data: { type: 'string', description: 'The replacement file bytes, base64-encoded.' },
         query: { type: 'string', description: 'Search terms, with dates written as YYYY-MM-DD.' },
         owner: { type: 'string', description: 'Who owns the repository.' },
+        path: { type: 'string', description: 'Path to the file or directory.' },
     }));
     assert.deepEqual(values, {
         author: 'test@example.com',
@@ -205,10 +207,12 @@ test('what a description says a field holds comes before guesses from its name',
         after: day(7),
         before: day(0),
         since: `${day(7)}T00:00:00Z`,
-        container: 'https://example.com',
+        folder: 'https://example.com',
+        api_version: day(0),
         data: 'dGVzdA==',
         query: 'test',
         owner: 'modelcontextprotocol',
+        path: '/',
     });
 });
 
