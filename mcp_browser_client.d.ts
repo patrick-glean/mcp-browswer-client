@@ -12,9 +12,6 @@ declare namespace wasm_bindgen {
 	 */
 	export function set_logger(logger: Function): void;
 	export function get_metadata(): string;
-	export function add_memory_event(text: string): void;
-	export function clear_memory_events(): void;
-	export function get_bootrom(): string;
 	/**
 	 * Detects the server's protocol era and returns what it reported about itself:
 	 * `{url, era, protocolVersion, serverInfo, capabilities, instructions}`.
@@ -29,6 +26,27 @@ declare namespace wasm_bindgen {
 	 * Calls a tool with JSON-encoded arguments and returns the JSON-RPC `result`.
 	 */
 	export function call_tool(url: string, name: string, args: string, options: string): Promise<string>;
+	/**
+	 * Returns `{resources}`, every page of the server's resource list.
+	 */
+	export function list_resources(url: string, options: string): Promise<string>;
+	/**
+	 * Returns `{resourceTemplates}`, every page of the server's resource template list.
+	 */
+	export function list_resource_templates(url: string, options: string): Promise<string>;
+	/**
+	 * Reads a resource and returns the JSON-RPC `result`, `{contents}`.
+	 */
+	export function read_resource(url: string, uri: string, options: string): Promise<string>;
+	/**
+	 * Returns `{prompts}`, every page of the server's prompt list.
+	 */
+	export function list_prompts(url: string, options: string): Promise<string>;
+	/**
+	 * Gets a prompt with JSON-encoded arguments and returns the JSON-RPC `result`,
+	 * `{description?, messages}`.
+	 */
+	export function get_prompt(url: string, name: string, args: string, options: string): Promise<string>;
 	export function forget_server(url: string): void;
 	/**
 	 * Starts signing in to a server that needs OAuth: discovery, client registration if needed,
@@ -59,12 +77,14 @@ declare interface InitOutput {
   readonly get_compiled_info: () => [number, number];
   readonly set_logger: (a: any) => void;
   readonly get_metadata: () => [number, number];
-  readonly add_memory_event: (a: number, b: number) => void;
-  readonly clear_memory_events: () => void;
-  readonly get_bootrom: () => [number, number];
   readonly connect: (a: number, b: number, c: number, d: number) => any;
   readonly list_tools: (a: number, b: number, c: number, d: number) => any;
   readonly call_tool: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
+  readonly list_resources: (a: number, b: number, c: number, d: number) => any;
+  readonly list_resource_templates: (a: number, b: number, c: number, d: number) => any;
+  readonly read_resource: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
+  readonly list_prompts: (a: number, b: number, c: number, d: number) => any;
+  readonly get_prompt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
   readonly forget_server: (a: number, b: number) => void;
   readonly auth_begin: (a: number, b: number, c: number, d: number) => any;
   readonly auth_finish: (a: number, b: number, c: number, d: number) => any;
@@ -77,8 +97,8 @@ declare interface InitOutput {
   readonly __wbindgen_export_5: WebAssembly.Table;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h3c5941f0d731c178: (a: number, b: number) => void;
-  readonly closure104_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure126_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure121_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure143_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_start: () => void;
 }
 

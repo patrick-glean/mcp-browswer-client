@@ -19,7 +19,10 @@ body {
 wb-rail,
 wb-tools,
 wb-request,
+wb-resource,
+wb-prompt,
 wb-response,
+wb-contents,
 wb-dock,
 wb-sheet,
 wb-palette {
@@ -189,12 +192,17 @@ kbd {
     min-height: 0;
 }
 
+/* The splitters (wb-splitter) sit in zero-width tracks between the panes and set the variables
+   these tracks read; clamp keeps a size saved on a wide screen from crowding a narrow one. */
 .wb-workbench[data-layout='b'] {
-    grid-template-columns: 248px 272px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns:
+        clamp(160px, var(--rail-width, 248px), 30vw) 0
+        clamp(180px, var(--tools-width, 272px), 32vw) 0
+        minmax(0, var(--request-fr, 1fr)) 0 minmax(0, var(--response-fr, 1fr));
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
-        'rail bar bar bar'
-        'rail tools request response';
+        'rail split-rail bar bar bar bar bar'
+        'rail split-rail tools split-tools request split-request response';
 }
 
 .wb-area-rail { grid-area: rail; }
@@ -202,21 +210,83 @@ kbd {
 .wb-area-tools { grid-area: tools; }
 .wb-area-request { grid-area: request; }
 .wb-area-response { grid-area: response; }
+.wb-area-split-rail { grid-area: split-rail; }
+.wb-area-split-tools { grid-area: split-tools; }
+.wb-area-split-request { grid-area: split-request; }
 
 @media (max-width: 1240px) {
     .wb-workbench[data-layout='b'] {
-        grid-template-columns: 220px 236px minmax(0, 1fr);
-        grid-template-rows: auto minmax(0, 1.1fr) minmax(0, 1fr);
+        grid-template-columns:
+            clamp(160px, var(--rail-width, 220px), 30vw) 0
+            clamp(180px, var(--tools-width, 236px), 32vw) 0 minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, var(--request-fr, 1.1fr)) 0 minmax(0, var(--response-fr, 1fr));
         grid-template-areas:
-            'rail bar bar'
-            'rail tools request'
-            'rail tools response';
+            'rail split-rail bar bar bar'
+            'rail split-rail tools split-tools request'
+            'rail split-rail tools split-tools split-request'
+            'rail split-rail tools split-tools response';
     }
 
     .wb-workbench[data-layout='b'] .wb-area-request {
         border-right: none;
         border-bottom: 1px solid var(--theme-border-light);
     }
+}
+
+wb-splitter {
+    position: relative;
+    z-index: 5;
+    display: block;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+}
+
+/* The hit area and the line that shows on hover, focus and while dragging. */
+wb-splitter::before,
+wb-splitter::after {
+    content: '';
+    position: absolute;
+    inset: 0 -4px;
+}
+
+wb-splitter::after {
+    inset: 0 -1px;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+wb-splitter:hover::after,
+wb-splitter:focus-visible::after,
+wb-splitter[data-dragging]::after {
+    background: var(--theme-link);
+}
+
+@media (max-width: 1240px) {
+    .wb-area-split-request {
+        cursor: row-resize;
+    }
+
+    .wb-area-split-request::before {
+        inset: -4px 0;
+    }
+
+    .wb-area-split-request::after {
+        inset: -1px 0;
+    }
+}
+
+/* While dragging, the cursor stays a resize cursor and nothing gets selected. */
+body.wb-resizing-columns,
+body.wb-resizing-columns * {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+body.wb-resizing-rows,
+body.wb-resizing-rows * {
+    cursor: row-resize !important;
+    user-select: none;
 }
 
 @media (max-width: 860px) {
@@ -241,6 +311,10 @@ kbd {
         border-bottom: 1px solid var(--theme-border-light);
     }
 
+    .wb-workbench[data-layout='b'] > wb-splitter {
+        display: none;
+    }
+
     .wb-goto-label,
     .wb-topbar .env-picker label,
     .wb-topbar .status-bar .status-label,
@@ -250,6 +324,25 @@ kbd {
 
     .wb-goto {
         min-width: 0;
+    }
+
+    .wb-apps .chat-card {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .wb-dock-head {
+        flex-wrap: wrap;
+        height: auto;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+
+    .wb-dock-head .log-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .wb-dock-head .log-toolbar input[type='search'] {
+        width: 140px;
     }
 }
 
@@ -356,6 +449,47 @@ kbd {
 .wb-more {
     font-size: 1rem;
     line-height: 1;
+}
+
+/* <details> menus: their summary is the button, so it needs the button look itself. */
+summary.btn-sm,
+summary.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: var(--radius-full);
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    user-select: none;
+}
+
+summary.btn-icon.btn-sm {
+    width: 24px;
+    padding: 0;
+}
+
+summary.btn-sm:not(.btn-tertiary) {
+    background: var(--theme-background-mid);
+}
+
+summary.btn-sm:hover,
+summary.btn-icon:hover,
+details[open] > summary.btn-sm,
+details[open] > summary.btn-icon {
+    background: var(--theme-feedback-hover);
+}
+
+.split-button > button {
+    border-right: 1px solid var(--theme-border-dark);
+}
+
+.split-button summary.btn-sm {
+    padding: 0 7px;
+    border-radius: 0 var(--radius-full) var(--radius-full) 0;
 }
 
 .wb-caret {
@@ -788,6 +922,56 @@ wb-tools {
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px dashed var(--theme-border-dark);
+}
+
+/* Resources: a title over its URI. */
+.wb-row-stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    height: auto;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+.wb-row-sub {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wb-group-label {
+    margin-top: 8px;
+    padding: 2px 8px 4px;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+.wb-group-label + .wb-list {
+    padding-left: 0;
+}
+
+/* The URI a resource template makes from its fields. */
+.wb-item-uri {
+    margin: 12px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.wb-item-problem {
+    margin: 4px 0 0;
+}
+
+/* What a resource holds and what a prompt says: each item's address or role over its content. */
+.wb-content-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
 }
 
 .wb-hidden-head {

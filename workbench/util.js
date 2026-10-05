@@ -13,6 +13,9 @@ export const schemaOf = tool => tool?.inputSchema || tool?.input_schema || null;
 
 export const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
+// "a", "a and b", "a, b and c".
+export const listOf = items => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+
 export function timeAgo(time) {
     const seconds = Math.round((Date.now() - time) / 1000);
     if (seconds < 10) return 'just now';

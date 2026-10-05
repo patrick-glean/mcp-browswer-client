@@ -39,10 +39,10 @@
             </button>
             <button type="button" class="status-bar" id="statusBar" title="Runtime controls" aria-controls="controlsPopdown">
                 <span class="status-indicator" id="sw-status" title="Service worker">●</span>
-                <span class="status-indicator" id="wasm-status" title="WASM module">●</span>
+                <span class="status-indicator" id="client-status" title="MCP client">●</span>
                 <span class="status-label">Runtime</span>
             </button>
-            <button type="button" id="guideBtn" class="btn-tertiary btn-sm" title="How to try this client" aria-controls="guide">
+            <button type="button" id="guideBtn" class="btn-tertiary btn-sm" title="How to try it" aria-controls="guide">
                 <span class="icon icon-help" aria-hidden="true"></span>Guide
             </button>
             <button type="button" id="themeToggle" class="btn-icon btn-sm btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
@@ -62,19 +62,26 @@
                         <button id="stop-sw" class="btn-outline btn-danger"><span class="icon icon-power" aria-hidden="true"></span>Stop</button>
                     </div>
                 </div>
-                <div class="control-group wasm-controls">
-                    <h3>WASM module <span class="status-uptime" id="wasm-uptime">0s</span></h3>
+                <div class="control-group client-controls">
+                    <h3>MCP client <span class="status-uptime" id="client-uptime">0s</span></h3>
+                    <!-- The MCP client libraries in public/mcp-clients.js; the first is the default. -->
+                    <label class="client-choice">Library
+                        <select id="clientSelect" title="Switches every tab's MCP client library at once; servers connect again on their next request">
+                            <option value="sdk">TypeScript SDK</option>
+                            <option value="wasm">Rust/WASM</option>
+                        </select>
+                    </label>
                     <div class="button-row">
-                        <button id="check-wasm">Check</button>
-                        <button id="reload-wasm" class="reload"><span class="icon icon-refresh" aria-hidden="true"></span>Reload</button>
-                        <button id="unload-wasm" class="btn-outline btn-danger">Unload</button>
+                        <button id="check-client">Check</button>
+                        <button id="reload-client" class="reload"><span class="icon icon-refresh" aria-hidden="true"></span>Reload</button>
+                        <button id="unload-client" class="btn-outline btn-danger">Unload</button>
                     </div>
                 </div>
                 <div class="control-group">
                     <h3>Build</h3>
                     <dl class="build-info">
-                        <dt>WASM</dt>
-                        <dd id="wasm-compiled">-</dd>
+                        <dt>Client</dt>
+                        <dd id="client-build">-</dd>
                         <dt>Metadata</dt>
                         <dd id="metadataVersion">-</dd>
                     </dl>
@@ -86,15 +93,21 @@
                  different arrangement is different grid areas, not different components. -->
             <div id="workbench" class="wb-workbench" data-layout="b">
                 <wb-rail class="wb-area-rail" role="navigation" aria-label="Servers, saved requests and history"></wb-rail>
+                <wb-splitter class="wb-area-split-rail" data-pane="rail"></wb-splitter>
                 <wb-server-bar class="wb-area-bar" role="region" aria-label="Selected server"></wb-server-bar>
                 <wb-tools class="wb-area-tools" role="region" aria-label="Tools"></wb-tools>
+                <wb-splitter class="wb-area-split-tools" data-pane="tools"></wb-splitter>
                 <wb-request id="requestPane" class="wb-area-request wb-pane" role="region" aria-label="Request"></wb-request>
+                <wb-resource id="resourcePane" class="wb-area-request wb-pane" role="region" aria-label="Resource" hidden></wb-resource>
+                <wb-prompt id="promptPane" class="wb-area-request wb-pane" role="region" aria-label="Prompt" hidden></wb-prompt>
+                <wb-splitter class="wb-area-split-request" data-pane="request"></wb-splitter>
                 <wb-response id="responsePane" class="wb-area-response wb-pane" role="region" aria-label="Response"></wb-response>
+                <wb-contents id="contentsPane" class="wb-area-response wb-pane" role="region" aria-label="Contents" hidden></wb-contents>
             </div>
             <section id="appsPage" class="wb-apps" aria-labelledby="appsTitle" hidden>
                 <header class="wb-apps-head">
                     <h2 id="appsTitle">Chat</h2>
-                    <p class="text-secondary">The first app: a conversation that goes through an MCP tool. Choose the tool under Model and tick the field your message goes to; the tool's reply joins the conversation.</p>
+                    <p class="text-secondary">The first app, an agent loop: the model is an MCP tool. Tick the field your message goes to, and a list field for the conversation, which also tells the model which tools your servers have. Tool calls in its reply run, and their results join the conversation.</p>
                 </header>
                 <div class="chat-card">
                     <section class="chat-card-left panel" aria-label="Conversation">
@@ -103,10 +116,10 @@
                             <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
                             <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
                         </div>
-                        <div id="chatEngramIdDisplay" class="chat-engram"></div>
+                        <div id="chatConversation" class="chat-conversation"></div>
                     </section>
                     <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
-                        <div class="cbus-tap-card">
+                        <div class="chat-model-card">
                             <div class="panel-title">Model</div>
                             <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
                             <div class="chat-server-select-row">
@@ -122,13 +135,13 @@
                         <div class="chat-context">
                             <div class="panel-header">
                                 <div class="panel-title">Instructions and context</div>
-                                <button id="addImprintBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
+                                <button id="addContextBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
                                     <span class="icon icon-plus" aria-hidden="true"></span>
                                 </button>
                             </div>
                             <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
-                            <div id="imprintsList" class="imprints-list"></div>
-                            <div id="imprintEditor" class="imprint-editor"></div>
+                            <div id="contextList" class="context-list"></div>
+                            <div id="contextEditor" class="context-editor"></div>
                         </div>
                     </aside>
                 </div>
@@ -138,7 +151,7 @@
             <div class="wb-dock-grip" title="Drag to resize" aria-hidden="true"></div>
             <div class="wb-dock-head">
                 <div class="wb-tabs" role="tablist" aria-label="Dock">
-                    <button type="button" role="tab" class="wb-tab" data-dock-tab="log" aria-selected="true" title="Every connect, tool listing and tool call with its timing, from this page, the service worker and the WASM client. Bearer tokens are never logged.">Log<span id="logsBadge" class="tab-badge" hidden></span></button>
+                    <button type="button" role="tab" class="wb-tab" data-dock-tab="log" aria-selected="true" title="Every connect, tool listing and tool call with its timing, from this page, the service worker and the MCP client library. Bearer tokens are never logged.">Log<span id="logsBadge" class="tab-badge" hidden></span></button>
                     <button type="button" role="tab" class="wb-tab" data-dock-tab="trace" aria-selected="false">Trace</button>
                     <button type="button" role="tab" class="wb-tab" data-dock-tab="runs" aria-selected="false">Runs</button>
                 </div>
@@ -180,7 +193,7 @@
                 <span class="icon icon-x" aria-hidden="true"></span>
             </button>
         </div>
-        <p class="guide-intro">This page is the whole MCP client: Rust compiled to WebAssembly, running in a service worker. Pick a server, then follow the steps. The guide stays open while you work. You can also add a server with + beside Servers: paste its URL, or your work email to find your company's Glean.</p>
+        <p class="guide-intro">Everything runs in this page and a service worker its tabs share, so there's nothing to install. The MCP client is a library you choose under Runtime: the official TypeScript SDK, or Rust compiled to WebAssembly. Pick a server, then follow the steps. The guide stays open while you work. You can also add a server with + beside Servers: paste its URL, or your work email to find your company's Glean.</p>
 
         <section class="guide-section">
             <h3>1. Pick a server</h3>
@@ -252,12 +265,13 @@
         <section class="guide-section">
             <h3>3. Run a tool</h3>
             <p>Click a tool, fill in its fields and choose Run (or press ⌘↵ or Ctrl+Enter). The result appears beside it; JSON has the whole reply. Optional fields left empty aren't sent.</p>
-            <p>Pre-fill fills the fields from what you last sent, a saved request or the tool's schema, and fields take <code>{{variables}}</code> from the environment in the top bar. Save keeps a request; run it again from Saved on the left to see what changed.</p>
+            <p>Pre-fill fills the fields from what you last sent, a saved request, or test data: the schema's examples where it has them, and generated values that fit each field where it doesn't. Fields take <code>{{variables}}</code> from the environment in the top bar, and Stage these values, in Pre-fill's menu, keeps a field's value there for any tool with that field. Save keeps a request; run it again from Saved on the left to see what changed.</p>
         </section>
 
         <section class="guide-section">
             <h3>4. Chat through a tool</h3>
             <p>Open Apps in the top bar. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
+            <p>A model tool with a list field can run an agent loop: tick "The conversation goes here" on it, and the model also gets the instructions, your servers' tools and the conversation so far. Tool calls it writes in its reply run, and their results join the conversation.</p>
         </section>
 
         <section class="guide-section">
@@ -275,7 +289,7 @@
                 <dt>HTTP 401</dt>
                 <dd>The server wants you to sign in, or a token. Choose Sign in in the bar above the tools, or paste a token under Info, then choose Connect.</dd>
                 <dt>Old behavior after a rebuild</dt>
-                <dd>Reload the page; the log should show "Loaded the WASM module" with the new build time. If it doesn't, open Runtime in the top bar and reload the WASM module.</dd>
+                <dd>Reload the page; the log should show "Loaded the TypeScript SDK client" (or whichever library Runtime has chosen) with the new build time. If it doesn't, open Runtime in the top bar and reload the MCP client.</dd>
             </dl>
         </section>
     </aside>
@@ -285,7 +299,63 @@
         // window would restart it and drop every open tab's connections.
         const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
 
-        // The dock's Log: entries from this page, the service worker and the WASM client, kept in
+        // Which MCP client library the service worker runs, one of the Runtime menu's. ?client= or
+        // the menu picks it. The page remembers it and tells the worker when the page starts and
+        // when the choice changes; the worker remembers it across restarts. Only a choice is ever
+        // sent: the worker serves every tab, and a tab that answered its announcements with what it
+        // last knew would undo another tab's switch.
+        const clientSelect = document.getElementById('clientSelect');
+        const CLIENT_NAMES = [...clientSelect.options].map(option => option.value);
+        const clientLabel = name => [...clientSelect.options].find(option => option.value === name)?.textContent ?? name;
+        let clientChoice = (() => {
+            const params = new URLSearchParams(location.search);
+            const asked = params.get('client');
+            if (CLIENT_NAMES.includes(asked)) {
+                localStorage.setItem('mcpClient', asked);
+                params.delete('client');
+                history.replaceState(null, '', location.pathname + (params.size ? `?${params}` : '') + location.hash);
+            }
+            const saved = localStorage.getItem('mcpClient');
+            return CLIENT_NAMES.includes(saved) ? saved : CLIENT_NAMES[0];
+        })();
+        const showClient = () => {
+            document.getElementById('client-status').title = `MCP client (${clientLabel(clientChoice)})`;
+            clientSelect.value = clientChoice;
+        };
+        showClient();
+        // Another tab switched clients, and has told the worker.
+        window.addEventListener('storage', event => {
+            if (event.key !== 'mcpClient' || !CLIENT_NAMES.includes(event.newValue)) return;
+            clientChoice = event.newValue;
+            showClient();
+        });
+
+        // The Chat app's settings under the names they had before its code was renamed: moved
+        // once, before anything reads them. (The worker moves stored conversations itself.)
+        (function moveOldChatSettings() {
+            const move = (storage, from, to, convert = value => value) => {
+                const value = storage.getItem(from);
+                if (value === null) return;
+                try {
+                    if (storage.getItem(to) === null) storage.setItem(to, convert(value));
+                } catch {
+                    // Unreadable, so there's nothing to keep.
+                }
+                storage.removeItem(from);
+            };
+            move(localStorage, 'lastEngramId', 'lastChatConversation');
+            move(sessionStorage, 'consoleChatEngramId', 'chatConversation');
+            move(localStorage, 'cbusTapConfig', 'chatModel', value => {
+                const { connectedStringArg = null, connectedArrayArg = null, ...model } = JSON.parse(value);
+                const preset = connectedStringArg && model.args?.[connectedStringArg];
+                if (typeof preset === 'string') model.args[connectedStringArg] = preset.replaceAll('{{cbus_message}}', '{{message}}');
+                return JSON.stringify({ ...model, messageField: connectedStringArg, conversationField: connectedArrayArg });
+            });
+            move(localStorage, 'mcp_module_metadata', 'chatContext', value => JSON.stringify(JSON.parse(value).memory_events || []));
+            sessionStorage.removeItem('mcpEngramId');
+        })();
+
+        // The dock's Log: entries from this page, the service worker and the MCP client, kept in
         // a capped buffer and filtered by level and text.
         class LogPanel {
             static LEVELS = ['debug', 'info', 'warn', 'error'];
@@ -464,7 +534,7 @@
             download() {
                 const about = {
                     app: 'mcp-browser-client',
-                    build: document.getElementById('wasm-compiled')?.textContent,
+                    build: document.getElementById('client-build')?.textContent,
                     page: location.href,
                     userAgent: navigator.userAgent,
                     savedAt: new Date().toISOString()
@@ -524,29 +594,30 @@
             label._flashTimer = setTimeout(() => { label.textContent = label.dataset.label; }, 1500);
         }
 
-        // The client's controller: the service worker and WASM runtime, the server list, sign-in
-        // and tool calls. It draws nothing itself; the Workbench's components (public/workbench/)
-        // listen for these events and call its methods:
+        // The app's controller: the service worker and its MCP client library, the server list,
+        // sign-in and tool calls. It draws nothing itself; the Workbench's components
+        // (public/workbench/) listen for these events and call its methods:
         //   servers  a server was added, changed or deleted      { url }
         //   select   the selected server changed                 { url }
         //   tools    a server's tool list arrived                { url }
+        //   catalog  a server's resources or prompts arrived, or couldn't be listed   { url }
         //   auth     sign-in started, moved on or ended          { url, pasteError }
         //   run      a call the Workbench shows is under way, done, or never sent
         //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
         //   recorded the worker saved a run in history           (the run's summary)
-        class ChatShell {
+        class AppShell {
             constructor() {
                 this.events = new EventTarget();
                 this.logPanel = new LogPanel();
                 this.swStatus = document.getElementById('sw-status');
-                this.wasmStatus = document.getElementById('wasm-status');
+                this.clientStatus = document.getElementById('client-status');
                 this.swUptime = document.getElementById('sw-uptime');
                 this.serviceWorker = null;
                 this.startTime = Date.now();
-                this.wasmStartTime = null;
+                this.clientStartTime = null;
                 this.uptimeInterval = null;
                 this.lastMcpCheck = null;
-                this.wasmCheckInterval = null;
+                this.clientCheckInterval = null;
                 this.checkCounter = 0;
                 this.selectedServerUrl = null;
                 this.isInitialized = false;
@@ -554,6 +625,8 @@
                 this.pendingConnects = new Map();
                 // Tool calls waiting for the worker's answer, by run id: { resolve, timer, show }.
                 this.pendingRuns = new Map();
+                // Resource reads and prompt gets waiting for theirs, by request id: { resolve, timer }.
+                this.pendingRequests = new Map();
                 // The run the response pane shows or waits for.
                 this.shownRunId = null;
                 // The Workbench (public/workbench/) once it has loaded; it fills in {{variables}}.
@@ -568,7 +641,7 @@
                 
                 // Initialize status indicators
                 this.updateSwStatus(false);
-                this.updateWasmStatus(false);
+                this.updateClientStatus(false);
                 
                 if (LOGS_ONLY) {
                     navigator.serviceWorker.addEventListener('message', this.boundMessageHandler);
@@ -615,47 +688,48 @@
                 if (this.swUptime) {
                     this.swUptime.textContent = '00:00:00';
                 }
-                if (this.wasmUptime) {
-                    this.wasmUptime.textContent = '00:00:00';
+                if (this.clientUptime) {
+                    this.clientUptime.textContent = '00:00:00';
                 }
             }
 
-            startWasmUptimeCounter() {
-                if (this.wasmUptimeInterval) {
-                    clearInterval(this.wasmUptimeInterval);
+            startClientUptimeCounter() {
+                if (this.clientUptimeInterval) {
+                    clearInterval(this.clientUptimeInterval);
                 }
-                if (!this.wasmStartTime) {
-                    this.wasmStartTime = Date.now();
+                if (!this.clientStartTime) {
+                    this.clientStartTime = Date.now();
                 }
-                this.wasmUptimeInterval = setInterval(() => {
-                    if (this.wasmStartTime) {
-                        const uptime = Math.floor((Date.now() - this.wasmStartTime) / 1000);
-                        if (this.wasmUptime) {
+                this.clientUptimeInterval = setInterval(() => {
+                    if (this.clientStartTime) {
+                        const uptime = Math.floor((Date.now() - this.clientStartTime) / 1000);
+                        if (this.clientUptime) {
                             const hours = Math.floor(uptime / 3600);
                             const minutes = Math.floor((uptime % 3600) / 60);
                             const seconds = uptime % 60;
-                            this.wasmUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                            this.clientUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
                         }
                     }
                 }, 1000);
             }
 
-            stopWasmUptimeCounter() {
-                if (this.wasmUptimeInterval) {
-                    clearInterval(this.wasmUptimeInterval);
-                    this.wasmUptimeInterval = null;
+            stopClientUptimeCounter() {
+                if (this.clientUptimeInterval) {
+                    clearInterval(this.clientUptimeInterval);
+                    this.clientUptimeInterval = null;
                 }
-                if (this.wasmUptime) {
-                    this.wasmUptime.textContent = '00:00:00';
+                if (this.clientUptime) {
+                    this.clientUptime.textContent = '00:00:00';
                 }
-                this.wasmStartTime = null;
+                this.clientStartTime = null;
             }
 
             setupServiceWorker() {
                 if ('serviceWorker' in navigator) {
                     // One registration serves every tab. Each load checks sw.js and its imports for
-                    // changes, fetched fresh with updateViaCache 'none'; build.js changes with every
-                    // WASM build, and a changed worker takes over as soon as it installs.
+                    // changes, fetched fresh with updateViaCache 'none'; build.js and build-sdk.js
+                    // change with every build of their client, and a changed worker takes over as
+                    // soon as it installs.
                     let hadWorker = !!navigator.serviceWorker.controller;
                     navigator.serviceWorker.addEventListener('controllerchange', () => {
                         this.serviceWorker = navigator.serviceWorker.controller;
@@ -696,21 +770,29 @@
             }
 
             setupPeriodicChecks() {
-                // Wait a short time for WASM to initialize
+                // Gives the worker a second to load the MCP client library before the first check.
                 setTimeout(() => {
-                    // Set up periodic WASM uptime checks
-                    this.startPeriodicWasmChecks();
-                }, 1000); // Wait 1 second for WASM to initialize
+                    this.startPeriodicClientChecks();
+                }, 1000);
             }
 
             setupEventListeners() {
                 const buttons = {
-                    'check-wasm': () => this.checkWasm(),
-                    'unload-wasm': () => this.unloadWasm(),
-                    'reload-wasm': () => this.reloadWasm(),
+                    'check-client': () => this.checkClient(),
+                    'unload-client': () => this.unloadClient(),
+                    'reload-client': () => this.reloadClient(),
                     'stop-sw': () => this.stopServiceWorker(),
                     'start-sw': () => this.startServiceWorker()
                 };
+
+                // The worker swaps libraries in place; servers connect again on their next request.
+                clientSelect.addEventListener('change', () => {
+                    clientChoice = clientSelect.value;
+                    localStorage.setItem('mcpClient', clientChoice);
+                    showClient();
+                    this.log(`Switching to the ${clientLabel(clientChoice)} client`);
+                    this.postToWorkerQuietly({ type: 'set_client', client: clientChoice });
+                });
 
                 Object.entries(buttons).forEach(([id, handler]) => {
                     const button = document.getElementById(id);
@@ -856,33 +938,33 @@
                 this.emit('auth', { url });
             }
 
-            startPeriodicWasmChecks() {
+            startPeriodicClientChecks() {
                 // Clear any existing interval
-                if (this.wasmCheckInterval) {
-                    clearInterval(this.wasmCheckInterval);
+                if (this.clientCheckInterval) {
+                    clearInterval(this.clientCheckInterval);
                 }
                 
                 // Check immediately
-                this.checkWasm();
+                this.checkClient();
                 
                 // Then check every minute
-                this.wasmCheckInterval = setInterval(() => {
-                    this.checkWasm();
+                this.clientCheckInterval = setInterval(() => {
+                    this.checkClient();
                 }, 600000); // 10 minutes
             }
 
-            stopPeriodicWasmChecks() {
-                if (this.wasmCheckInterval) {
-                    clearInterval(this.wasmCheckInterval);
-                    this.wasmCheckInterval = null;
+            stopPeriodicClientChecks() {
+                if (this.clientCheckInterval) {
+                    clearInterval(this.clientCheckInterval);
+                    this.clientCheckInterval = null;
                 }
             }
 
             async stopServiceWorker() {
                 if (this.serviceWorker) {
                     try {
-                        this.stopPeriodicWasmChecks();
-                        this.stopWasmUptimeCounter();
+                        this.stopPeriodicClientChecks();
+                        this.stopClientUptimeCounter();
                         await this.serviceWorker.postMessage({ type: 'stop' });
                         await navigator.serviceWorker.getRegistrations().then(registrations => {
                             registrations.forEach(registration => registration.unregister());
@@ -901,10 +983,11 @@
                 try {
                     const registration = await navigator.serviceWorker.register('sw.js', { type: 'module', updateViaCache: 'none' });
                     this.serviceWorker = registration.active || (await navigator.serviceWorker.ready).active;
+                    this.serviceWorker.postMessage({ type: 'set_client', client: clientChoice });
                     this.updateSwStatus(true);
                     this.startUptimeCounter();
-                    this.startPeriodicWasmChecks();
-                    this.startWasmUptimeCounter();
+                    this.startPeriodicClientChecks();
+                    this.startClientUptimeCounter();
                     this.log({ level: 'debug', message: 'Started the service worker' });
                 } catch (error) {
                     this.log({ level: 'error', message: `Couldn't start the service worker: ${error.message}` });
@@ -912,28 +995,28 @@
                 }
             }
 
-            async unloadWasm() {
+            async unloadClient() {
                 if (this.serviceWorker) {
-                    await this.serviceWorker.postMessage({ type: 'unload_wasm' });
-                    this.wasmStatus.classList.remove('healthy', 'unhealthy');
-                    this.wasmStatus.classList.add('unknown');
-                    this.stopWasmUptimeCounter();
+                    await this.serviceWorker.postMessage({ type: 'unload_client' });
+                    this.clientStatus.classList.remove('healthy', 'unhealthy');
+                    this.clientStatus.classList.add('unknown');
+                    this.stopClientUptimeCounter();
                 }
             }
 
-            async reloadWasm() {
+            async reloadClient() {
                 if (this.serviceWorker) {
-                    this.stopWasmUptimeCounter();
-                    await this.serviceWorker.postMessage({ type: 'reload_wasm' });
-                    this.startWasmUptimeCounter();
+                    this.stopClientUptimeCounter();
+                    await this.serviceWorker.postMessage({ type: 'reload_client' });
+                    this.startClientUptimeCounter();
                 }
             }
 
-            async checkWasm() {
+            async checkClient() {
                 if (this.serviceWorker) {
                     const checkId = ++this.checkCounter;
                     await this.serviceWorker.postMessage({ 
-                        type: 'check_wasm',
+                        type: 'check_client',
                         checkId: checkId
                     });
                 }
@@ -949,11 +1032,11 @@
                 
                 // Handle JSON-RPC messages
                 if (message.jsonrpc === '2.0') {
-                    if (message.method === 'wasm_status') {
+                    if (message.method === 'client_status') {
                         const { status, metadata } = message.params;
-                        this.updateWasmStatus(status.healthy);
+                        this.updateClientStatus(status.healthy);
                         if (status.uptime) {
-                            this.updateWasmUptime(status.uptime);
+                            this.updateClientUptime(status.uptime);
                         }
                         if (metadata) {
                             // Update version
@@ -973,7 +1056,7 @@
                         }
                         this.log({
                             level: status.healthy ? 'debug' : 'error',
-                            message: `WASM health check: ${status.healthy ? 'healthy' : 'not loaded'} (uptime ${formatUptime(status.uptime)})`
+                            message: `MCP client health check: ${status.healthy ? 'healthy' : 'not loaded'} (uptime ${formatUptime(status.uptime)})`
                         });
                     }
                     return;
@@ -984,8 +1067,8 @@
                     case 'log':
                         this.logPanel.add(message.content);
                         break;
-                    case 'wasm_status':
-                        this.updateWasmStatus(message.healthy);
+                    case 'client_status':
+                        this.updateClientStatus(message.healthy);
                         if (message.healthy && message.params && message.params.metadata) {
                             const metadata = message.params.metadata;
                             // Update version
@@ -1005,7 +1088,7 @@
                         }
                         break;
                     case 'uptime':
-                        this.updateWasmUptime(message.uptime);
+                        this.updateClientUptime(message.uptime);
                         break;
                     case 'mcp_server_connected':
                         this.handleServerConnected(message.url, message.info);
@@ -1013,6 +1096,28 @@
                     case 'mcp_server_error':
                         this.handleServerError(message.url, message.action, message.error);
                         break;
+                    case 'resources_list':
+                    case 'prompts_list': {
+                        const server = this.servers[message.url];
+                        if (!server) break;
+                        if (message.type === 'resources_list') {
+                            Object.assign(server, { resources: message.resources, resourceTemplates: message.resourceTemplates, resourcesError: null });
+                        } else {
+                            Object.assign(server, { prompts: message.prompts, promptsError: null });
+                        }
+                        this.saveServers();
+                        this.emit('catalog', { url: message.url });
+                        break;
+                    }
+                    case 'resource_read':
+                    case 'prompt_got': {
+                        const pending = this.pendingRequests.get(message.requestId);
+                        if (!pending) break;
+                        clearTimeout(pending.timer);
+                        this.pendingRequests.delete(message.requestId);
+                        pending.resolve(message);
+                        break;
+                    }
                     case 'auth_redirect':
                     case 'auth_callback_done':
                     case 'auth_error':
@@ -1020,7 +1125,10 @@
                     case 'auth_status':
                         this.handleAuthMessage(message);
                         break;
-                    case 'wasm_initialized':
+                    case 'client_set':
+                        if (!message.loaded) this.log({ level: 'error', message: `The service worker couldn't switch to the ${clientLabel(message.client)} client; see its log entries` });
+                        break;
+                    case 'client_loaded':
                         this.updateBuildInfo(message.buildInfo);
                         this.syncWorker();
                         // Update version if available
@@ -1039,8 +1147,8 @@
                             this.saveServers();
                         }
                         this.emit('tools', { url: message.url });
-                        renderTapServerSelect();
-                        renderTapToolSelect();
+                        renderModelServerSelect();
+                        renderModelToolSelect();
                         break;
                     }
                     case 'tool_result': {
@@ -1050,7 +1158,7 @@
                             this.pendingRuns.delete(message.run.id);
                             if (pending.show && this.shownRunId === message.run.id) this.emit('run', { phase: 'done', runId: message.run.id, message });
                             pending.resolve(message);
-                        } else if (!message.run && (!message.engramId || message.engramId !== chatEngramId)) {
+                        } else if (!message.run && (!message.conversationId || message.conversationId !== chatConversationId)) {
                             // Calls the worker turned away before they ran, such as tool calls from
                             // replies over the rate limit. Chat replies show in the chat instead.
                             this.emit('run', { phase: 'done', message });
@@ -1060,18 +1168,10 @@
                     case 'run_recorded':
                         this.emit('recorded', message.run);
                         break;
-                    case 'bootrom':
-                        // Suppress warning; handled elsewhere (e.g., via Promise)
-                        break;
-                    case 'cbus_queue':
-                        // No-op: handled elsewhere, suppress warning
-                        break;
-                    case 'cbus_message':
-                        // print out tool config from local storage
-                        // No-op: handled elsewhere, suppress warning
-                        break;
-                    case 'extracted_tool_call':
-                        // No-op: handled elsewhere, suppress warning
+                    case 'chat_instructions':
+                    case 'chat_history':
+                    case 'chat_message':
+                        // The Chat app's own listener handles these.
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -1086,36 +1186,15 @@
                 }
             }
 
-            updateWasmStatus(healthy) {
-                if (this.wasmStatus) {
-                    this.wasmStatus.classList.remove('healthy', 'unhealthy', 'unknown');
-                    this.wasmStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
-                    this.wasmStatus.textContent = '●';
+            updateClientStatus(healthy) {
+                if (this.clientStatus) {
+                    this.clientStatus.classList.remove('healthy', 'unhealthy', 'unknown');
+                    this.clientStatus.classList.add(healthy ? 'healthy' : 'unhealthy');
+                    this.clientStatus.textContent = '●';
                 }
-                const compiledInfo = document.getElementById('wasm-compiled');
+                const compiledInfo = document.getElementById('client-build');
                 if (compiledInfo) {
                     compiledInfo.textContent = '-';
-                }
-            }
-
-            updateMetadataDisplay(metadata) {
-                if (!metadata) return;
-                
-                const versionElement = document.getElementById('metadataVersion');
-                if (versionElement && metadata.version) {
-                    versionElement.textContent = metadata.version;
-                }
-                
-                const memoryEvents = document.getElementById('memoryEvents');
-                if (memoryEvents && Array.isArray(metadata.memory_events)) {
-                    memoryEvents.innerHTML = '';
-                    metadata.memory_events.forEach(event => {
-                        const eventDiv = document.createElement('div');
-                        eventDiv.className = 'memory-event';
-                        const time = new Date(event.timestamp).toLocaleString();
-                        eventDiv.innerHTML = `<span class="memory-event-time">${time}</span>${event.text}`;
-                        memoryEvents.appendChild(eventDiv);
-                    });
                 }
             }
 
@@ -1131,7 +1210,8 @@
             // none of the page's state: the server list with its tokens, and the chat's tool target.
             syncWorker() {
                 navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
-                sendTapConfigToServiceWorker();
+                sendChatModelToWorker();
+                sendChatContextToWorker();
                 for (const url of Object.keys(this.servers)) {
                     this.postToWorkerQuietly({ type: 'auth-status', url });
                 }
@@ -1154,8 +1234,8 @@
                 return true;
             }
 
-            updateWasmUptime(uptime) {
-                const uptimeElement = document.getElementById('wasm-uptime');
+            updateClientUptime(uptime) {
+                const uptimeElement = document.getElementById('client-uptime');
                 if (uptimeElement) {
                     uptimeElement.textContent = formatUptime(uptime);
                 }
@@ -1193,12 +1273,37 @@
                 }, 50_000);
             }
 
+            // Lists the tools, and the resources and prompts when the server says it has them.
             requestTools(url, { refresh = false } = {}) {
-                this.postToWorker({
-                    type: 'list_tools',
-                    url,
-                    refresh,
-                    bearerToken: this.servers[url]?.bearerToken || undefined
+                const server = this.servers[url];
+                const bearerToken = server?.bearerToken || undefined;
+                this.postToWorker({ type: 'list_tools', url, refresh, bearerToken });
+                if (server?.capabilities?.resources) this.postToWorker({ type: 'list_resources', url, bearerToken });
+                if (server?.capabilities?.prompts) this.postToWorker({ type: 'list_prompts', url, bearerToken });
+            }
+
+            // Reads a resource, or gets a prompt filled in with its arguments. Resolves with the
+            // worker's resource_read or prompt_got, {result, durationMs} or {error}, or a stand-in
+            // when the request never went out or never came back.
+            readResource(url, uri) {
+                return this.requestFromWorker({ type: 'read_resource', url, uri });
+            }
+
+            getPrompt(url, name, args) {
+                return this.requestFromWorker({ type: 'get_prompt', url, name, args });
+            }
+
+            requestFromWorker(message) {
+                const requestId = crypto.randomUUID();
+                const sent = this.postToWorker({ ...message, requestId, bearerToken: this.servers[message.url]?.bearerToken || undefined });
+                if (!sent) return Promise.resolve({ error: { kind: 'not_sent', message: "The service worker isn't running yet. Try again in a moment." } });
+                return new Promise(resolve => {
+                    // Requests time out after 120 s in the client; past that, the worker is gone.
+                    const timer = setTimeout(() => {
+                        this.pendingRequests.delete(requestId);
+                        resolve({ error: { kind: 'timeout', message: 'No answer from the service worker within 130 seconds; the browser may have stopped it. Try again.' } });
+                    }, 130_000);
+                    this.pendingRequests.set(requestId, { resolve, timer });
                 });
             }
 
@@ -1222,6 +1327,13 @@
             handleServerError(url, action, error) {
                 if (action === 'connect') this.pendingConnects.delete(url);
                 if (!this.servers[url]) return;
+                // The tools still work; the Resources or Prompts tab says what went wrong.
+                if (action === 'list_resources' || action === 'list_prompts') {
+                    this.servers[url][action === 'list_resources' ? 'resourcesError' : 'promptsError'] = error?.message || 'Unknown error';
+                    this.saveServers();
+                    this.emit('catalog', { url });
+                    return;
+                }
                 const changes = { lastError: error?.message || 'Unknown error' };
                 if (action === 'connect') changes.status = 'failed';
                 if (error?.kind === 'auth_required') {
@@ -1394,7 +1506,7 @@
             }
 
             updateBuildInfo(buildInfo) {
-                const compiledInfo = document.getElementById('wasm-compiled');
+                const compiledInfo = document.getElementById('client-build');
                 if (compiledInfo) {
                     compiledInfo.textContent = buildInfo;
                 }
@@ -1487,9 +1599,8 @@
                 const runId = crypto.randomUUID();
                 const sent = this.postToWorker({
                     type: 'call_tool',
-                    tapConfig: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
+                    call: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
                     run: { id: runId, args, requestId, collectionRunId, environmentName: prepared.environmentName },
-                    engramId: this.mcpEngramId(),
                     bearerToken: this.servers[url]?.bearerToken || undefined
                 });
                 if (!sent) return notSent("The service worker isn't running yet. Try again in a moment.");
@@ -1509,16 +1620,6 @@
                     }, 130_000);
                     this.pendingRuns.set(runId, { resolve, timer, show });
                 });
-            }
-
-            // Workbench calls share one id per tab session, kept apart from the chat's.
-            mcpEngramId() {
-                let id = sessionStorage.getItem('mcpEngramId');
-                if (!id) {
-                    id = crypto.randomUUID();
-                    sessionStorage.setItem('mcpEngramId', id);
-                }
-                return id;
             }
 
             // Builds tool arguments from the form. Optional fields left empty are left out:
@@ -1618,44 +1719,25 @@
         }
 
         // Initialize the chat shell
-        const chatShell = new ChatShell();
+        const appShell = new AppShell();
         // The logs pop-out reads the opener's entries from here.
-        window.logPanel = chatShell.logPanel;
+        window.logPanel = appShell.logPanel;
 
         if (LOGS_ONLY) {
-            for (const entry of window.opener?.logPanel?.entries || []) chatShell.logPanel.add(entry);
+            for (const entry of window.opener?.logPanel?.entries || []) appShell.logPanel.add(entry);
         } else {
-            chatShell.startServiceWorker();
+            appShell.startServiceWorker();
             // The Workbench's components and its state (environments, saved requests, runs).
             import('./workbench/index.js')
-                .then(({ installWorkbench }) => installWorkbench(chatShell))
-                .catch(error => chatShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }));
+                .then(({ installWorkbench }) => installWorkbench(appShell))
+                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }));
         }
 
         window.addEventListener('error', event => {
-            chatShell.log({ level: 'error', message: `Uncaught error in the page: ${event.message}`, detail: { file: event.filename, line: event.lineno } });
+            appShell.log({ level: 'error', message: `Uncaught error in the page: ${event.message}`, detail: { file: event.filename, line: event.lineno } });
         });
         window.addEventListener('unhandledrejection', event => {
-            chatShell.log({ level: 'error', message: `Unhandled promise rejection in the page: ${event.reason?.message || event.reason}` });
-        });
-
-        // Add memory event
-        document.getElementById('addMemoryEvent')?.addEventListener('click', () => {
-            const text = document.getElementById('memoryEventText')?.value.trim();
-            if (text) {
-                navigator.serviceWorker.controller?.postMessage({
-                    type: 'add_memory_event',
-                    text: text
-                });
-                document.getElementById('memoryEventText').value = '';
-            }
-        });
-
-        // Clear memory events
-        document.getElementById('clearMemoryEvents')?.addEventListener('click', () => {
-            navigator.serviceWorker.controller?.postMessage({
-                type: 'clear_memory_events'
-            });
+            appShell.log({ level: 'error', message: `Unhandled promise rejection in the page: ${event.reason?.message || event.reason}` });
         });
 
         // Format uptime for display
@@ -1688,10 +1770,10 @@
             localStorage.setItem('mode', document.body.dataset.mode);
             if (apps) {
                 // The chat's server list may have changed while it was hidden.
-                renderTapServerSelect();
+                renderModelServerSelect();
                 renderChatMessages();
-                renderEngramId();
-                subscribeToCbus();
+                renderConversationId();
+                loadChatHistory();
             }
         }
         document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => showMode(button.dataset.mode)));
@@ -1723,7 +1805,7 @@
         // Quick-add, copy and "open the guide" buttons, wherever they appear.
         document.addEventListener('click', async event => {
             const add = event.target.closest('[data-add-server]');
-            if (add) chatShell.addServer(add.dataset.addServer, add.dataset.alias || '');
+            if (add) appShell.addServer(add.dataset.addServer, add.dataset.alias || '');
             if (event.target.closest('[data-open-guide]')) openGuide();
             const copy = event.target.closest('[data-copy]');
             if (copy) {
@@ -1731,7 +1813,7 @@
                     await navigator.clipboard.writeText(document.getElementById(copy.dataset.copy).textContent);
                     flashLabel(copy, 'Copied');
                 } catch (error) {
-                    chatShell.log({ level: 'error', message: `Couldn't copy: ${error.message}` });
+                    appShell.log({ level: 'error', message: `Couldn't copy: ${error.message}` });
                 }
             }
         });
@@ -1762,10 +1844,10 @@
                 return;
             }
             // Opened now, during the click; a URL opens it inside addGleanServer, still in the click.
-            const popup = isEmail ? chatShell.openSignInWindow("Looking up your company's Glean…") : undefined;
+            const popup = isEmail ? appShell.openSignInWindow("Looking up your company's Glean…") : undefined;
             if (isEmail) gleanNote('gleanStatus', "Looking up your company's Glean…");
             try {
-                const { url, found } = await chatShell.addGleanServer(value, popup);
+                const { url, found } = await appShell.addGleanServer(value, popup);
                 gleanUrlInput.value = url;
                 gleanNote('gleanStatus', found ? `${found.domain} uses the Glean at ${found.queryUrl}. Signing in to its default MCP server.` : null);
             } catch (error) {
@@ -1812,10 +1894,10 @@
             const rest = new URLSearchParams(location.search);
             rest.delete('server');
             history.replaceState(null, '', location.pathname + (rest.size ? `?${rest}` : '') + location.hash);
-            navigator.serviceWorker.ready.then(() => setTimeout(() => chatShell.addServer(linkedServer), 0));
+            navigator.serviceWorker.ready.then(() => setTimeout(() => appShell.addServer(linkedServer), 0));
         }
 
-        if (!LOGS_ONLY && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(chatShell.servers).length === 0) {
+        if (!LOGS_ONLY && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(appShell.servers).length === 0) {
             openGuide();
         }
 
@@ -1856,58 +1938,35 @@
             }
         });
 
-        // --- Chat Card Logic ---
+        // --- The Chat app ---
         let chatSelectedTool = null;
         let chatToolConfig = {};
-        let chatToolAssignUserMessage = {}; // fieldName -> boolean
+        // Which of the model tool's fields get the message and the conversation: field -> ticked.
+        let chatFieldChoices = {};
         let chatMessages = [];
-        let chatTools = [];
         let chatSelectedServerUrl = null;
-        // Map of requestId -> callback (if needed for advanced routing)
-        const chatRequestHandlers = {};
-        // --- EngramId session logic ---
-        function getCurrentEngramId() {
-            let engramId = sessionStorage.getItem('consoleChatEngramId');
-            if (!engramId) {
-                // Try to get last used engramId from localStorage
-                engramId = localStorage.getItem('lastEngramId');
-                if (!engramId) {
-                    engramId = crypto.randomUUID();
-                }
-                sessionStorage.setItem('consoleChatEngramId', engramId);
-                localStorage.setItem('lastEngramId', engramId);
-            } else {
-                // Always update localStorage to reflect the current session's engramId
-                localStorage.setItem('lastEngramId', engramId);
-            }
-            return engramId;
+
+        // The conversation this tab shows: the tab's own, or the last one used in this browser.
+        function currentConversationId() {
+            const id = sessionStorage.getItem('chatConversation') || localStorage.getItem('lastChatConversation') || crypto.randomUUID();
+            sessionStorage.setItem('chatConversation', id);
+            localStorage.setItem('lastChatConversation', id);
+            return id;
         }
-        let chatEngramId = getCurrentEngramId();
-        // Helper to render engramId below chat input, with New button
-        function renderEngramId() {
-            let engramDiv = document.getElementById('chatEngramIdDisplay');
-            if (!engramDiv) {
-                engramDiv = document.createElement('div');
-                engramDiv.id = 'chatEngramIdDisplay';
-                engramDiv.className = 'chat-engram';
-                const inputRow = document.querySelector('.chat-input-row');
-                inputRow.parentNode.insertBefore(engramDiv, inputRow.nextSibling);
-            }
-            engramDiv.innerHTML = `<span>Conversation</span> <span class="mono">${chatEngramId}</span> <button id="newEngramBtn" class="btn-sm btn-outline" title="Start a new conversation">New conversation</button>`;
-            // Attach handler for New button
-            const newBtn = document.getElementById('newEngramBtn');
-            if (newBtn) {
-                newBtn.onclick = function() {
-                    chatEngramId = crypto.randomUUID();
-                    sessionStorage.setItem('consoleChatEngramId', chatEngramId);
-                    renderEngramId();
-                    // Clear chat history for new engram
-                    chatMessages = [];
-                    renderChatMessages();
-                };
-            }
+        let chatConversationId = currentConversationId();
+        function renderConversationId() {
+            const conversationDiv = document.getElementById('chatConversation');
+            conversationDiv.innerHTML = `<span>Conversation</span> <span class="mono">${chatConversationId}</span> <button id="newConversationBtn" class="btn-sm btn-outline" title="Start a new conversation">New conversation</button>`;
+            document.getElementById('newConversationBtn').onclick = () => {
+                chatConversationId = crypto.randomUUID();
+                sessionStorage.setItem('chatConversation', chatConversationId);
+                localStorage.setItem('lastChatConversation', chatConversationId);
+                renderConversationId();
+                chatMessages = [];
+                renderChatMessages();
+            };
         }
-        renderEngramId();
+        renderConversationId();
         // Helper to render chat messages
         function renderChatMessages() {
             const chatDiv = document.getElementById('chatMessages');
@@ -1916,47 +1975,14 @@
             ).join('');
             chatDiv.scrollTop = chatDiv.scrollHeight;
         }
-        // Subscribe to the CBus queue on page load
-        if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
-        }
-        // Handle incoming CBus messages
+        // The worker sends every conversation's messages to every tab; show this tab's.
         navigator.serviceWorker.addEventListener('message', (event) => {
-            const msg = event.data;
-            if (msg.type === 'cbus_message') {
-                console.debug('[page] chat message:', msg.message);
-                chatMessages.push(msg.message);
+            const update = event.data;
+            if (update.type === 'chat_message' && update.message.conversationId === chatConversationId) {
+                chatMessages.push(update.message);
                 renderChatMessages();
-
-                // --- CBus Tap Forwarder ---
-                // Only forward user messages (not tool responses or messages from the tap tool itself)
-                if (msg.message.role === 'user') {
-                    const tapConfig = loadCbusTapConfig();
-                    if (
-                        tapConfig &&
-                        tapConfig.serverUrl &&
-                        tapConfig.toolName &&
-                        tapConfig.connectedArg
-                    ) {
-                        // Prevent feedback: do not forward if the message is from the tap tool itself
-                        // (user messages are safe, but double-check if needed)
-                        // If you ever want to forward tool messages, add a check here:
-                        // if (msg.message.role === 'tool' && msg.message.toolName === tapConfig.toolName) return;
-                        const toolArgs = { ...(tapConfig.args || {}) };
-                        toolArgs[tapConfig.connectedArg] = msg.message.text;
-                        //chatShell.serviceWorker.postMessage({
-                        navigator.serviceWorker.controller?.postMessage({
-                            type: 'call_tool',
-                            url: tapConfig.serverUrl,
-                            toolName: tapConfig.toolName,
-                            args: toolArgs,
-                            engramId: chatEngramId,
-                            requestId: crypto.randomUUID()
-                        });
-                    }
-                }
-            } else if (msg.type === 'cbus_queue') {
-                chatMessages = msg.queue;
+            } else if (update.type === 'chat_history' && update.conversationId === chatConversationId) {
+                chatMessages = update.messages;
                 renderChatMessages();
             }
         });
@@ -1970,16 +1996,15 @@
         }
         updateSendBtnState();
         chatUserInput.addEventListener('input', updateSendBtnState);
-        // In chatRequestHandlers[requestId], only add the tool message once
         chatSendBtn.addEventListener('click', async function() {
             const userInput = document.getElementById('chatUserInput').value.trim();
             if (!userInput) return;
             if (navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({
-                    type: 'cbus_send_message',
+                    type: 'chat_send',
                     text: userInput,
                     role: 'user',
-                    engramId: chatEngramId
+                    conversationId: chatConversationId
                 });
             }
             document.getElementById('chatUserInput').value = '';
@@ -1992,235 +2017,194 @@
             }
         });
         // Initial render; showMode('apps') draws these again.
-        renderTapServerSelect();
+        renderModelServerSelect();
         renderChatMessages();
-        renderEngramId();
+        renderConversationId();
 
-        // --- Imprint (Memory Event) Two-Panel Logic ---
-        function generateImprintId() {
-            return 'imprint-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
-        }
-        let imprints = [];
-        let selectedImprintIdx = null;
+        // --- Instructions and context: what the model is told before each conversation ---
+        // The built-in instructions come from the worker, which sends them to the model itself;
+        // this page shows them read-only. The context you add is kept here and sent to the worker.
+        const INSTRUCTIONS_ID = 'instructions';
+        let chatInstructions = null;
+        let contextEntries = [];
+        let selectedContextId = null;
+        const allContext = () => (chatInstructions ? [chatInstructions, ...contextEntries] : contextEntries);
 
-        function getBootromImprint() {
-            return new Promise((resolve, reject) => {
-                if (!navigator.serviceWorker.controller) {
-                    reject('No service worker controller');
-                    return;
-                }
-                function handler(event) {
-                    if (event.data && event.data.type === 'bootrom') {
-                        navigator.serviceWorker.removeEventListener('message', handler);
-                        if (event.data.bootrom) resolve(event.data.bootrom);
-                        else reject(event.data.error || 'Unknown error');
-                    }
-                }
-                navigator.serviceWorker.addEventListener('message', handler);
-                navigator.serviceWorker.controller.postMessage({ type: 'get_bootrom' });
-            });
+        function newContextId() {
+            return 'context-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
         }
 
-        function loadImprintsFromStorage() {
-            const raw = localStorage.getItem('mcp_module_metadata');
-            if (raw) {
-                try {
-                    const meta = JSON.parse(raw);
-                    imprints = meta.memory_events || [];
-                } catch (e) {
-                    imprints = [];
-                }
-            } else {
-                imprints = [];
+        function loadChatContext() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('chatContext') || '[]');
+                contextEntries = Array.isArray(saved) ? saved : [];
+            } catch {
+                contextEntries = [];
             }
         }
 
-        function syncImprintsToServiceWorker() {
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'update_memory',
-                    imprints: imprints
-                });
-            }
+        function sendChatContextToWorker() {
+            navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_context', context: contextEntries });
         }
 
-        function saveImprintsToStorage() {
-            const meta = {
-                version: '1.0.0',
-                memory_events: imprints.filter(imprint => imprint.id !== 'bootrom'), // don't save bootrom
-                last_health_check: Date.now()
-            };
-            localStorage.setItem('mcp_module_metadata', JSON.stringify(meta));
-            syncImprintsToServiceWorker();
+        function saveChatContext() {
+            localStorage.setItem('chatContext', JSON.stringify(contextEntries));
+            sendChatContextToWorker();
         }
 
-        function renderImprintsList() {
-            const listDiv = document.getElementById('imprintsList');
+        function renderContextList() {
+            const listDiv = document.getElementById('contextList');
             listDiv.innerHTML = '';
-            if (!imprints.length) {
+            const entries = allContext();
+            if (!entries.length) {
                 listDiv.innerHTML = '<div class="empty-state">No context yet.</div>';
                 return;
             }
-            imprints.forEach((imprint, idx) => {
+            entries.forEach(entry => {
                 const item = document.createElement('div');
-                item.className = 'imprint-list-item' + (selectedImprintIdx === idx ? ' selected' : '');
-                const name = imprint.id === 'bootrom' ? 'Instructions (built in)' : imprint.name || '(no name)';
+                item.className = 'context-list-item' + (selectedContextId === entry.id ? ' selected' : '');
+                const name = entry.id === INSTRUCTIONS_ID ? 'Instructions (built in)' : entry.name || '(no name)';
                 item.innerHTML = `
-                    <span class="imprint-name">${escapeHtml(name)}</span>
-                    <span class="imprint-timestamp">${new Date(imprint.timestamp).toLocaleString()}</span>
+                    <span class="context-name">${escapeHtml(name)}</span>
+                    <span class="context-timestamp">${entry.id === INSTRUCTIONS_ID ? '' : new Date(entry.timestamp).toLocaleString()}</span>
                 `;
                 item.onclick = () => {
-                    selectedImprintIdx = idx;
-                    renderImprintsList();
-                    renderImprintEditor();
+                    selectedContextId = entry.id;
+                    renderContextList();
+                    renderContextEditor();
                 };
                 listDiv.appendChild(item);
             });
         }
 
-        function renderImprintEditor() {
-            const editorDiv = document.getElementById('imprintEditor');
+        function renderContextEditor() {
+            const editorDiv = document.getElementById('contextEditor');
             editorDiv.innerHTML = '';
-            if (selectedImprintIdx === null || !imprints[selectedImprintIdx]) {
+            const entry = allContext().find(candidate => candidate.id === selectedContextId);
+            if (!entry) {
                 editorDiv.innerHTML = '<div class="text-secondary">Select an entry to see or edit it.</div>';
                 return;
             }
-            const imprint = imprints[selectedImprintIdx];
-            if (imprint.id === 'bootrom') {
+            if (entry.id === INSTRUCTIONS_ID) {
                 editorDiv.innerHTML = `
-                    <label>Name</label>
-                    <input type="text" value="${escapeHtml(imprint.name || '')}" disabled />
                     <label>Text</label>
-                    <textarea rows="12" disabled>${escapeHtml(imprint.text || '')}</textarea>
-                    <label>Timestamp</label>
-                    <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
-                    <div class="field-help">These are the built-in instructions, so they can't be edited.</div>
+                    <textarea rows="12" disabled>${escapeHtml(entry.text || '')}</textarea>
+                    <div class="field-help">These are the built-in instructions (public/chat-instructions.js), so they can't be edited here.</div>
                 `;
                 return;
             }
-            // Editor form
             const form = document.createElement('form');
             form.innerHTML = `
                 <label>Name</label>
-                <input type="text" value="${escapeHtml(imprint.name || '')}" required id="editImprintName" />
+                <input type="text" value="${escapeHtml(entry.name || '')}" required id="editContextName" />
                 <label>Text</label>
-                <textarea rows="8" id="editImprintText">${escapeHtml(imprint.text || '')}</textarea>
+                <textarea rows="8" id="editContextText">${escapeHtml(entry.text || '')}</textarea>
                 <label>Timestamp</label>
-                <input type="text" value="${new Date(imprint.timestamp).toLocaleString()}" disabled />
+                <input type="text" value="${new Date(entry.timestamp).toLocaleString()}" disabled />
                 <div class="editor-actions">
                     <button type="submit" class="btn-primary">Save</button>
-                    <button type="button" id="deleteImprintBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete</button>
+                    <button type="button" id="deleteContextBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete</button>
                 </div>
             `;
             form.onsubmit = (e) => {
                 e.preventDefault();
-                const newName = form.querySelector('#editImprintName').value.trim();
-                const newText = form.querySelector('#editImprintText').value;
+                const newName = form.querySelector('#editContextName').value.trim();
                 if (!newName) {
                     alert('Give it a name.');
                     return;
                 }
-                imprints[selectedImprintIdx].name = newName;
-                imprints[selectedImprintIdx].text = newText;
-                saveImprintsToStorage();
-                renderImprintsList();
-                renderImprintEditor();
-                syncImprintsToServiceWorker();
+                entry.name = newName;
+                entry.text = form.querySelector('#editContextText').value;
+                saveChatContext();
+                renderContextList();
+                renderContextEditor();
             };
-            form.querySelector('#deleteImprintBtn').onclick = () => {
+            form.querySelector('#deleteContextBtn').onclick = () => {
                 if (confirm('Delete this context?')) {
-                    imprints.splice(selectedImprintIdx, 1);
-                    selectedImprintIdx = null;
-                    saveImprintsToStorage();
-                    renderImprintsList();
-                    renderImprintEditor();
-                    syncImprintsToServiceWorker();
+                    contextEntries = contextEntries.filter(other => other !== entry);
+                    selectedContextId = null;
+                    saveChatContext();
+                    renderContextList();
+                    renderContextEditor();
                 }
             };
             editorDiv.appendChild(form);
         }
 
-        // Add Imprint button logic
-        const addImprintBtn = document.getElementById('addImprintBtn');
-        if (addImprintBtn) {
-            addImprintBtn.onclick = () => {
-                const newImprint = {
-                    id: generateImprintId(),
-                    name: 'Untitled context',
-                    text: '',
-                    timestamp: Date.now()
-                };
-                imprints.push(newImprint);
-                saveImprintsToStorage();
-                selectedImprintIdx = imprints.length - 1;
-                renderImprintsList();
-                renderImprintEditor();
-                syncImprintsToServiceWorker();
+        document.getElementById('addContextBtn').onclick = () => {
+            const entry = { id: newContextId(), name: 'Untitled context', text: '', timestamp: Date.now() };
+            contextEntries.push(entry);
+            saveChatContext();
+            selectedContextId = entry.id;
+            renderContextList();
+            renderContextEditor();
+        };
+
+        function loadChatInstructions() {
+            const listen = event => {
+                if (event.data?.type !== 'chat_instructions') return;
+                navigator.serviceWorker.removeEventListener('message', listen);
+                chatInstructions = { id: INSTRUCTIONS_ID, text: event.data.instructions };
+                renderContextList();
             };
+            navigator.serviceWorker.addEventListener('message', listen);
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'get_chat_instructions' });
+            } else {
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_instructions' });
+                }, { once: true });
+            }
         }
 
-        // Initial load
-        if (document.getElementById('imprintsList')) {
-            getBootromImprint()
-                .then(bootrom => {
-                    loadImprintsFromStorage();
-                    imprints = imprints.filter(imprint => imprint.id !== 'bootrom');
-                    imprints.unshift(bootrom);
-                    renderImprintsList();
-                    renderImprintEditor();
-                    syncImprintsToServiceWorker();
-                })
-                .catch(err => {
-                    loadImprintsFromStorage();
-                    renderImprintsList();
-                    renderImprintEditor();
-                    syncImprintsToServiceWorker();
-                });
-        }
+        loadChatContext();
+        renderContextList();
+        renderContextEditor();
+        sendChatContextToWorker();
+        loadChatInstructions();
 
-        // --- CBus Tap Config Persistence ---
-        function loadCbusTapConfig() {
-            const raw = localStorage.getItem('cbusTapConfig');
-            if (!raw) return null;
+        // --- The model: the tool the chat's messages go to, and which of its fields get what ---
+        // Saved as {serverUrl, toolName, args, messageField, conversationField}.
+        function loadChatModel() {
             try {
-                return JSON.parse(raw);
-            } catch (e) {
+                return JSON.parse(localStorage.getItem('chatModel')) || null;
+            } catch {
                 return null;
             }
         }
-        function saveCbusTapConfig(config) {
-            localStorage.setItem('cbusTapConfig', JSON.stringify(config));
-            // The worker routes chat messages with its own copy.
-            sendTapConfigToServiceWorker();
+        function saveChatModel(model) {
+            localStorage.setItem('chatModel', JSON.stringify(model));
+            // The worker runs the chat with its own copy.
+            sendChatModelToWorker();
         }
-        function saveCurrentTapConfig() {
+        function saveChatModelFromForm() {
             let args;
             try {
-                args = chatShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema);
+                args = appShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema);
             } catch {
                 return; // A JSON field that's still being typed.
             }
-            saveCbusTapConfig({
+            const ticked = type => Object.keys(chatFieldChoices).find(k => chatFieldChoices[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === type) || null;
+            saveChatModel({
                 serverUrl: chatSelectedServerUrl,
                 toolName: chatSelectedTool?.name,
                 args,
-                connectedStringArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'string') || null,
-                connectedArrayArg: Object.keys(chatToolAssignUserMessage).find(k => chatToolAssignUserMessage[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === 'array') || null
+                messageField: ticked('string'),
+                conversationField: ticked('array')
             });
         }
-        // --- CBus Tap Card Logic ---
-        function renderTapServerSelect() {
+        function renderModelServerSelect() {
             const select = document.getElementById('chatServerSelect');
             if (!select) return;
-            const tapConfig = loadCbusTapConfig() || {};
-            renderServerSelect(select, tapConfig.serverUrl || chatSelectedServerUrl, chatShell.servers || {});
+            const model = loadChatModel() || {};
+            renderServerSelect(select, model.serverUrl || chatSelectedServerUrl, appShell.servers || {});
             chatSelectedServerUrl = select.value;
         }
-        function renderTapToolSelect() {
+        function renderModelToolSelect() {
             const select = document.getElementById('chatToolSelect');
             if (!select) return;
-            const tapConfig = loadCbusTapConfig() || {};
-            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            const model = loadChatModel() || {};
+            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
             select.innerHTML = '';
             tools.forEach((tool, idx) => {
                 const opt = document.createElement('option');
@@ -2231,25 +2215,25 @@
             // Restore tool selection from config if possible
             if (tools.length > 0) {
                 let toolToSelect = tools[0];
-                if (tapConfig.toolName) {
-                    const found = tools.find(t => t.name === tapConfig.toolName);
+                if (model.toolName) {
+                    const found = tools.find(t => t.name === model.toolName);
                     if (found) toolToSelect = found;
                 }
                 select.value = toolToSelect.name;
                 chatSelectedTool = toolToSelect;
-                renderTapToolConfig(toolToSelect);
+                renderModelToolForm(toolToSelect);
             } else {
                 chatSelectedTool = null;
-                renderTapToolConfig(null);
+                renderModelToolForm(null);
             }
         }
-        function renderTapToolConfig(tool) {
+        function renderModelToolForm(tool) {
             const form = document.getElementById('chatToolConfigForm');
             form.innerHTML = '';
-            chatToolAssignUserMessage = {};
+            chatFieldChoices = {};
             if (!tool) return;
             const schema = tool.inputSchema || tool.input_schema;
-            const tapConfig = loadCbusTapConfig() || {};
+            const model = loadChatModel() || {};
             if (schema && schema.properties) {
                 Object.entries(schema.properties).forEach(([key, prop]) => {
                     const isRequired = (schema.required || []).includes(key);
@@ -2264,36 +2248,36 @@
                         label += '</label>';
                         inputCard.innerHTML = `${label}
                             <input type="text" name="${name}" />
-                            <label class="cbus-checkbox-label">
-                                <input type="checkbox" class="assign-cbus-string solid-checkbox" data-field="${name}" />
-                                <span class="cbus-checkbox-text">Your message goes here</span>
+                            <label class="chat-field-label">
+                                <input type="checkbox" class="chat-message-field solid-checkbox" data-field="${name}" />
+                                <span class="chat-field-text">Your message goes here</span>
                             </label>
-                            <div class="cbus-message-warning" style="display:none;"></div>`;
+                            <div class="chat-field-warning" style="display:none;"></div>`;
                         setTimeout(() => {
                             const input = inputCard.querySelector(`input[type='text'][name='${CSS.escape(key)}']`);
-                            const cb = inputCard.querySelector(`.assign-cbus-string[data-field='${CSS.escape(key)}']`);
-                            const warn = inputCard.querySelector('.cbus-message-warning');
+                            const cb = inputCard.querySelector(`.chat-message-field[data-field='${CSS.escape(key)}']`);
+                            const warn = inputCard.querySelector('.chat-field-warning');
                             // Restore value from config if present
-                            let value = (tapConfig.args && tapConfig.args[key]) || '';
+                            let value = (model.args && model.args[key]) || '';
                             input.value = value;
                             // Restore checkbox from config
-                            if (tapConfig.connectedStringArg === key) {
+                            if (model.messageField === key) {
                                 cb.checked = true;
-                                chatToolAssignUserMessage[key] = true;
+                                chatFieldChoices[key] = true;
                             }
                             // UX logic for enabling/disabling and warning
                             function updateInputState() {
                                 if (cb.checked) {
                                     if (!input.value) {
-                                        input.value = '{{cbus_message}}';
+                                        input.value = '{{message}}';
                                     }
-                                    if (input.value.includes('{{cbus_message}}')) {
+                                    if (input.value.includes('{{message}}')) {
                                         input.disabled = true;
                                         warn.textContent = '';
                                         warn.style.display = 'none';
                                     } else {
                                         input.disabled = false;
-                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.textContent = 'Value must include {{message}}';
                                         warn.style.display = '';
                                     }
                                 } else {
@@ -2304,41 +2288,41 @@
                             }
                             cb.onchange = () => {
                                 // Only one string field can be connected
-                                Object.keys(chatToolAssignUserMessage).forEach(k => {
-                                    if (k !== key && schema.properties[k]?.type === 'string') chatToolAssignUserMessage[k] = false;
+                                Object.keys(chatFieldChoices).forEach(k => {
+                                    if (k !== key && schema.properties[k]?.type === 'string') chatFieldChoices[k] = false;
                                 });
                                 if (cb.checked) {
                                     if (!input.value) {
-                                        input.value = '{{cbus_message}}';
+                                        input.value = '{{message}}';
                                     }
-                                    if (!input.value.includes('{{cbus_message}}')) {
+                                    if (!input.value.includes('{{message}}')) {
                                         // Prevent checking, show warning, keep input enabled
                                         cb.checked = false;
-                                        warn.textContent = 'Value must include {{cbus_message}}';
+                                        warn.textContent = 'Value must include {{message}}';
                                         warn.style.display = '';
                                         input.disabled = false;
-                                        chatToolAssignUserMessage[key] = false;
+                                        chatFieldChoices[key] = false;
                                         return;
                                     }
                                     // Uncheck all other checkboxes
-                                    document.querySelectorAll('.assign-cbus-string').forEach(otherCb => {
+                                    document.querySelectorAll('.chat-message-field').forEach(otherCb => {
                                         if (otherCb !== cb) otherCb.checked = false;
                                     });
-                                    chatToolAssignUserMessage[key] = true;
+                                    chatFieldChoices[key] = true;
                                 } else {
-                                    // If the value is exactly '{{cbus_message}}', clear it
-                                    if (input.value.trim() === '{{cbus_message}}') {
+                                    // If the value is exactly '{{message}}', clear it
+                                    if (input.value.trim() === '{{message}}') {
                                         input.value = '';
                                     }
-                                    chatToolAssignUserMessage[key] = false;
+                                    chatFieldChoices[key] = false;
                                 }
                                 updateInputState();
-                                onConnectToCbusChanged(key, cb.checked);
-                                saveCurrentTapConfig();
+                                onChatFieldChanged(key, cb.checked);
+                                saveChatModelFromForm();
                             };
                             input.addEventListener('input', () => {
                                 updateInputState();
-                                saveCurrentTapConfig();
+                                saveChatModelFromForm();
                             });
                             updateInputState();
                         }, 0);
@@ -2351,79 +2335,73 @@
                         label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
                         label += '</label>';
                         inputCard.innerHTML = `${label}
-                            <label class="cbus-checkbox-label">
-                                <input type="checkbox" class="assign-cbus-array solid-checkbox" data-field="${name}" />
-                                <span class="cbus-checkbox-text">The conversation goes here</span>
+                            <label class="chat-field-label">
+                                <input type="checkbox" class="chat-conversation-field solid-checkbox" data-field="${name}" />
+                                <span class="chat-field-text">The conversation goes here</span>
                             </label>
                             <div class="field-help">This field gets the conversation so far as a list of messages, without the newest one.</div>`;
                         setTimeout(() => {
-                            const cb = inputCard.querySelector(`.assign-cbus-array[data-field='${CSS.escape(key)}']`);
-                            if (tapConfig.connectedArrayArg === key) {
+                            const cb = inputCard.querySelector(`.chat-conversation-field[data-field='${CSS.escape(key)}']`);
+                            if (model.conversationField === key) {
                                 cb.checked = true;
-                                chatToolAssignUserMessage[key] = true;
+                                chatFieldChoices[key] = true;
                             }
                             if (cb) {
                                 cb.onchange = () => {
                                     // Only one array field can be connected
-                                    Object.keys(chatToolAssignUserMessage).forEach(k => {
-                                        if (k !== key && schema.properties[k]?.type === 'array') chatToolAssignUserMessage[k] = false;
+                                    Object.keys(chatFieldChoices).forEach(k => {
+                                        if (k !== key && schema.properties[k]?.type === 'array') chatFieldChoices[k] = false;
                                     });
-                                    chatToolAssignUserMessage[key] = cb.checked;
+                                    chatFieldChoices[key] = cb.checked;
                                     if (cb.checked) {
-                                        document.querySelectorAll('.assign-cbus-array').forEach(otherCb => {
+                                        document.querySelectorAll('.chat-conversation-field').forEach(otherCb => {
                                             if (otherCb !== cb) otherCb.checked = false;
                                         });
                                     }
-                                    onConnectToCbusChanged(key, cb.checked);
-                                    saveCurrentTapConfig();
+                                    onChatFieldChanged(key, cb.checked);
+                                    saveChatModelFromForm();
                                 };
                             }
                         }, 0);
                     } else {
-                        inputCard = chatShell.renderInputField(key, prop, isRequired);
+                        inputCard = appShell.renderInputField(key, prop, isRequired);
                     }
                     form.appendChild(inputCard);
                 });
             }
             form.oninput = () => {
                 try {
-                    chatToolConfig = chatShell.serializeToolForm(form, schema);
-                    saveCurrentTapConfig();
+                    chatToolConfig = appShell.serializeToolForm(form, schema);
+                    saveChatModelFromForm();
                 } catch {
                     // A JSON field that's still being typed; the field is marked invalid.
                 }
             };
             try {
-                chatToolConfig = chatShell.serializeToolForm(form, schema);
+                chatToolConfig = appShell.serializeToolForm(form, schema);
             } catch {
                 chatToolConfig = {};
             }
         }
-        // --- Event listeners for Tap card ---
+        // --- The model card's server and tool pickers ---
         const chatServerSelect = document.getElementById('chatServerSelect');
         chatServerSelect.addEventListener('change', function() {
             chatSelectedServerUrl = this.value;
-            renderTapToolSelect();
-            saveCurrentTapConfig();
+            renderModelToolSelect();
+            saveChatModelFromForm();
         });
         const chatToolSelect = document.getElementById('chatToolSelect');
         chatToolSelect.addEventListener('change', function() {
-            const tools = (chatShell.servers[chatSelectedServerUrl]?.tools) || [];
+            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
             const tool = tools.find(t => t.name === this.value);
             chatSelectedTool = tool;
-            renderTapToolConfig(tool);
-            saveCurrentTapConfig();
+            renderModelToolForm(tool);
+            saveChatModelFromForm();
         });
-        // Initial render for Tap card
-        renderTapServerSelect();
-        renderTapToolSelect();
-        renderTapToolConfig(chatSelectedTool);
-        // Subscribe to the CBus queue on page load (fix typo)
-        if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
-        }
-
-        function onConnectToCbusChanged(field, checked) {
+        renderModelServerSelect();
+        renderModelToolSelect();
+        renderModelToolForm(chatSelectedTool);
+        function onChatFieldChanged(field, checked) {
             console.debug(`[page] ${field} ${checked ? 'now receives' : 'no longer receives'} chat messages`);
         }
 
@@ -2446,40 +2424,25 @@
             }
         }
 
-        // --- Robust CBus Subscription ---
-        function subscribeToCbus() {
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
-            } else {
-                // Wait for the SW to become active, then subscribe
-                navigator.serviceWorker.addEventListener('controllerchange', function() {
-                    if (navigator.serviceWorker.controller) {
-                        navigator.serviceWorker.controller.postMessage({ type: 'cbus_subscribe', engramId: chatEngramId });
-                    }
-                }, { once: true });
-            }
+        // Asks the worker for this tab's conversation, now or once it controls the page.
+        function loadChatHistory() {
+            const ask = () => navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_history', conversationId: chatConversationId });
+            if (navigator.serviceWorker.controller) ask();
+            else navigator.serviceWorker.addEventListener('controllerchange', ask, { once: true });
         }
-        // Subscribe on page load; showMode('apps') subscribes again.
-        subscribeToCbus();
+        // On page load; showMode('apps') asks again.
+        loadChatHistory();
 
-        function sendTapConfigToServiceWorker() {
-            const tapConfig = loadCbusTapConfig();
-            if (tapConfig && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'set_tap_config',
-                    tapConfig
-                });
-            }
+        function sendChatModelToWorker() {
+            const model = loadChatModel();
+            if (model) navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_model', model });
         }
 
-        // Send on page load if SW is already controlling
-        if (navigator.serviceWorker.controller) {
-            sendTapConfigToServiceWorker();
-        }
-
-        // Also send when the SW takes control (first activation)
+        // Now if the worker already controls the page, and when it takes control (first activation).
+        sendChatModelToWorker();
         navigator.serviceWorker.oncontrollerchange = () => {
-            sendTapConfigToServiceWorker();
+            sendChatModelToWorker();
+            sendChatContextToWorker();
         };
 
         function getServersFromLocalStorage() {

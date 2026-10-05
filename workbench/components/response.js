@@ -27,8 +27,8 @@ function dataUri(item, kind) {
 
 const safeLink = uri => (/^https?:\/\//i.test(uri || '') ? uri : null);
 
-// One content block of a tool result. Text that is JSON is shown indented.
-function contentHtml(item) {
+// One content block of a tool result or a prompt message. Text that is JSON is shown indented.
+export function contentHtml(item) {
     if (item?.type === 'text' && typeof item.text === 'string') {
         const trimmed = item.text.trim();
         if (/^[[{]/.test(trimmed)) {
@@ -78,6 +78,10 @@ export class WbResponse extends WbElement {
         this.shell.on('recorded', () => {
             if (this.view.kind === 'message' && this.tab === 'runs') this.renderTab();
         }, signal);
+        // Resources and prompts show what comes back in wb-contents, in this area.
+        this.workbench.on('view', () => {
+            this.hidden = this.workbench.view !== 'tools';
+        }, signal);
         this.addEventListener('click', event => this.clicked(event), { signal });
         this.addEventListener('keydown', event => {
             const row = event.target.closest?.('tr[data-open-run]');
@@ -106,6 +110,7 @@ export class WbResponse extends WbElement {
     }
 
     render() {
+        this.hidden = this.workbench.view !== 'tools';
         const view = this.view;
         if (view.kind === 'empty') {
             this.innerHTML = '<div class="wb-empty"><span>Run a tool to see its result here.</span><span class="text-secondary">⌘↵ or Ctrl+Enter runs it from anywhere on the page.</span></div>';

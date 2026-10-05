@@ -1,37 +1,38 @@
-let wasmInstance = null;
+let mcpClient = null;
 let isRunning = true;
 
-// --- TAP Config Storage ---
-let currentTapConfig = {};
-
-// --- Memory/Imprints Store ---
-let currentImprints = [];
+// The Chat app's model, {serverUrl, toolName, args, messageField, conversationField}
+// (set_chat_model), and the context the page added, [{id, name, text, timestamp}]
+// (set_chat_context).
+let chatModel = {};
+let chatContext = [];
 
 // --- MCP Servers Index ---
 const mcpServersIndex = {};
 
-// --- Tool Call Circuit Breaker ---
-const toolCallHistory = {}; // { engramId: [timestamps] }
+// When each conversation's replies last asked for tool calls: { conversationId: [timestamps] }
+const replyCallTimes = {};
 
 import * as authStore from './authStore.js';
-import { WASM_SHA256 } from './build.js';
-import { handleOp, initDB, openDB } from './chatStorage.js';
+import { CHAT_INSTRUCTIONS } from './chat-instructions.js';
+import { loadConversation, openDB, saveMessage } from './chatStorage.js';
+import { MCP_CLIENTS } from './mcp-clients.js';
 import { formatDuration, logger, setLogSink } from './logger.js';
 import { canonicalJson, compareKeyFor, comparedValue, sha256, stored } from './workbench/runs.js';
 import { addRun, latestRun } from './workbench/store.js';
 import {
-    checkWasm,
-    ensureWasm,
-    initializeWasm,
-    reloadWasm,
-    unloadWasm,
+    checkClient,
+    ensureClient,
+    loadClient,
+    reloadClient,
+    setClient,
+    unloadClient,
     stopUptimeCounter,
-    getWasmInstance,
-    setBroadcast as setWasmBroadcast
-} from './wasm.js';
+    getClient,
+    setBroadcast as setClientBroadcast
+} from './client-runtime.js';
 
-// Set up broadcast for wasm.js
-setWasmBroadcast(broadcastToClients);
+setClientBroadcast(broadcastToClients);
 setLogSink(entry => broadcastToClients({ type: 'log', content: entry }));
 
 self.addEventListener('error', event => {
@@ -42,28 +43,27 @@ self.addEventListener('unhandledrejection', event => {
 });
 
 
-// Add this near the top of sw.js
-async function initialWasmBroadcast() {
-    const wasmState = await checkWasm();
-    broadcastWasmStatus(wasmState);
+async function initialClientBroadcast() {
+    const state = await checkClient();
+    broadcastClientStatus(state);
 }
 
 
-// Broadcast WASM status to all clients
-function broadcastWasmStatus(wasmState) {
+// Tells every page whether the MCP client library is loaded and healthy.
+function broadcastClientStatus(state) {
 
     const statusMessage = {
         jsonrpc: '2.0',
-        method: 'wasm_status',
+        method: 'client_status',
         params: {
             status: {
-                healthy: wasmState.healthy,
-                uptime: wasmState.uptime || 0
+                healthy: state.healthy,
+                uptime: state.uptime || 0
             },
             metadata: {
                 timestamp: new Date().toISOString(),
-                metadataVersion: wasmState.metadata || 'unknown',
-                buildInfo: wasmState.buildInfo || 'unknown'
+                metadataVersion: state.metadata || 'unknown',
+                buildInfo: state.buildInfo || 'unknown'
             }
         }
     };
@@ -87,7 +87,7 @@ function staticToken(url, message = {}) {
     return message.bearerToken ?? mcpServersIndex[url]?.bearerToken;
 }
 
-// Options for the WASM MCP client. A static token wins; otherwise the server's OAuth token.
+// Options for the MCP client. A static token wins; otherwise the server's OAuth token.
 async function mcpOptions(url, message = {}, extra = {}) {
     const bearerToken = staticToken(url, message) || await oauthAccessToken(url);
     return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...extra });
@@ -129,7 +129,7 @@ const refreshes = new Map();
 
 async function refreshTokens(url, tokens) {
     try {
-        const fresh = JSON.parse(await wasmInstance.auth_refresh(JSON.stringify(tokens)));
+        const fresh = JSON.parse(await mcpClient.auth_refresh(JSON.stringify(tokens)));
         await authStore.putTokens(fresh);
         broadcastToClients({ type: 'auth_status', url, status: authStatus(fresh) });
         return fresh;
@@ -157,7 +157,7 @@ function authStatus(tokens) {
     };
 }
 
-// WASM MCP calls reject with a JSON McpError: {kind, message, status?, code?, data?}.
+// MCP client calls reject with a JSON McpError: {kind, message, status?, code?, data?}.
 function mcpError(error) {
     if (typeof error === 'string') {
         try {
@@ -171,7 +171,7 @@ function mcpError(error) {
 
 function broadcastMcpError(url, action, error, started) {
     broadcastToClients({ type: 'mcp_server_error', url, action, error });
-    const what = action === 'list_tools' ? 'Listing tools' : 'Connecting';
+    const what = { list_tools: 'Listing tools', list_resources: 'Listing resources', list_prompts: 'Listing prompts' }[action] || 'Connecting';
     const after = started === undefined ? '' : ` after ${formatDuration(performance.now() - started)}`;
     logger.error(`${what} failed${after}: ${error.message}`, { server: url, detail: errorDetail(error) });
 }
@@ -188,8 +188,11 @@ function describeServer(url, info) {
     return info.serverInfo.version ? `${name} ${info.serverInfo.version}` : name;
 }
 
-// Where a tool call came from, as the trace describes it.
-const CALL_ORIGINS = { console: 'the page', tap: 'a chat message', extracted: 'tool output' };
+// Where a tool call came from, as the trace describes it. The sources are the runs' (see recordRun).
+const CALL_ORIGINS = { workbench: 'the page', chat: 'a chat message', reply: 'a tool call in a reply' };
+
+const METHOD_NOT_FOUND = -32601;
+const counted = (count, one) => `${count} ${one}${count === 1 ? '' : 's'}`;
 
 function listNames(names, max = 8) {
     if (names.length <= max) return names.join(', ');
@@ -198,76 +201,28 @@ function listNames(names, max = 8) {
 
 // What a page message is about, for the trace. Payloads stay out of the log: they can be large
 // (the server list) or carry bearer tokens.
-function describeMessage({ url, refresh, tapConfig }) {
+function describeMessage({ url, refresh, call, model }) {
     const detail = {};
+    const target = call ?? model;
     if (url) detail.url = url;
-    if (tapConfig?.serverUrl) detail.server = tapConfig.serverUrl;
-    if (tapConfig?.toolName) detail.tool = tapConfig.toolName;
+    if (target?.serverUrl) detail.server = target.serverUrl;
+    if (target?.toolName) detail.tool = target.toolName;
     if (refresh) detail.refresh = true;
     return Object.keys(detail).length ? detail : undefined;
 }
 
-// --- Engram NAT Table ---
-const engramNAT = new Map(); // engramId -> clientId
-
-// --- UUIDv7 generator (browser-compatible, minimal) ---
-function uuidv7() {
-    // UUIDv7: 48 bits unix timestamp ms, 74 bits random
-    const now = Date.now();
-    const unixTs = now;
-    const tsHex = unixTs.toString(16).padStart(12, '0'); // 48 bits = 12 hex chars
-    // 74 bits random = 19 hex chars (but UUID is 36 chars with dashes)
-    const rand = crypto.getRandomValues(new Uint8Array(10));
-    let randHex = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
-    randHex = randHex.padEnd(20, '0');
-    // Compose UUIDv7: xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx
-    // Use timestamp for first 12 hex, then version, then random
-    const uuid = [
-        tsHex.slice(0, 8),
-        tsHex.slice(8, 12),
-        '7' + randHex.slice(0, 3),
-        (8 + (rand[3] & 0x3)).toString(16) + randHex.slice(3, 6),
-        randHex.slice(6, 18)
-    ].join('-');
-    return uuid;
+async function saveChatMessage(message) {
+    if (message.conversationId) await saveMessage(message);
 }
 
-// --- DRY helper for engram message persistence ---
-async function persistEngramMessage(msg) {
-    if (!msg.engramId) return;
-    const storedMsg = {
-        ...msg,
-        id: uuidv7(),
-        timestamp: msg.timestamp || Date.now(),
-    };
-    const db = await (await initDB(), openDB());
-    const convStore = db.transaction('conversations', 'readonly').objectStore('conversations');
-    const getReq = convStore.get(storedMsg.engramId);
-    const exists = await new Promise(resolve => {
-        getReq.onsuccess = () => resolve(!!getReq.result);
-        getReq.onerror = () => resolve(false);
-    });
-    if (!exists) {
-        await handleOp('store', storedMsg.engramId, {
-            meta: { created: Date.now(), engramId: storedMsg.engramId },
-            messages: [storedMsg]
-        });
-    } else {
-        await handleOp('append', storedMsg.engramId, { message: storedMsg });
-    }
-}
-
-
-
-
-function shouldBreakCircuit(engramId) {
+// At most three tool calls from a conversation's replies every 10 seconds.
+function shouldBreakCircuit(conversationId) {
     const now = Date.now();
-    if (!engramId) return false;
-    if (!toolCallHistory[engramId]) toolCallHistory[engramId] = [];
-    // Keep only timestamps from the last 10 seconds
-    toolCallHistory[engramId] = toolCallHistory[engramId].filter(ts => now - ts < 10000);
-    if (toolCallHistory[engramId].length >= 3) return true; // max 3 calls per 10s
-    toolCallHistory[engramId].push(now);
+    if (!conversationId) return false;
+    const recent = (replyCallTimes[conversationId] ?? []).filter(time => now - time < 10000);
+    replyCallTimes[conversationId] = recent;
+    if (recent.length >= 3) return true;
+    recent.push(now);
     return false;
 }
 
@@ -281,32 +236,26 @@ async function handleClientMessage(event) {
     const message = event.data;
     logger.debug(`Page sent ${message.type}`, { detail: describeMessage(message) });
 
-    const managesWasmLifecycle = ['unload_wasm', 'reload_wasm', 'stop'].includes(message.type);
-    wasmInstance = managesWasmLifecycle ? getWasmInstance() : await ensureWasm();
+    const managesClientLifecycle = ['unload_client', 'reload_client', 'stop', 'set_client'].includes(message.type);
+    mcpClient = managesClientLifecycle ? getClient() : await ensureClient();
 
-    // Handle legacy messages
     switch (message.type) {
-        case 'check-wasm':
-        case 'check_wasm':
-            const wasmState = await checkWasm(message.checkId);
-            broadcastWasmStatus(wasmState);
-            break;
-        case 'initialize-wasm':
-            await initializeWasm();
+        case 'check_client':
+            broadcastClientStatus(await checkClient());
             break;
         // 'initialize-mcp' is the pre-2026 name for connecting; there's no handshake anymore
         // unless the server turns out to be a legacy one.
         case 'connect-mcp':
         case 'initialize-mcp': {
             const url = message.url;
-            if (!wasmInstance) {
-                broadcastMcpError(url, 'connect', { kind: 'internal', message: 'The WASM module is not loaded.' });
+            if (!mcpClient) {
+                broadcastMcpError(url, 'connect', { kind: 'internal', message: 'The MCP client is not loaded.' });
                 break;
             }
             logger.info('Connecting', { server: url });
             const started = performance.now();
             try {
-                const info = JSON.parse(await withAuth(url, message, {}, options => wasmInstance.connect(url, options)));
+                const info = JSON.parse(await withAuth(url, message, {}, options => mcpClient.connect(url, options)));
                 broadcastToClients({ type: 'mcp_server_connected', url, info });
                 logger.info(
                     `Connected to ${describeServer(url, info)} in ${formatDuration(performance.now() - started)}: MCP ${info.protocolVersion} (${info.era})`,
@@ -319,7 +268,7 @@ async function handleClientMessage(event) {
         }
         case 'forget-mcp':
             if (message.url) {
-                wasmInstance?.forget_server(message.url);
+                mcpClient?.forget_server(message.url);
                 delete mcpServersIndex[message.url];
                 logger.debug('Forgot the connection', { server: message.url });
             }
@@ -333,7 +282,7 @@ async function handleClientMessage(event) {
                     clients: await authStore.listClients(),
                     wwwAuthenticate: message.wwwAuthenticate || undefined
                 };
-                const begin = JSON.parse(await wasmInstance.auth_begin(url, JSON.stringify(options)));
+                const begin = JSON.parse(await mcpClient.auth_begin(url, JSON.stringify(options)));
                 if (begin.newClient) await authStore.putClient(begin.client);
                 await authStore.putPending(begin.pending);
                 event.source?.postMessage({ type: 'auth_redirect', url, authorizationUrl: begin.authorizationUrl, issuer: begin.authServer.issuer });
@@ -361,10 +310,10 @@ async function handleClientMessage(event) {
             }
             const url = pending.serverUrl;
             try {
-                const tokens = JSON.parse(await wasmInstance.auth_finish(JSON.stringify(pending), JSON.stringify(params)));
+                const tokens = JSON.parse(await mcpClient.auth_finish(JSON.stringify(pending), JSON.stringify(params)));
                 await authStore.putTokens(tokens);
                 // A connection made before signing in shouldn't outlive it.
-                wasmInstance.forget_server(url);
+                mcpClient.forget_server(url);
                 event.source?.postMessage({ type: 'auth_callback_done', ok: true, url });
                 broadcastToClients({ type: 'auth_complete', url, status: authStatus(tokens) });
             } catch (error) {
@@ -385,50 +334,46 @@ async function handleClientMessage(event) {
             if (message.forgetClient && tokens) {
                 await authStore.deleteClient(tokens.issuer, REDIRECT_URI);
             }
-            wasmInstance?.forget_server(url);
+            mcpClient?.forget_server(url);
             logger.info(message.forgetClient && tokens ? `Signed out, and forgot this client's registration with ${tokens.issuer}` : 'Signed out', { server: url });
             broadcastToClients({ type: 'auth_status', url, status: authStatus(null) });
             break;
         }
-        case 'unload_wasm':
-            unloadWasm();
+        // Which MCP client library to run, a name from mcp-clients.js. Connections don't carry
+        // over; the next request to each server connects again.
+        case 'set_client': {
+            let loaded = false;
+            try {
+                loaded = await setClient(message.client);
+            } catch (error) {
+                logger.error(error.message);
+            }
+            mcpClient = getClient();
+            event.source?.postMessage({ type: 'client_set', client: message.client, loaded });
+            if (!loaded) broadcastToClients({ type: 'client_status', healthy: false });
             break;
-        case 'reload_wasm':
-            await reloadWasm();
+        }
+        case 'unload_client':
+            unloadClient();
+            break;
+        case 'reload_client':
+            await reloadClient();
             break;
         case 'stop':
             logger.info('Stopping the service worker');
             isRunning = false;
             stopUptimeCounter();
-            unloadWasm();
-            break;
-        case 'add_memory_event':
-            if (wasmInstance && message && message.text) {
-                try {
-                    await wasmInstance.add_memory_event(message.text);
-                } catch (error) {
-                    logger.error(`Couldn't add a memory event: ${error.message}`);
-                }
-            }
-            break;
-        case 'clear_memory_events':
-            if (wasmInstance) {
-                try {
-                    await wasmInstance.clear_memory_events();
-                } catch (error) {
-                    logger.error(`Couldn't clear memory events: ${error.message}`);
-                }
-            }
+            unloadClient();
             break;
         case 'list_tools': {
             const url = message.url;
-            if (!wasmInstance) {
-                broadcastMcpError(url, 'list_tools', { kind: 'internal', message: 'The WASM module is not loaded.' });
+            if (!mcpClient) {
+                broadcastMcpError(url, 'list_tools', { kind: 'internal', message: 'The MCP client is not loaded.' });
                 break;
             }
             const started = performance.now();
             try {
-                const listing = JSON.parse(await withAuth(url, message, { refresh: !!message.refresh }, options => wasmInstance.list_tools(url, options)));
+                const listing = JSON.parse(await withAuth(url, message, { refresh: !!message.refresh }, options => mcpClient.list_tools(url, options)));
                 if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
                 mcpServersIndex[url].tools = listing.tools;
                 broadcastToClients({
@@ -451,120 +396,133 @@ async function handleClientMessage(event) {
             }
             break;
         }
-        case 'call_tool':
-            if (!wasmInstance) {
-                // Send error to the correct client if possible
-                const errorMsg = {
-                    type: 'tool_result',
-                    error: 'WASM module not loaded',
-                    // Not a call, so not in history, but the page waits on this run id.
-                    run: message.run?.id ? { id: message.run.id, outcome: 'failed', changed: null } : null,
-                    engramId: message.engramId || null,
-                    requestId: message.requestId || null,
-                    source: 'console'
-                };
-                if (message.engramId && message.requestId && event.source && event.source.id) {
-                    engramNAT.set(message.engramId, event.source.id);
-                    sendToEngramClient(message.engramId, errorMsg);
-                } else if (event?.source) {
-                    event.source.postMessage(errorMsg);
-                } else {
-                    broadcastToClients(errorMsg);
-                }
+        case 'list_resources': {
+            const url = message.url;
+            if (!mcpClient) {
+                broadcastMcpError(url, 'list_resources', { kind: 'internal', message: 'The MCP client is not loaded.' });
                 break;
             }
-            // Only use message.tapConfig if present, do NOT fall back to currentTapConfig
-            await handleToolCall({ source: 'console', tapConfig: message.tapConfig, message, event, memory: currentImprints });
-            break;
-        case 'get_bootrom':
-            if (!wasmInstance) {
-                event.source.postMessage({
-                    type: 'bootrom',
-                    error: 'WASM module not loaded'
-                });
-                break;
-            }
+            const started = performance.now();
             try {
-                const bootromJson = wasmInstance.get_bootrom();
-                const bootrom = JSON.parse(bootromJson);
-                event.source.postMessage({
-                    type: 'bootrom',
-                    bootrom
-                });
+                const { resources = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_resources(url, options)));
+                let resourceTemplates = [];
+                try {
+                    ({ resourceTemplates = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_resource_templates(url, options))));
+                } catch (error) {
+                    // Servers without templates may not have the method at all.
+                    const failure = mcpError(error);
+                    if (failure.code !== METHOD_NOT_FOUND) logger.warn(`Couldn't list resource templates: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                }
+                broadcastToClients({ type: 'resources_list', url, resources, resourceTemplates });
+                const templates = resourceTemplates.length ? ` and ${counted(resourceTemplates.length, 'template')}` : '';
+                logger.info(`Listed ${counted(resources.length, 'resource')}${templates} in ${formatDuration(performance.now() - started)}`, { server: url });
             } catch (error) {
-                event.source.postMessage({
-                    type: 'bootrom',
-                    error: error.message
-                });
+                broadcastMcpError(url, 'list_resources', mcpError(error), started);
             }
             break;
-        case 'cbus_message':
-            logger.error('Pages send cbus_send_message; cbus_message only goes from the worker to pages');
+        }
+        case 'list_prompts': {
+            const url = message.url;
+            if (!mcpClient) {
+                broadcastMcpError(url, 'list_prompts', { kind: 'internal', message: 'The MCP client is not loaded.' });
+                break;
+            }
+            const started = performance.now();
+            try {
+                const { prompts = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_prompts(url, options)));
+                broadcastToClients({ type: 'prompts_list', url, prompts });
+                const names = prompts.map(prompt => prompt.name);
+                logger.info(`Listed ${counted(names.length, 'prompt')} in ${formatDuration(performance.now() - started)}${names.length ? `: ${listNames(names)}` : ''}`, { server: url });
+            } catch (error) {
+                broadcastMcpError(url, 'list_prompts', mcpError(error), started);
+            }
             break;
-        case 'cbus_send_message':
-            if (message && message.text) {
-                const msg = {
+        }
+        // A resource read or a prompt get the page asked for, answered to that page only. They
+        // aren't tool calls, so they don't go into the run history.
+        case 'read_resource':
+        case 'get_prompt': {
+            const { url, requestId } = message;
+            const reading = message.type === 'read_resource';
+            const what = reading ? message.uri : message.name;
+            const reply = fields => event.source?.postMessage({ type: reading ? 'resource_read' : 'prompt_got', url, requestId, ...fields });
+            if (!mcpClient) {
+                reply({ error: { kind: 'internal', message: 'The MCP client is not loaded.' } });
+                break;
+            }
+            const started = performance.now();
+            try {
+                const result = JSON.parse(await withAuth(url, message, {}, options => (reading
+                    ? mcpClient.read_resource(url, message.uri, options)
+                    : mcpClient.get_prompt(url, message.name, JSON.stringify(message.args || {}), options))));
+                const durationMs = performance.now() - started;
+                const size = reading ? counted(result.contents?.length ?? 0, 'item') : counted(result.messages?.length ?? 0, 'message');
+                logger.info(`${reading ? 'Read' : 'Got the prompt'} ${what} in ${formatDuration(durationMs)}: ${size}`, { server: url });
+                reply({ result, durationMs });
+            } catch (error) {
+                const failure = mcpError(error);
+                const durationMs = performance.now() - started;
+                logger.error(`Couldn't ${reading ? 'read' : 'get the prompt'} ${what}: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                reply({ error: failure, durationMs });
+            }
+            break;
+        }
+        case 'call_tool':
+            if (!mcpClient) {
+                // Not a call, so not in history, but the page waits on this run id.
+                event.source?.postMessage({
+                    type: 'tool_result',
+                    error: 'The MCP client is not loaded',
+                    run: message.run?.id ? { id: message.run.id, outcome: 'failed', changed: null } : null,
+                    source: 'workbench'
+                });
+                break;
+            }
+            await handleToolCall({ source: 'workbench', call: message.call, message, event });
+            break;
+        case 'get_chat_instructions':
+            event.source?.postMessage({ type: 'chat_instructions', instructions: CHAT_INSTRUCTIONS });
+            break;
+        case 'chat_message':
+            logger.error('Pages send chat_send; chat_message only goes from the worker to pages');
+            break;
+        case 'chat_send':
+            if (message.text) {
+                const sent = {
                     text: message.text,
                     role: message.role || 'user',
                     timestamp: Date.now(),
-                    engramId: message.engramId || null
+                    conversationId: message.conversationId || null
                 };
-                broadcastToClients({
-                    type: 'cbus_message',
-                    message: msg
-                });
-                // --- Persist user message ---
-                await persistEngramMessage(msg);
-
-                // --- After persisting, trigger tool call if CBus Tap is configured ---
+                broadcastToClients({ type: 'chat_message', message: sent });
+                await saveChatMessage(sent);
                 try {
-                    const tapConfig = currentTapConfig || {};
-                    if (tapConfig.serverUrl && tapConfig.toolName && (tapConfig.connectedStringArg || tapConfig.connectedArrayArg)) {
-                        // Load full engram history
-                        const { messages: engramMessages = [] } = await handleOp('load', msg.engramId, null) || {};
-                        await handleToolCall({ source: 'tap', tapConfig, message: msg, engramMessages, memory: currentImprints });
+                    if (chatModel.serverUrl && chatModel.toolName && (chatModel.messageField || chatModel.conversationField)) {
+                        await handleToolCall({ source: 'chat', call: chatModel, message: sent });
                     }
                 } catch (err) {
-                    logger.error(`The chat's tool call failed: ${err.message}`, { server: currentTapConfig?.serverUrl });
+                    logger.error(`The chat's tool call failed: ${err.message}`, { server: chatModel.serverUrl });
                 }
             } else {
                 logger.debug('Ignored a chat message without text');
             }
             break;
-        case 'cbus_subscribe':
-            if (event.source) {
-                // Load the engram's messages from IndexedDB
-                let engramId = message?.engramId;
-                if (!engramId && event.source) {
-                    // Try to get engramId from NAT table if available
-                    // (Optional: you may want to pass engramId explicitly from the client)
-                }
-                if (engramId) {
-                    const { messages = [] } = await handleOp('load', engramId, null) || {};
-                    event.source.postMessage({
-                        type: 'cbus_queue',
-                        queue: messages
-                    });
-                } else {
-                    // If no engramId, send empty queue
-                    event.source.postMessage({
-                        type: 'cbus_queue',
-                        queue: []
-                    });
-                }
-            }
+        case 'get_chat_history': {
+            const { messages } = await loadConversation(message.conversationId ?? null);
+            event.source?.postMessage({ type: 'chat_history', conversationId: message.conversationId ?? null, messages });
             break;
-        case 'set_tap_config':
-            currentTapConfig = message.tapConfig || {};
+        }
+        case 'set_chat_model':
+            chatModel = message.model || {};
             logger.debug('The chat now sends messages to a tool', {
-                server: currentTapConfig.serverUrl,
-                detail: { tool: currentTapConfig.toolName, messageField: currentTapConfig.connectedStringArg, historyField: currentTapConfig.connectedArrayArg }
+                server: chatModel.serverUrl,
+                detail: { tool: chatModel.toolName, messageField: chatModel.messageField, conversationField: chatModel.conversationField }
             });
             return;
-        case 'update_memory':
-            if (Array.isArray(message.imprints)) {
-                currentImprints = message.imprints;
-                logger.debug(`Updated memory: ${currentImprints.length} imprint${currentImprints.length === 1 ? '' : 's'}`);
+        case 'set_chat_context':
+            if (Array.isArray(message.context)) {
+                chatContext = message.context;
+                logger.debug(`The chat's context has ${chatContext.length} entr${chatContext.length === 1 ? 'y' : 'ies'}`);
             }
             break;
         case 'init_mcp_servers_index':
@@ -573,47 +531,36 @@ async function handleClientMessage(event) {
                 logger.debug(`The page registered ${Object.keys(message.servers).length} server(s)`);
             }
             break;
-        case 'extracted_tool_call': {
-            // message.toolCall (the JSON-RPC object), message.engramId, message.tapConfig
-            const toolCall = message.toolCall;
-            const engramId = message.engramId || null;
-            await maybeCallExtractedTool(toolCall, engramId);
+        case 'reply_tool_call':
+            await runReplyToolCall(message.toolCall, message.conversationId || null);
             break;
-        }
         default:
             logger.warn(`Ignored a message of unknown type ${message.type}`);
     }
 }
 
-// --- Send to engram client helper ---
-function sendToEngramClient(engramId, message) {
-    const clientId = engramNAT.get(engramId);
-    if (clientId) {
-        self.clients.get(clientId).then(client => {
-            if (client) {
-                client.postMessage(message);
-            }
-        });
-    } else {
-        // Fallback: broadcast if mapping missing
-        broadcastToClients(message);
-    }
+// Chat messages go to every page; each shows the conversation it has open.
+function sendChatMessage(message, event) {
+    const update = { type: 'chat_message', message };
+    if (event?.source) event.source.postMessage(update);
+    else broadcastToClients(update);
 }
 
 // Initialize on install. A new version takes over as soon as it's installed instead of waiting
 // for every tab to close.
 self.addEventListener('install', event => {
-    logger.info(`Installing the service worker for WASM build ${WASM_SHA256.slice(0, 12)}`);
+    const builds = Object.values(MCP_CLIENTS).map(client => `${client.label} ${client.build.slice(0, 12)}`).join(', ');
+    logger.info(`Installing the service worker with the MCP client library builds ${builds}`);
     self.skipWaiting();
-    event.waitUntil(initializeWasm());
-    event.waitUntil(initDB());
+    event.waitUntil(loadClient());
+    event.waitUntil(openDB());
 });
 
 // Handle activation
 self.addEventListener('activate', event => {
     logger.debug('Activating');
     event.waitUntil(clients.claim());
-    event.waitUntil(initialWasmBroadcast());
+    event.waitUntil(initialClientBroadcast());
 });
 
 
@@ -690,154 +637,103 @@ function extractJsonRpcCalls(text) {
     return results;
 }
 
-// --- Tool Call Dispatch Helper ---
-async function maybeCallExtractedTool(toolCall, engramId) {
-    // Circuit breaker: prevent rapid-fire loops
-    if (shouldBreakCircuit(engramId)) {
-        logger.warn('Skipped a tool call from tool output: more than 3 in 10 seconds', { detail: { engramId } });
+// A tool call a reply asked for: a JSON-RPC request whose method is a tool's name.
+async function runReplyToolCall(toolCall, conversationId) {
+    if (shouldBreakCircuit(conversationId)) {
+        logger.warn('Skipped a tool call from a reply: more than 3 in 10 seconds', { detail: { conversationId } });
         broadcastToClients({
             type: 'tool_result',
             error: 'Circuit breaker: too many tool calls in a short period',
-            engramId,
-            source: 'extracted'
+            conversationId,
+            source: 'reply'
         });
         return;
     }
     if (toolCall && toolCall.method && toolCall.jsonrpc === '2.0') {
-        // Find the tool and server
         const found = findToolAndServerByMethod(toolCall.method);
         if (!found) {
-            logger.error(`Tool output asked for ${toolCall.method}, which no connected server offers`);
+            logger.error(`A reply asked for ${toolCall.method}, which no connected server offers`);
             broadcastToClients({
                 type: 'tool_result',
                 error: `Tool not found: ${toolCall.method}`,
-                engramId,
-                source: 'extracted'
+                conversationId,
+                source: 'reply'
             });
             return;
         }
         const { serverUrl, tool } = found;
-        // Extract args from toolCall.params
-        const args = toolCall.params || {};
-        const tapConfig = { ...buildTapConfigForTool(serverUrl, tool), args };
+        const call = { serverUrl, toolName: tool.name, args: toolCall.params || {} };
 
         try {
-            logger.info(`Tool output asked for ${tool.name}; calling it`, { server: serverUrl });
-            await handleToolCall({
-                source: 'extracted',
-                tapConfig,
-                message: { ...toolCall, engramId },
-                event: null,
-                engramMessages: null,
-                memory: null
-            });
+            logger.info(`A reply asked for ${tool.name}; calling it`, { server: serverUrl });
+            await handleToolCall({ source: 'reply', call, message: { ...toolCall, conversationId } });
         } catch (err) {
-            logger.error(`Couldn't run the tool call from tool output: ${err.message}`, { server: serverUrl, detail: { toolCall } });
+            logger.error(`Couldn't run the tool call from a reply: ${err.message}`, { server: serverUrl, detail: { toolCall } });
             broadcastToClients({
                 type: 'tool_result',
                 error: err.message,
-                engramId,
-                source: 'extracted'
+                conversationId,
+                source: 'reply'
             });
         }
     } else {
-        logger.error('extracted_tool_call carried no JSON-RPC tool call', { detail: { toolCall } });
+        logger.error('reply_tool_call carried no JSON-RPC tool call', { detail: { toolCall } });
     }
 }
 
-// --- Unified Tool Call Handler ---
-/**
- * Handles all tool calls, routing results to the correct output.
- * @param {Object} opts - Options for the tool call.
- * @param {'tap'|'console'} opts.source - Source of the tool call.
- * @param {Object} opts.tapConfig - Tap config (if any).
- * @param {Object} opts.message - The original message triggering the call.
- * @param {Object} opts.event - The event (for client routing).
- * @param {Array} [opts.engramMessages] - Engram history (if any).
- * @param {Array} [opts.memory] - Memory/imprints (if any).
- */
-async function handleToolCall({ source, tapConfig, message, event, engramMessages, memory }) {
-    // Use only tapConfig for all tool call parameters
-    const toolArgs = { ...(tapConfig.args || {}) };
-    const connectedStringArg = tapConfig.connectedStringArg;
-    const connectedArrayArg = tapConfig.connectedArrayArg;
-    if ((connectedStringArg || connectedArrayArg) && message.engramId) {
-        if (!engramMessages) {
-            const loaded = await handleOp('load', message.engramId, null) || {};
-            engramMessages = loaded.messages || [];
-        }
+// {{message}} in a preset message field is replaced by the message ({{cbus_message}} is its old name).
+const MESSAGE_PLACEHOLDER = /\{\{(?:message|cbus_message)\}\}/g;
 
-        // Hardened memory injection
-        if (Array.isArray(memory) && memory.length > 0) {
-            // Insert all imprints except the first (bootrom) as memory messages
-            for (const imprint of memory.slice(1)) {
-                if (imprint && typeof imprint.text === 'string' && imprint.text.trim()) {
-                    engramMessages.unshift({ text: imprint.text, role: 'memory', timestamp: Date.now() });
-                }
-            }
-
-            // insert a json encoded servers list
-            engramMessages.unshift({ text: JSON.stringify(mcpServersIndex), role: 'memory', timestamp: Date.now() });
-
-
-            // Insert bootrom if it exists and has text
-            const bootrom = memory[0];
-            if (bootrom && typeof bootrom.text === 'string' && bootrom.text.trim()) {
-                engramMessages.unshift({ text: bootrom.text, role: 'memory', timestamp: Date.now() });
-            }
-        }
-
-        if (engramMessages.length === 1) {
-            if (connectedStringArg) toolArgs[connectedStringArg] = engramMessages[0].text;
-            if (connectedArrayArg) toolArgs[connectedArrayArg] = [];
-        } else if (engramMessages.length > 1) {
-            if (connectedStringArg) {
-                let template = toolArgs[connectedStringArg];
-                const latestMsg = engramMessages[engramMessages.length - 1].text;
-                if (typeof template === 'string' && template.includes('{{cbus_message}}')) {
-                    toolArgs[connectedStringArg] = template.replace(/{{cbus_message}}/g, latestMsg);
-                } else if (typeof template === 'string' && template.length > 0) {
-                    toolArgs[connectedStringArg] = template;
-                } else {
-                    toolArgs[connectedStringArg] = latestMsg;
-                }
-            }
-            if (connectedArrayArg) toolArgs[connectedArrayArg] = engramMessages.slice(0, -1).map(msg => msg.text);
-        }
+// The chat model's arguments. Its message field gets the newest message, and its conversation field
+// everything before it: how to ask for a tool call, the servers and their tools to choose from, the
+// context the page added, then the conversation so far.
+async function modelArguments(model, conversationId) {
+    const args = { ...(model.args || {}) };
+    const { messageField, conversationField } = model;
+    if (!conversationId || !(messageField || conversationField)) return args;
+    const { messages } = await loadConversation(conversationId);
+    const context = chatContext.map(entry => entry?.text).filter(text => typeof text === 'string' && text.trim());
+    const texts = [CHAT_INSTRUCTIONS, JSON.stringify(serversForModel()), ...context, ...messages.map(message => message.text)];
+    const newest = texts.at(-1);
+    if (messageField) {
+        const preset = args[messageField];
+        if (typeof preset === 'string' && preset.match(MESSAGE_PLACEHOLDER)) args[messageField] = preset.replace(MESSAGE_PLACEHOLDER, () => newest);
+        else if (typeof preset !== 'string' || !preset) args[messageField] = newest;
     }
-    const server = tapConfig.serverUrl;
-    const tool = tapConfig.toolName;
+    if (conversationField) args[conversationField] = texts.slice(0, -1);
+    return args;
+}
+
+// Every tool call goes through here, whichever part of the app asked for it (`source`: workbench,
+// chat or reply). `call` is {serverUrl, toolName, args}; for the chat, the model with its fields.
+async function handleToolCall({ source, call, message, event }) {
+    const toolArgs = source === 'chat' ? await modelArguments(call, message.conversationId) : { ...(call.args || {}) };
+    const server = call.serverUrl;
+    const tool = call.toolName;
     logger.debug(`Calling ${tool}`, { server, detail: { from: CALL_ORIGINS[source] || source, arguments: Object.keys(toolArgs) } });
     const startedAt = Date.now();
     const started = performance.now();
-    const call = { source, message, serverUrl: server, toolName: tool, toolArgs, startedAt };
+    const attempt = { source, message, serverUrl: server, toolName: tool, toolArgs, startedAt };
+    const reply = update => (event?.source ? event.source.postMessage(update) : broadcastToClients(update));
     let result;
     try {
         // Only calls the page asked for directly may bring a token; calls started from chat or
-        // from tool output use the one the page registered for the server.
-        result = await withAuth(server, source === 'console' ? message : {}, {}, options =>
-            wasmInstance.call_tool(server, tool, JSON.stringify(toolArgs), options)
+        // from a reply use the one the page registered for the server.
+        result = await withAuth(server, source === 'workbench' ? message : {}, {}, options =>
+            mcpClient.call_tool(server, tool, JSON.stringify(toolArgs), options)
         );
     } catch (err) {
         const error = mcpError(err);
         logger.error(`${tool} failed after ${formatDuration(performance.now() - started)}: ${error.message}`, { server, detail: errorDetail(error) });
-        const run = await recordRun(call, { outcome: 'failed', error, durationMs: performance.now() - started });
-        const errorMsg = {
+        const run = await recordRun(attempt, { outcome: 'failed', error, durationMs: performance.now() - started });
+        reply({
             type: 'tool_result',
             error: error.message,
             errorKind: error.kind,
             run,
             source,
-            engramId: message.engramId || null,
-            requestId: message.requestId || null
-        };
-        if (message.engramId && message.requestId) {
-            sendToEngramClient(message.engramId, errorMsg);
-        } else if (event?.source) {
-            event.source.postMessage(errorMsg);
-        } else {
-            broadcastToClients(errorMsg);
-        }
+            conversationId: message.conversationId || null
+        });
         return;
     }
     let parsedResult;
@@ -856,83 +752,56 @@ async function handleToolCall({ source, tapConfig, message, event, engramMessage
     } else {
         logger.info(`${tool} returned in ${took}`, { server });
     }
-    // For tap/auto, also create a cbus_message and persist
-    if (source === 'tap' || source === 'extracted') {
-        const toolMsg = {
-            text: toolText,
-            role: 'tool',
-            timestamp: Date.now(),
-            engramId: message.engramId || null
-        };
-        // Only send cbus_message to the correct client/engram
-        if (message.engramId && message.requestId) {
-            sendToEngramClient(message.engramId, { type: 'cbus_message', message: toolMsg });
-        } else if (event?.source) {
-            event.source.postMessage({ type: 'cbus_message', message: toolMsg });
-        } else {
-            broadcastToClients({ type: 'cbus_message', message: toolMsg });
-        }
-        await persistEngramMessage(toolMsg);
+    // The chat's model and the tools its replies call answer in the conversation.
+    if (source === 'chat' || source === 'reply') {
+        const answer = { text: toolText, role: 'tool', timestamp: Date.now(), conversationId: message.conversationId || null };
+        sendChatMessage(answer, event);
+        await saveChatMessage(answer);
     }
-    const run = await recordRun(call, { outcome: parsedResult?.isError ? 'tool_error' : 'ok', result: parsedResult, durationMs });
-    // Route tool_result strictly
-    const resultMsg = {
+    const run = await recordRun(attempt, { outcome: parsedResult?.isError ? 'tool_error' : 'ok', result: parsedResult, durationMs });
+    reply({
         type: 'tool_result',
         result: parsedResult,
         run,
         source,
-        engramId: message.engramId || null,
-        requestId: message.requestId || null
-    };
-    if (message.engramId && message.requestId) {
-        sendToEngramClient(message.engramId, resultMsg);
-    } else if (event?.source) {
-        event.source.postMessage(resultMsg);
-    } else {
-        broadcastToClients(resultMsg);
-    }
+        conversationId: message.conversationId || null
+    });
 
-    // --- Extract and dispatch tool calls from tool output ---
-    let extractedCalls = extractJsonRpcCalls(toolText);
-    if (Array.isArray(extractedCalls) && extractedCalls.length > 0) {
-        for (const call of extractedCalls) {
-            await maybeCallExtractedTool(call, message.engramId || null);
-        }
+    for (const toolCall of extractJsonRpcCalls(toolText)) {
+        await runReplyToolCall(toolCall, message.conversationId || null);
     }
 }
 
 // --- Run history: every tool call becomes a run, whichever part of the client made it ---
 
-// handleToolCall's sources, as the Workbench names them.
-const RUN_SOURCES = { console: 'workbench', tap: 'chat', extracted: 'reply' };
-
 // Saves the call and compares its result with the last run of the same request. Pages asking for
 // a call send `run` details: the arguments as written (with {{variables}}), the saved request it
 // came from and the environment. History failing must never fail the call, so errors only log.
-async function recordRun(call, { outcome, result = null, error = null, durationMs }) {
-    const details = call.message?.run || {};
+// Sources are handleToolCall's: workbench (collection for Run all), chat and reply.
+async function recordRun(attempt, { outcome, result = null, error = null, durationMs }) {
+    const details = attempt.message?.run || {};
     const record = {
         id: details.id || crypto.randomUUID(),
-        startedAt: call.startedAt,
+        startedAt: attempt.startedAt,
         durationMs: Math.round(durationMs),
-        source: call.source === 'console' && details.collectionRunId ? 'collection' : RUN_SOURCES[call.source] || call.source,
-        serverUrl: call.serverUrl,
-        toolName: call.toolName,
+        source: attempt.source === 'workbench' && details.collectionRunId ? 'collection' : attempt.source,
+        serverUrl: attempt.serverUrl,
+        toolName: attempt.toolName,
         requestId: details.requestId || null,
         collectionRunId: details.collectionRunId || null,
         environmentName: details.environmentName || null,
         outcome,
         error: error?.message || null,
         errorKind: error?.kind || null,
-        ...stored('args', details.args ?? call.toolArgs),
-        ...stored('sentArgs', call.toolArgs),
+        ...stored('args', details.args ?? attempt.toolArgs),
+        ...stored('sentArgs', attempt.toolArgs),
         ...stored('result', result),
     };
     record.truncated = !!(record.argsText || record.sentArgsText || record.resultText);
     const summary = { id: record.id, startedAt: record.startedAt, durationMs: record.durationMs, outcome, changed: null, previousRunId: null };
     try {
         record.resultHash = await sha256(canonicalJson(comparedValue({ outcome, result, error: record.error, errorKind: record.errorKind })));
-        record.compareKey = await compareKeyFor({ requestId: record.requestId, serverUrl: call.serverUrl, toolName: call.toolName, sentArgs: call.toolArgs });
+        record.compareKey = await compareKeyFor({ requestId: record.requestId, serverUrl: attempt.serverUrl, toolName: attempt.toolName, sentArgs: attempt.toolArgs });
         const previous = await latestRun(record.compareKey);
         record.previousRunId = previous?.id || null;
         record.changed = previous ? previous.resultHash !== record.resultHash : null;
@@ -943,12 +812,18 @@ async function recordRun(call, { outcome, result = null, error = null, durationM
             run: { ...summary, source: record.source, serverUrl: record.serverUrl, toolName: record.toolName, requestId: record.requestId, errorKind: record.errorKind }
         });
     } catch (failure) {
-        logger.warn(`Couldn't save the call to ${call.toolName} in the run history: ${failure.message}`, { server: call.serverUrl });
+        logger.warn(`Couldn't save the call to ${attempt.toolName} in the run history: ${failure.message}`, { server: attempt.serverUrl });
     }
     return summary;
 }
 
 // --- Tool/Server Lookup Helper ---
+// The server list as the page registered it, minus static tokens: the model's tool may be on any
+// server, and a token only ever goes to the server it's for.
+function serversForModel() {
+    return Object.fromEntries(Object.entries(mcpServersIndex).map(([url, { bearerToken, ...server }]) => [url, server]));
+}
+
 function findToolAndServerByMethod(method) {
     for (const [url, server] of Object.entries(mcpServersIndex)) {
         if (server.tools && Array.isArray(server.tools)) {
@@ -959,13 +834,4 @@ function findToolAndServerByMethod(method) {
         }
     }
     return null;
-}
-
-// --- TapConfig Builder ---
-function buildTapConfigForTool(serverUrl, tool) {
-    return {
-        serverUrl,
-        toolName: tool.name,
-        // Optionally: add connectedStringArg, connectedArrayArg, etc.
-    };
 }

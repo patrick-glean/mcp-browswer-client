@@ -1,5 +1,5 @@
 // The dock along the bottom: Log (the log panel index.html builds, with its level, filter, copy
-// and download), Trace (each HTTP request and response the WASM client made) and Runs (every
+// and download), Trace (each HTTP request and response the MCP client made) and Runs (every
 // stored run). It collapses to its tab row and can be dragged taller or shorter.
 
 import * as store from '../store.js';
@@ -42,7 +42,7 @@ export class WbDock extends WbElement {
         if (!this.$('[data-dock-panel="trace"]')) {
             this.$('.wb-dock-body').insertAdjacentHTML('beforeend', `
                 <div class="wb-dock-panel" data-dock-panel="trace" hidden>
-                    <p class="wb-dock-note text-secondary">Every HTTP request and response the WASM client made, newest last. Bearer tokens and sign-in secrets are redacted.</p>
+                    <p class="wb-dock-note text-secondary">Every HTTP request and response the MCP client made, newest last. Bearer tokens and sign-in secrets are redacted.</p>
                     <div class="log-container wb-trace" id="traceList" role="log"></div>
                 </div>
                 <div class="wb-dock-panel" data-dock-panel="runs" hidden>
@@ -144,7 +144,7 @@ export class WbDock extends WbElement {
                         ? `<span class="badge badge-error">${escapeHtml(run.errorKind || 'failed')}</span>`
                         : run.outcome === 'tool_error' ? '<span class="badge badge-error">tool error</span>' : verdictChip(run);
                     return `
-                        <tr class="history-item" data-open-run="${escapeHtml(run.id)}" data-source="${escapeHtml(run.source)}" tabindex="0">
+                        <tr class="wb-run-row" data-open-run="${escapeHtml(run.id)}" data-source="${escapeHtml(run.source)}" tabindex="0">
                             <td>${escapeHtml(timeAgo(run.startedAt))}</td>
                             <td class="mono">${escapeHtml(run.toolName)}</td>
                             <td>${escapeHtml(this.workbench.serverLabel(run.serverUrl))}</td>
@@ -194,6 +194,8 @@ export class WbDock extends WbElement {
     }
 }
 
+// The MCP client library's debug entries, whichever library it is: everything but the page and the
+// worker logs under its library's name.
 function isTrace(entry) {
-    return entry.source === 'wasm' && entry.level === 'debug';
+    return entry.source !== 'page' && entry.source !== 'worker' && entry.level === 'debug';
 }

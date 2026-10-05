@@ -27,8 +27,16 @@ export async function compareKeyFor({ requestId, serverUrl, toolName, sentArgs }
     return `call:${await sha256(`${serverUrl}\n${toolName}\n${canonicalJson(sentArgs ?? {})}`)}`;
 }
 
-// What a run is compared on: the result, or for a failed call its error.
-export const comparedValue = run => (run.outcome === 'failed' ? { error: run.error, errorKind: run.errorKind } : run.result);
+// What a run is compared on: the result, or for a failed call its error. A result without a
+// `resultType` is complete, and libraries differ on whether they say so.
+export function comparedValue(run) {
+    if (run.outcome === 'failed') return { error: run.error, errorKind: run.errorKind };
+    const { result } = run;
+    if (result && typeof result === 'object' && !Array.isArray(result) && result.resultType === undefined) {
+        return { ...result, resultType: 'complete' };
+    }
+    return result;
+}
 
 // `{ [name]: value }`, or for a value too big to keep, `{ [name]: null, [name + 'Text']: the start of its JSON }`.
 export function stored(name, value) {

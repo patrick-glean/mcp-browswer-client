@@ -5,13 +5,17 @@
 // in a named grid area, so another arrangement is new grid areas, not new components.
 
 import { app } from './app.js';
+import { WbContents } from './components/contents.js';
 import { WbDock } from './components/dock.js';
 import { WbPalette } from './components/palette.js';
+import { WbPrompt } from './components/prompt.js';
 import { WbRail } from './components/rail.js';
 import { WbRequest } from './components/request.js';
+import { WbResource } from './components/resource.js';
 import { WbResponse } from './components/response.js';
 import { WbServerBar } from './components/server-bar.js';
 import { WbSheet } from './components/sheet.js';
+import { WbSplitter } from './components/splitter.js';
 import { WbTools } from './components/tools.js';
 import { closeMenusOutside, escapeHtml } from './util.js';
 import { Workbench } from './workbench.js';
@@ -21,7 +25,11 @@ const COMPONENTS = {
     'wb-server-bar': WbServerBar,
     'wb-tools': WbTools,
     'wb-request': WbRequest,
+    'wb-resource': WbResource,
+    'wb-prompt': WbPrompt,
     'wb-response': WbResponse,
+    'wb-contents': WbContents,
+    'wb-splitter': WbSplitter,
     'wb-dock': WbDock,
     'wb-sheet': WbSheet,
     'wb-palette': WbPalette,
@@ -79,7 +87,7 @@ function wireShortcuts(workbench) {
     document.addEventListener('keydown', event => {
         const inWorkbench = document.body.dataset.mode !== 'apps';
         const command = event.metaKey || event.ctrlKey;
-        if (command && event.key === 'Enter' && inWorkbench && workbench.tool) {
+        if (command && event.key === 'Enter' && inWorkbench && (workbench.tool || workbench.item)) {
             event.preventDefault();
             workbench.emit('run-request');
         } else if (command && event.key.toLowerCase() === 's' && inWorkbench && workbench.tool) {

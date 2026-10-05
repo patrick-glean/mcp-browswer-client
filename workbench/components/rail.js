@@ -18,6 +18,7 @@ export class WbRail extends WbElement {
         const servers = () => this.renderServers();
         this.shell.on('servers', servers, signal);
         this.shell.on('select', servers, signal);
+        this.shell.on('tools', servers, signal);
         this.shell.on('auth', servers, signal);
         this.shell.on('recorded', this.refreshSoon, signal);
         this.workbench.on('saved', () => this.renderSaved(), signal);

@@ -282,35 +282,6 @@ let wasm_bindgen;
     };
 
     /**
-     * @param {string} text
-     */
-    __exports.add_memory_event = function(text) {
-        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.add_memory_event(ptr0, len0);
-    };
-
-    __exports.clear_memory_events = function() {
-        wasm.clear_memory_events();
-    };
-
-    /**
-     * @returns {string}
-     */
-    __exports.get_bootrom = function() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.get_bootrom();
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    };
-
-    /**
      * Detects the server's protocol era and returns what it reported about itself:
      * `{url, era, protocolVersion, serverInfo, capabilities, instructions}`.
      * @param {string} url
@@ -360,6 +331,91 @@ let wasm_bindgen;
         const ptr3 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len3 = WASM_VECTOR_LEN;
         const ret = wasm.call_tool(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        return ret;
+    };
+
+    /**
+     * Returns `{resources}`, every page of the server's resource list.
+     * @param {string} url
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.list_resources = function(url, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.list_resources(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Returns `{resourceTemplates}`, every page of the server's resource template list.
+     * @param {string} url
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.list_resource_templates = function(url, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.list_resource_templates(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Reads a resource and returns the JSON-RPC `result`, `{contents}`.
+     * @param {string} url
+     * @param {string} uri
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.read_resource = function(url, uri, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(uri, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.read_resource(ptr0, len0, ptr1, len1, ptr2, len2);
+        return ret;
+    };
+
+    /**
+     * Returns `{prompts}`, every page of the server's prompt list.
+     * @param {string} url
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.list_prompts = function(url, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.list_prompts(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Gets a prompt with JSON-encoded arguments and returns the JSON-RPC `result`,
+     * `{description?, messages}`.
+     * @param {string} url
+     * @param {string} name
+     * @param {string} args
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.get_prompt = function(url, name, args, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(args, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.get_prompt(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
         return ret;
     };
 
@@ -422,11 +478,11 @@ let wasm_bindgen;
     }
 
     function __wbg_adapter_29(arg0, arg1, arg2) {
-        wasm.closure104_externref_shim(arg0, arg1, arg2);
+        wasm.closure121_externref_shim(arg0, arg1, arg2);
     }
 
-    function __wbg_adapter_99(arg0, arg1, arg2, arg3) {
-        wasm.closure126_externref_shim(arg0, arg1, arg2, arg3);
+    function __wbg_adapter_101(arg0, arg1, arg2, arg3) {
+        wasm.closure143_externref_shim(arg0, arg1, arg2, arg3);
     }
 
     async function __wbg_load(module, imports) {
@@ -543,7 +599,7 @@ let wasm_bindgen;
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wbg_adapter_99(a, state0.b, arg0, arg1);
+                        return __wbg_adapter_101(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -657,12 +713,12 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper287 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 70, __wbg_adapter_26);
+        imports.wbg.__wbindgen_closure_wrapper446 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 112, __wbg_adapter_26);
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper567 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 105, __wbg_adapter_29);
+        imports.wbg.__wbindgen_closure_wrapper587 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 122, __wbg_adapter_29);
             return ret;
         };
         imports.wbg.__wbindgen_debug_string = function(arg0, arg1) {
