@@ -22,6 +22,7 @@ import argparse
 import base64
 import hashlib
 import json
+import re
 import threading
 import time
 import urllib.parse
@@ -98,6 +99,46 @@ TOOLS = [
             "properties": {"tags": {"type": "array", "items": {"type": "string", "x-mcp-header": "Tag"}}},
         },
     },
+    {
+        # Twenty fields, five of them required, described the way servers describe them for models.
+        "name": "search_notes",
+        "title": "Search notes",
+        "description": "Searches the notes by words, dates and author, with the optional filters a real search tool has. Says what it was sent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Words to look for in the notes."},
+                "after": {"type": "string", "description": "Only notes written on or after this day, as YYYY-MM-DD."},
+                "before": {"type": "string", "description": "Only notes written before this day, as YYYY-MM-DD."},
+                "author": {"type": "string", "description": "Email address of the person who wrote the notes."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "How many notes to return at most."},
+                "owner": {"type": "string", "description": "Whose notes to search. Value can be a person's name, \"me\" or \"myteam\"."},
+                "updated": {"type": "string", "description": "When the notes last changed: one of \"today\", \"past_week\" or \"past_month\". Only when the person mentioned a time frame (e.g. last week)."},
+                "sort": {"type": "string", "enum": ["relevance", "newest", "oldest"], "description": "How to order the results."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Only notes with all of these tags (e.g. 'design', 'q3')."},
+                "include_archived": {"type": "boolean", "description": "Also search archived notes."},
+                "folder": {"type": "string", "description": "URL of the folder to search in."},
+                "region": {"type": "string", "description": "Where the notes are stored, e.g. eu-west-1."},
+                "language": {"type": "string", "description": "Language the notes are written in."},
+                "peer": {"type": "string", "description": "Email address of someone whose shared notes to include (e.g. 'Which notes did alice@example.com share with me?')."},
+                "fields": {"type": "array", "items": {"type": "string", "enum": ["title", "body", "tags", "author"]}, "description": "Which parts of each note to return."},
+                "snippet": {
+                    "type": "object",
+                    "description": "How much text to show around each match.",
+                    "properties": {
+                        "length": {"type": "integer", "default": 200, "description": "Characters of text around a match."},
+                        "marker": {"type": "string", "default": "**", "description": "What to put around the words that matched."},
+                    },
+                },
+                "timeout_seconds": {"type": "number", "description": "How long to search before giving up."},
+                "request_id": {"type": "string", "format": "uuid", "description": "An ID to find this search by in the server's log."},
+                "format": {"type": "string", "enum": ["text", "markdown", "json"], "default": "markdown", "description": "How to write the results."},
+                "cursor": {"type": "string", "description": "Pagination cursor from an earlier response's next_cursor."},
+            },
+            "required": ["query", "after", "before", "author", "limit"],
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
 ]
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
@@ -129,6 +170,25 @@ PROMPTS = [
     {"name": "summarize_server", "title": "Summarize this server", "description": "Asks for a summary of the server, with its README attached."},
 ]
 RESOURCE_NOT_FOUND = -32002
+
+
+def search_notes_problems(args):
+    """What a real server would turn search_notes away for: missing or malformed arguments."""
+    schema = TOOLS_BY_NAME["search_notes"]["inputSchema"]
+    problems = [f"{key} is required" for key in schema["required"] if args.get(key) in (None, "")]
+    for key in ("after", "before"):
+        if args.get(key) and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(args[key])):
+            problems.append(f"{key} must be a day, as YYYY-MM-DD, not {args[key]!r}")
+    for key in ("author", "peer"):
+        if args.get(key) and "@" not in str(args[key]):
+            problems.append(f"{key} must be an email address, not {args[key]!r}")
+    limit = args.get("limit")
+    if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50):
+        problems.append(f"limit must be a whole number from 1 to 50, not {limit!r}")
+    unknown = sorted(set(args) - set(schema["properties"]))
+    if unknown:
+        problems.append(f"unknown arguments: {', '.join(unknown)}")
+    return problems
 
 
 def rpc_error(request_id, code, message, data=None):
@@ -451,6 +511,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.tickets += 1
                 number = self.server.tickets
             text = f"{args.get('prefix', 'T-')}{number}"
+        elif name == "search_notes":
+            problems = search_notes_problems(args)
+            if problems:
+                return self.respond(request_id, {**result, "content": [text_content("; ".join(problems))], "isError": True})
+            text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
         else:
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Ajv2020Module from 'ajv/dist/2020.js';
 import addFormatsModule from 'ajv-formats';
-import { matchingVariable, testData } from '../public/workbench/prefill.js';
+import { fieldTestData, matchingVariable, testData } from '../public/workbench/prefill.js';
 import { resolveArguments } from '../public/workbench/template.js';
 
 const Ajv2020 = Ajv2020Module.default ?? Ajv2020Module;
@@ -135,10 +135,20 @@ test('hints come first: const, staged variables, defaults, examples, then exampl
     });
 });
 
-test('optional fields stay empty unless the schema suggests a value or every field is asked for', () => {
-    const schema = SCHEMAS['a search with limits'];
-    assert.deepEqual(testData(schema).values, { query: 'test' });
-    assert.deepEqual(testData(schema, { every: true }).values, { query: 'test', limit: 5 });
+test('only the required fields are filled, unless every field is asked for', () => {
+    const schema = object({
+        query: { type: 'string' },
+        limit: { type: 'integer', default: 10 },
+        sort: { enum: ['asc', 'desc'], examples: ['desc'] },
+        region: { type: 'string', description: 'Where to look, e.g. eu-west-1.' },
+        fixed: { const: 'v2' },
+        filter: object({ owner: { type: 'string' }, since: { type: 'string', format: 'date' } }, ['owner']),
+    }, ['query', 'filter']);
+    assert.deepEqual(testData(schema).values, { query: 'test', filter: { owner: 'modelcontextprotocol' } });
+    assert.deepEqual(testData(schema, { variables: { limit: '3' } }).values, { query: 'test', filter: { owner: 'modelcontextprotocol' } });
+    assert.deepEqual(testData(schema, { every: true }).values, {
+        query: 'test', limit: 10, sort: 'desc', region: 'eu-west-1', fixed: 'v2', filter: { owner: 'modelcontextprotocol', since: day(7) },
+    });
 });
 
 test('descriptions give examples and the values a field takes, as MCP servers write them', () => {
@@ -220,6 +230,29 @@ test('optional pagination cursors stay empty, even with every field filled', () 
     const schema = object({ query: { type: 'string' }, cursor: { type: 'string' }, page_token: { type: 'string' }, nextToken: { type: 'string' } }, ['query']);
     assert.deepEqual(testData(schema, { every: true }).values, { query: 'test' });
     assert.deepEqual(testData(object({ cursor: { type: 'string' } })).values, { cursor: 'test' });
+});
+
+test('one field at a time, nested ones too', () => {
+    const schema = {
+        type: 'object',
+        properties: {
+            query: { type: 'string' },
+            limit: { type: 'integer', default: 10 },
+            cursor: { type: 'string' },
+            filter: object({ owner: { type: 'string' }, since: { type: 'string', format: 'date' } }, ['owner']),
+        },
+        required: ['query'],
+    };
+    assert.deepEqual(fieldTestData(schema, 'limit'), { value: 10, source: 'default' });
+    assert.deepEqual(fieldTestData(schema, 'filter.since'), { value: day(7), source: 'generated' });
+    assert.deepEqual(fieldTestData(schema, 'filter'), { value: { owner: 'modelcontextprotocol', since: day(7) }, source: 'generated' });
+    assert.deepEqual(fieldTestData(schema, 'query', { variables: { Query: 'whisper' } }), { value: '{{Query}}', source: 'variable' });
+    assert.equal(fieldTestData(schema, 'cursor'), null);
+    assert.equal(fieldTestData(schema, 'nope'), null);
+    assert.equal(fieldTestData(schema, 'filter.nope'), null);
+    // The same value as filling every field gives it.
+    const every = testData(schema, { every: true }).values;
+    for (const key of Object.keys(every)) assert.deepEqual(fieldTestData(schema, key).value, every[key], key);
 });
 
 test('staged variables are used ignoring case, dashes and underscores, and resolve to valid values', () => {

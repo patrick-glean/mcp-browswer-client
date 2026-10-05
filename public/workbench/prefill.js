@@ -1,14 +1,15 @@
 // Pre-fill's test data: a value for each of a tool's fields, from its input schema and the active
 // environment's variables, which is where test data is staged.
 //
-// A field gets the first of: its `const`; {{name}} when a variable is named like the field
-// (ignoring case, dashes and underscores); its `default`; its first example, from `examples` or
-// from its description ("e.g. 'react'", 'one of "asc", "desc"'). Required fields with none of
-// those, and every field with `every`, get a generated value that fits the schema: its format,
-// pattern, length, range, multipleOf, enum, items and properties, with plausible text for common
-// field names and for what a description says a field holds (a date as YYYY-MM-DD, an email
-// address). Optional pagination cursors stay empty, since only an earlier response has one.
-// Nothing is random, so a schema gets the same values every time and their runs compare.
+// By default only the required fields are filled; `every` fills the optional ones too, and
+// fieldTestData fills one field. A field gets the first of: its `const`; {{name}} when a variable
+// is named like the field (ignoring case, dashes and underscores); its `default`; its first
+// example, from `examples` or from its description ("e.g. 'react'", 'one of "asc", "desc"'). The
+// rest get a generated value that fits the schema: its format, pattern, length, range, multipleOf,
+// enum, items and properties, with plausible text for common field names and for what a
+// description says a field holds (a date as YYYY-MM-DD, an email address). Optional pagination
+// cursors stay empty, since only an earlier response has one. Nothing is random, so a schema gets
+// the same values every time and their runs compare.
 
 import { schemaType } from './template.js';
 
@@ -42,6 +43,18 @@ export function testData(schema, { variables = {}, every = false } = {}) {
     return { values: value, sources };
 }
 
+// One field's test data, as if every field were asked for: {value, source}, or null when it gets
+// none. `path` names the field the way the form does: `limit`, or `filter.owner` inside an object.
+export function fieldTestData(schema, path, { variables = {} } = {}) {
+    const context = { root: schema || {}, variables, every: true };
+    const keys = String(path).split('.');
+    let parent = resolve(schema, context);
+    for (const key of keys.slice(0, -1)) parent = resolve(parent.properties?.[key], context);
+    const key = keys.at(-1);
+    if (!parent.properties || !Object.hasOwn(parent.properties, key)) return null;
+    return fieldValue(key, parent.properties[key], (parent.required || []).includes(key), context, keys.length - 1);
+}
+
 // --- What a field gets ---
 
 function objectValue(schema, context, depth, fillRequired) {
@@ -61,6 +74,7 @@ function objectValue(schema, context, depth, fillRequired) {
 const PAGINATION = /(cursor|pagetoken|nexttoken|continuationtoken)$/;
 
 function fieldValue(key, raw, required, context, depth) {
+    if (!required && !context.every) return null;
     const prop = resolve(raw, context);
     if (Object.hasOwn(prop, 'const')) return { value: prop.const, source: 'const' };
     const variable = matchingVariable(key, context.variables);
@@ -71,14 +85,13 @@ function fieldValue(key, raw, required, context, depth) {
         // An object's fields each get their own hints, and the object counts as generated when
         // any of them was.
         if (depth >= MAX_DEPTH) return null;
-        const fill = required || context.every;
-        const { value, sources } = objectValue(prop, context, depth + 1, fill);
+        const { value, sources } = objectValue(prop, context, depth + 1, true);
         const kinds = Object.values(sources);
-        if (!kinds.length) return fill ? { value, source: 'generated' } : null;
+        if (!kinds.length) return { value, source: 'generated' };
         const source = ['generated', 'variable', 'description', 'example', 'default', 'const'].find(kind => kinds.includes(kind));
         return { value, source };
     }
-    if (!required && (!context.every || PAGINATION.test(normalized(key)))) return null;
+    if (!required && PAGINATION.test(normalized(key))) return null;
     const value = generated(key, prop, context, depth, 0);
     return value === undefined ? null : { value, source: 'generated' };
 }

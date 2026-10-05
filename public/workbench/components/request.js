@@ -1,9 +1,10 @@
 // The request pane: the selected tool's arguments as a form, what the call will send with
-// {{variables}} filled in, and the tool's schema, with Pre-fill, Save and Run.
+// {{variables}} filled in, and the tool's schema, with Pre-fill, Save and Run. Opening a tool fills
+// its required fields with test data, and Fill beside a field's name fills that one.
 
 import { NEW_COLLECTION } from '../workbench.js';
 import { previewText, variablesIn } from '../template.js';
-import { debounce, escapeHtml, plural, schemaOf, serverLabel, timeAgo, toolBadges, toolTitle } from '../util.js';
+import { addFillButtons, debounce, escapeHtml, fillField, plural, schemaOf, serverLabel, timeAgo, toolBadges, toolTitle } from '../util.js';
 import { WbElement } from './base.js';
 
 const TABS = [['arguments', 'Arguments'], ['sends', 'Sends'], ['schema', 'Schema']];
@@ -19,7 +20,10 @@ export class WbRequest extends WbElement {
         this.workbench.on('tool', ({ refreshed }) => this.render({ keepValues: refreshed }), signal);
         this.workbench.on('request', () => this.renderCrumb(), signal);
         this.workbench.on('fill', detail => this.fill(detail), signal);
-        this.workbench.on('environment', () => this.updatePreview(), signal);
+        this.workbench.on('environment', () => {
+            if (this.form && this.shownTool) addFillButtons(this.form, schemaOf(this.shownTool), this.workbench);
+            this.updatePreview();
+        }, signal);
         // Resources and prompts have their own panes in this area (wb-resource, wb-prompt).
         this.workbench.on('view', () => {
             this.hidden = this.workbench.view !== 'tools';
@@ -82,7 +86,7 @@ export class WbRequest extends WbElement {
                     <span class="wb-spacer"></span>
                     <div class="wb-request-actions">
                         <div class="split-button">
-                            <button type="button" class="btn-sm" data-prefill-best title="Fill the fields from what you last sent, a saved request, or test data from the schema">Pre-fill</button>
+                            <button type="button" class="btn-sm" data-prefill-best title="Fill the fields from what you last sent, a saved request, or test data for the required fields">Pre-fill</button>
                             <details class="menu prefill-menu">
                                 <summary class="btn-sm" aria-label="Choose what to pre-fill from">▾</summary>
                                 <div class="menu-list" role="menu"></div>
@@ -116,7 +120,14 @@ export class WbRequest extends WbElement {
         this.renderFields(schema);
         this.renderCrumb();
         this.showTab(this.tab);
-        if (kept) this.shell.fillToolForm(this.form, schema, kept);
+        if (kept) {
+            this.shell.fillToolForm(this.form, schema, kept);
+        } else {
+            const filled = this.workbench.testDataFor(schema);
+            this.shell.fillToolForm(this.form, schema, filled.args);
+            if (filled.count) this.note(filled.text);
+        }
+        addFillButtons(this.form, schema, this.workbench);
         this.updatePreview();
         requestAnimationFrame(() => this.clampDescription());
     }
@@ -267,8 +278,8 @@ export class WbRequest extends WbElement {
             item('last', last?.args ? `What you last sent, ${timeAgo(last.startedAt)}` : 'What you last sent (nothing yet)', { disabled: !last?.args }),
             ...saved.map(request => item(`saved:${request.id}`, `Saved: ${request.name}`)),
             saved.length ? '' : '<span class="menu-note">No saved requests for this tool yet</span>',
-            item('schema', 'Test data from the schema', { title: `The required fields, and the ones the schema suggests a value for. A variable in ${environment} named like a field comes first.` }),
-            item('every', 'Test data for every field', { title: 'The same, with the optional fields filled in too' }),
+            item('schema', 'Test data for the required fields', { title: `What opening the tool fills in. A field takes a variable in ${environment} named like it, else the schema's const, default or example, else a value made to fit it.` }),
+            item('every', 'Test data for every field', { title: "The optional fields too, except pagination cursors. Fill, beside a field's name, fills just that one." }),
             item('clear', 'Clear the fields'),
             item('stage', `Stage these values in ${environment}`, { title: 'Saves each field as a variable named like it, so Pre-fill uses the value for any tool with that field' }),
         ].join('');
@@ -371,6 +382,7 @@ export class WbRequest extends WbElement {
         if (!button || button.disabled) return;
         const { dataset } = button;
         if (dataset.requestTab) return this.showTab(dataset.requestTab);
+        if (dataset.fillField) return this.note(fillField(this.form, schemaOf(this.workbench.tool), dataset.fillField, this) || '');
         if (dataset.prefillBest !== undefined) return this.workbench.prefillBest();
         if (dataset.prefillSource) {
             button.closest('details.menu').open = false;
