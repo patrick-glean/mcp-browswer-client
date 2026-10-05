@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use types::*;
 
-const MAX_TOOL_PAGES: usize = 100;
+const MAX_LIST_PAGES: usize = 100;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -90,13 +90,67 @@ pub async fn call_tool(url: &str, name: &str, args: Value, opts: &Options) -> Re
     check_result_type(result)
 }
 
+/// Lists the server's resources: `{resources}`, every page.
+pub async fn list_resources(url: &str, opts: &Options) -> Result<Value, McpError> {
+    Ok(json!({ "resources": fetch_all(url, opts, "resources/list", "resources").await? }))
+}
+
+/// Lists the server's resource templates: `{resourceTemplates}`, every page.
+pub async fn list_resource_templates(url: &str, opts: &Options) -> Result<Value, McpError> {
+    Ok(json!({ "resourceTemplates": fetch_all(url, opts, "resources/templates/list", "resourceTemplates").await? }))
+}
+
+/// Reads a resource: `{contents: [{uri, mimeType?, text | blob}]}`. On modern servers the URI
+/// also travels in `Mcp-Name`.
+pub async fn read_resource(url: &str, uri: &str, opts: &Options) -> Result<Value, McpError> {
+    let result = request(url, opts, "resources/read", json!({ "uri": uri }), &[], CALL_TIMEOUT_MS).await?;
+    check_result_type(result)
+}
+
+/// Lists the server's prompts: `{prompts}`, every page.
+pub async fn list_prompts(url: &str, opts: &Options) -> Result<Value, McpError> {
+    Ok(json!({ "prompts": fetch_all(url, opts, "prompts/list", "prompts").await? }))
+}
+
+/// Gets a prompt filled in with its arguments: `{description?, messages}`. On modern servers the
+/// name also travels in `Mcp-Name`.
+pub async fn get_prompt(url: &str, name: &str, args: Value, opts: &Options) -> Result<Value, McpError> {
+    let args = if args.is_null() { json!({}) } else { args };
+    let result = request(url, opts, "prompts/get", json!({ "name": name, "arguments": args }), &[], CALL_TIMEOUT_MS).await?;
+    check_result_type(result)
+}
+
+/// Every page of a list method's `key` array, following `nextCursor`.
+async fn fetch_all(url: &str, opts: &Options, method: &str, key: &str) -> Result<Vec<Value>, McpError> {
+    let mut items = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_LIST_PAGES {
+        let params = match &cursor {
+            Some(cursor) => json!({ "cursor": cursor }),
+            None => json!({}),
+        };
+        let result = request(url, opts, method, params, &[], LIST_TIMEOUT_MS).await?;
+        items.extend(result.get(key).and_then(Value::as_array).into_iter().flatten().cloned());
+        cursor = next_cursor(&result);
+        if cursor.is_none() {
+            return Ok(items);
+        }
+    }
+    logging::warn(url, &format!("Stopped after {MAX_LIST_PAGES} pages of {method}"));
+    Ok(items)
+}
+
+fn next_cursor(result: &Value) -> Option<String> {
+    result.get("nextCursor").and_then(Value::as_str).filter(|next| !next.is_empty()).map(String::from)
+}
+
 async fn fetch_tools(url: &str, opts: &Options) -> Result<ToolCache, McpError> {
     let mut tools = Vec::new();
     let mut rejected = Vec::new();
     let mut cursor: Option<String> = None;
     let mut ttl_ms = None;
     let mut cache_scope = None;
-    for page in 0..MAX_TOOL_PAGES {
+    for page in 0..MAX_LIST_PAGES {
         let params = match &cursor {
             Some(cursor) => json!({ "cursor": cursor }),
             None => json!({}),
@@ -116,17 +170,13 @@ async fn fetch_tools(url: &str, opts: &Options) -> Result<ToolCache, McpError> {
                 }
             }
         }
-        cursor = result
-            .get("nextCursor")
-            .and_then(Value::as_str)
-            .filter(|next| !next.is_empty())
-            .map(String::from);
+        cursor = next_cursor(&result);
         if cursor.is_none() {
             break;
         }
     }
     if cursor.is_some() {
-        logging::warn(url, &format!("Stopped listing tools after {MAX_TOOL_PAGES} pages"));
+        logging::warn(url, &format!("Stopped listing tools after {MAX_LIST_PAGES} pages"));
     }
     let cache = ToolCache { tools, rejected, ttl_ms, cache_scope, fetched_at: js_sys::Date::now() };
     registry::set_tools(url, cache.clone());
@@ -417,5 +467,13 @@ mod tests {
         assert_eq!(info["protocolVersion"], MODERN_VERSION);
         assert_eq!(info["serverInfo"]["name"], "Mock");
         assert_eq!(info["capabilities"], json!({ "tools": {} }));
+    }
+
+    #[test]
+    fn follows_cursors_until_there_are_none() {
+        assert_eq!(next_cursor(&json!({ "resources": [], "nextCursor": "2" })), Some("2".into()));
+        assert_eq!(next_cursor(&json!({ "resources": [], "nextCursor": "" })), None);
+        assert_eq!(next_cursor(&json!({ "resources": [] })), None);
+        assert_eq!(next_cursor(&json!({ "nextCursor": 2 })), None);
     }
 }

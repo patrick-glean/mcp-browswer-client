@@ -97,6 +97,57 @@ pub async fn call_tool(url: String, name: String, args: String, options: String)
     to_js(result)
 }
 
+/// Returns `{resources}`, every page of the server's resource list.
+#[wasm_bindgen]
+pub async fn list_resources(url: String, options: String) -> Result<String, JsValue> {
+    let result = match mcp::Options::parse(&options) {
+        Ok(opts) => mcp::list_resources(url.trim(), &opts).await,
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Returns `{resourceTemplates}`, every page of the server's resource template list.
+#[wasm_bindgen]
+pub async fn list_resource_templates(url: String, options: String) -> Result<String, JsValue> {
+    let result = match mcp::Options::parse(&options) {
+        Ok(opts) => mcp::list_resource_templates(url.trim(), &opts).await,
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Reads a resource and returns the JSON-RPC `result`, `{contents}`.
+#[wasm_bindgen]
+pub async fn read_resource(url: String, uri: String, options: String) -> Result<String, JsValue> {
+    let result = match mcp::Options::parse(&options) {
+        Ok(opts) => mcp::read_resource(url.trim(), &uri, &opts).await,
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Returns `{prompts}`, every page of the server's prompt list.
+#[wasm_bindgen]
+pub async fn list_prompts(url: String, options: String) -> Result<String, JsValue> {
+    let result = match mcp::Options::parse(&options) {
+        Ok(opts) => mcp::list_prompts(url.trim(), &opts).await,
+        Err(err) => Err(err),
+    };
+    to_js(result)
+}
+
+/// Gets a prompt with JSON-encoded arguments and returns the JSON-RPC `result`,
+/// `{description?, messages}`.
+#[wasm_bindgen]
+pub async fn get_prompt(url: String, name: String, args: String, options: String) -> Result<String, JsValue> {
+    let result = match (mcp::Options::parse(&options), parse_args(&args)) {
+        (Ok(opts), Ok(args)) => mcp::get_prompt(url.trim(), &name, args, &opts).await,
+        (Err(err), _) | (_, Err(err)) => Err(err),
+    };
+    to_js(result)
+}
+
 #[wasm_bindgen]
 pub fn forget_server(url: &str) {
     mcp::forget(url.trim());

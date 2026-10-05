@@ -64,19 +64,30 @@ The Workbench is where you work with MCP servers by hand: try their tools, keep 
 Its layout, from left to right:
 
 - **The rail**: your servers (with their status, tool count, or Sign in), saved requests grouped in collections, and the latest runs. Add a server with +: paste its URL, or enter your work email to find your company's Glean.
-- **The server bar**, across the top: the selected server's status and protocol, sign-in, Connect, Refresh tools and Info.
-- **Tools**: the selected server's tools, with a filter and annotation filters.
+- **The server bar**, across the top: the selected server's status and protocol, sign-in, Connect, Refresh (its tools, resources and prompts) and Info.
+- **Tools, Resources and Prompts**: what the selected server offers, a tab each, with a filter (and, for tools, annotation filters). Resources and Prompts open when the server declares them; see [Resources and prompts](#resources-and-prompts).
 - **The request pane**: the tool's arguments, with Pre-fill, Save and Run, and tabs for Sends (the arguments as they'll go out) and Schema.
 - **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON and Runs (every run of this request).
 - **The dock**, along the bottom: Log, Trace (every HTTP request and response) and Runs (every call). Collapse it, or drag its top edge.
 
+Drag the edges between the rail, the tool list and the request and response panes to resize them, or focus one and use the arrow keys; double-click an edge to put it back. The sizes are kept for next time.
+
 The top bar switches between the Workbench and Apps, picks the environment and opens Variables, and has Go to (⌘K or Ctrl+K) for any server, tool or saved request. ⌘↵ or Ctrl+Enter runs the request, ⌘S or Ctrl+S saves it, `/` jumps to the tool filter and Escape closes menus and side sheets.
 
-- **Pre-fill.** One click fills a tool's fields from what you last sent to it, or else your newest saved request for it, or else its schema. The menu beside it picks a source:
+- **Pre-fill.** One click fills a tool's fields from what you last sent to it, or else your newest saved request for it, or else test data. The menu beside it picks a source:
   - what you last sent
   - any saved request for the tool
-  - the schema: each field's `const`, `default` or first `examples` value. Required fields without one get the first enum choice, the minimum (or 1) for numbers, and false for booleans. A field named like a variable gets that variable.
+  - test data from the schema, for the required fields and any field the schema suggests a value for. Each field takes the first of:
+    - its `const`
+    - a variable named like it in the active environment, ignoring case, `-` and `_` (staged test data; see below)
+    - its `default`
+    - its first example, from `examples` or from its description ("e.g. 'react'")
+    - a generated value that fits its type, format, pattern, length, range, `multipleOf` and enum, with plausible text for common names: `email`, `url`, `query`, `owner` and `repo`, `language`, IDs, dates and so on. Nothing is random, so the same tool always gets the same values and their runs compare.
+
+    The note under the title says how many fields came from the schema, from staged variables, or were generated.
+  - test data for every field: the same, with the optional fields filled in too
   - nothing (clears the fields)
+- **Staged test data.** Stage these values, at the bottom of the Pre-fill menu, saves each field's value as a variable named like the field in the active environment (or updates the one named alike). From then on, Pre-fill fills that field in any tool with it, ahead of the schema's own examples, so a set of test data per environment is a matter of choosing the environment. Edit or remove staged values under Variables.
 - **Environments and variables.** Choose an environment in the top bar and edit its variables under Variables.
   - Write `{{name}}` in any field, number fields included. The field shows what it becomes, such as `→ hi world · from Default`.
   - A field that is exactly one variable gets the variable's value converted to the field's type: a number, true or false, or JSON for objects and arrays. Text around variables stays text.
@@ -108,7 +119,16 @@ The Workbench doubles as an inspector, in the spirit of the MCP Inspector but wi
 - **Tool details**: the request pane shows the tool's title and badges and the argument form; Schema has the input schema, output schema and raw definition.
 - **Hidden tools**: tools the client won't call, listed after the others with the reason.
 - **Download the server report**, in the server bar's ⋯ menu or under Info, saves the server's details and full tool list as JSON.
-- **Resources and Prompts** have their tabs beside Tools, disabled until the client supports them.
+
+### Resources and prompts
+
+When a server declares resources or prompts, the client lists them as soon as it connects (every page, and again with Refresh), and their tabs beside Tools show how many there are.
+
+- **Resources**: each resource with its title and URI, then the resource templates. Pick one and choose Read (or press ⌘↵ or Ctrl+Enter). A template gets a field for each of its variables (RFC 6570, such as `{id}` or `{+path}`), filled in with Pre-fill's test data and taking `{{variables}}`, with the URI they make shown below. What comes back shows on the right: text, with JSON indented; images, and audio with a player; other binary data with its size and a download.
+- **Prompts**: each prompt with how many arguments it takes. Pick one to fill in its arguments (required ones first, with test data), then choose Get. The messages come back on the right, each with its role, and with any image or resource they carry.
+- **Errors**: a resource the server doesn't have, or a prompt missing an argument, shows the server's error. If a list can't be fetched, its tab says why, and the tools keep working.
+
+Each tab keeps what its last read or get returned, with a JSON tab for the raw result. Reads and gets aren't tool calls, so they don't go into the run history.
 
 ## MCP Support
 
@@ -119,13 +139,13 @@ Both libraries work out which protocol era a server speaks the same way:
 3. Any other `4xx`, or a JSON-RPC error that isn't one of the modern codes, means a legacy server. The client then runs the `initialize` handshake (offering 2025-11-25) and sends `Mcp-Session-Id` and the negotiated version from then on.
 4. If the browser can't read any reply to `server/discover`, the client tries the `initialize` handshake anyway. A browser reports a CORS preflight that rejects the new headers exactly like an unreachable server, and the handshake needs fewer headers, so this covers 2025-era servers with strict CORS allowlists. If the handshake reaches a modern server, the error says which headers its CORS policy must allow.
 
-The result is remembered per server URL. After the browser restarts the service worker, the first request reconnects automatically. Replies can be plain JSON or an SSE stream. Tool lists are paginated and cached for the server's `ttlMs`. Parameters a tool marks with `x-mcp-header` are also sent as `Mcp-Param-*` headers, and tools with invalid annotations are hidden.
+The result is remembered per server URL. After the browser restarts the service worker, the first request reconnects automatically. Replies can be plain JSON or an SSE stream. Tool lists are paginated and cached for the server's `ttlMs`; resource, resource template and prompt lists are paginated and fetched fresh each time. Parameters a tool marks with `x-mcp-header` are also sent as `Mcp-Param-*` headers, and tools with invalid annotations are hidden.
 
 Known constraints:
 
 - **CORS**: the server must allow this site's origin and the headers above: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, any `Mcp-Param-*` its tools use, and `Authorization` for tokens. Legacy servers that use sessions must also list `Mcp-Session-Id` in `Access-Control-Expose-Headers`, or the browser can't read it. Sign-in also needs CORS on the metadata, registration and token endpoints.
 - **Local servers**: from a public site such as GitHub Pages, Chrome 142+ asks the user before it lets the page reach `localhost` ("Apps on device").
-- **Not yet supported**: `input_required` results (elicitation), `subscriptions/listen`, resources and prompts in the UI, and the deprecated 2024-11-05 HTTP+SSE transport.
+- **Not yet supported**: `input_required` results (elicitation), `subscriptions/listen` and resource subscriptions, completions for prompt and template arguments, and the deprecated 2024-11-05 HTTP+SSE transport.
 
 ### Sign-in (OAuth)
 
@@ -208,6 +228,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, the same every time) and the URIs resource templates make
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
@@ -227,10 +248,10 @@ Edit files in `public/` and reload. Style new UI with the `--theme-*` variables 
 
 The Workbench is built from components (custom elements in `public/workbench/components/`) that don't know about each other. Each draws itself from two shared objects and talks only through them:
 
-- `AppShell` (in `index.html`) owns the service worker, the server list, sign-in and tool calls, and announces changes as events: `servers`, `select`, `tools`, `auth`, `run` and `recorded`.
-- The Workbench state (`workbench.js`) owns the selected tool, environments, saved requests, Run all and the frame (dock, side sheets), with events of its own.
+- `AppShell` (in `index.html`) owns the service worker, the server list, sign-in, tool calls and resource reads and prompt gets, and announces changes as events: `servers`, `select`, `tools`, `catalog` (resources and prompts listed), `auth`, `run` and `recorded`.
+- The Workbench state (`workbench.js`) owns the selected tool or resource or prompt and which tab is open (`view`), environments, saved requests, Run all, the frame (dock, side sheets) and the pane sizes, with events of its own.
 
-The layout is CSS: each component sits in a named grid area, set by the `data-layout` block for `#workbench` in `workbench.css`. To try another arrangement, add a layout there and set `data-layout` on `#workbench`; the components don't change.
+The layout is CSS: each component sits in a named grid area, set by the `data-layout` block for `#workbench` in `workbench.css`. To try another arrangement, add a layout there and set `data-layout` on `#workbench`; the components don't change. Components can share an area and take turns: the request area holds the tool, resource and prompt panes, and the response area the response and contents panes, each showing itself only for its tab. The splitters sit in zero-width grid tracks of their own and set `--rail-width`, `--tools-width`, `--request-fr` and `--response-fr`, which the layout uses with limits, so a size kept from a wider window can't squeeze the others.
 
 ### Project Structure
 
@@ -266,12 +287,14 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   │   ├── index.js       # Starts it: loads the state, defines the components, wires shortcuts
 │   │   ├── workbench.js   # Shared state and actions: selection, environments, saved requests, runs
 │   │   ├── workbench.css  # The frame and the layout (grid areas), and each component's styles
-│   │   ├── components/    # One custom element per part: rail, server bar, tools, request,
-│   │   │                  #   response, dock, side sheet, Go to palette
+│   │   ├── components/    # One custom element per part: rail, server bar, tools (with resources
+│   │   │                  #   and prompts), request, resource, prompt, response, contents, the
+│   │   │                  #   splitters, dock, side sheet, Go to palette
 │   │   ├── store.js       # IndexedDB storage (mcp_sandbox), shared by the page and the worker
 │   │   ├── runs.js        # What counts as the same request and a changed result
 │   │   ├── template.js    # {{variable}} resolution with type conversion
-│   │   ├── prefill.js     # Field values from a tool's schema
+│   │   ├── prefill.js     # Pre-fill's test data: hints, staged variables and generated values
+│   │   ├── uri-template.js # Resource templates' URIs (RFC 6570)
 │   │   ├── diff.js        # The line diff behind Changes
 │   │   └── util.js        # Small shared helpers (escaping, badges, time)
 │   ├── bench/             # The tool-call benchmark, with its own service worker and an in-memory server
@@ -284,7 +307,7 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
-├── test_mcp_server.py     # Mock MCP server (modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS)
+├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS
 ├── DEVELOPMENT.md         # The library interface, the worker's messages, the agent loop, logging
 ├── Cargo.toml             # The Rust library's configuration
 ├── package.json           # Node.js configuration and scripts
@@ -310,10 +333,11 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 7. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including the chat's.
 8. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
 9. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
+10. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
 
 ### More server behaviors
 
-`test_mcp_server.py` needs only Python's standard library. Its flags simulate the situations a browser client has to handle:
+`test_mcp_server.py` needs only Python's standard library. Besides its tools, it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
 
 | Flag | What the mock does |
 | --- | --- |
@@ -344,7 +368,7 @@ These public servers need no account, allow browsers through CORS, and are in th
 | Microsoft Learn | `https://learn.microsoft.com/api/mcp` | 2025-06-18, with a session and SSE replies | `microsoft_docs_search` with query `service worker` |
 | DeepWiki | `https://mcp.deepwiki.com/mcp` | 2025-11-25, without a session | `read_wiki_structure` with repoName `modelcontextprotocol/modelcontextprotocol` |
 
-They're third-party services, so their behavior can change; `npm run test:public` checks that each one still connects and answers its sample call. It also connects to GitMCP (`https://gitmcp.io/docs`), whose reply to `server/discover` lacks CORS headers, so it's only reachable through the fallback described in [MCP Support](#mcp-support).
+They're third-party services, so their behavior can change; `npm run test:public` checks that each one still connects and answers its sample call, and notes how many resources and prompts each lists (Hugging Face has over a hundred resources; the others declare both but list none). It also connects to GitMCP (`https://gitmcp.io/docs`), whose reply to `server/discover` lacks CORS headers, so it's only reachable through the fallback described in [MCP Support](#mcp-support).
 
 `tests/reference_server.py` runs a server on the official MCP Python SDK (`npm run setup:python` installs it, then `npm run start:reference-mcp`); add `http://127.0.0.1:8082/mcp`.
 
@@ -381,12 +405,13 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema, and resource template URIs
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); the Workbench itself (each Pre-fill source, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (each Pre-fill source, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 

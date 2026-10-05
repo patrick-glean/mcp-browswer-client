@@ -20,8 +20,16 @@ export class WbRequest extends WbElement {
         this.workbench.on('request', () => this.renderCrumb(), signal);
         this.workbench.on('fill', detail => this.fill(detail), signal);
         this.workbench.on('environment', () => this.updatePreview(), signal);
-        this.workbench.on('run-request', () => this.run(), signal);
-        this.workbench.on('save-request', () => this.openSavePanel(), signal);
+        // Resources and prompts have their own panes in this area (wb-resource, wb-prompt).
+        this.workbench.on('view', () => {
+            this.hidden = this.workbench.view !== 'tools';
+        }, signal);
+        this.workbench.on('run-request', () => {
+            if (!this.hidden) this.run();
+        }, signal);
+        this.workbench.on('save-request', () => {
+            if (!this.hidden) this.openSavePanel();
+        }, signal);
         this.shell.on('servers', ({ url }) => {
             if (url === this.shell.selectedServerUrl) this.renderCrumb();
         }, signal);
@@ -50,6 +58,7 @@ export class WbRequest extends WbElement {
     }
 
     render({ keepValues = false } = {}) {
+        this.hidden = this.workbench.view !== 'tools';
         const tool = this.workbench.tool;
         if (!tool) {
             const server = this.workbench.server;
@@ -73,7 +82,7 @@ export class WbRequest extends WbElement {
                     <span class="wb-spacer"></span>
                     <div class="wb-request-actions">
                         <div class="split-button">
-                            <button type="button" class="btn-sm" data-prefill-best title="Fill the fields from what you last sent, a saved request or the schema">Pre-fill</button>
+                            <button type="button" class="btn-sm" data-prefill-best title="Fill the fields from what you last sent, a saved request, or test data from the schema">Pre-fill</button>
                             <details class="menu prefill-menu">
                                 <summary class="btn-sm" aria-label="Choose what to pre-fill from">▾</summary>
                                 <div class="menu-list" role="menu"></div>
@@ -251,15 +260,30 @@ export class WbRequest extends WbElement {
         const choices = await this.workbench.prefillChoices();
         const { last, saved } = choices;
         this.prefillShown = choices;
-        const item = (source, label, disabled = false) =>
-            `<button type="button" role="menuitem" class="menu-item" data-prefill-source="${escapeHtml(source)}" ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>`;
+        const item = (source, label, { disabled = false, title = '' } = {}) =>
+            `<button type="button" role="menuitem" class="menu-item" data-prefill-source="${escapeHtml(source)}" ${title ? `title="${escapeHtml(title)}"` : ''} ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>`;
+        const environment = this.workbench.environment?.name || 'this environment';
         list.innerHTML = [
-            item('last', last?.args ? `What you last sent, ${timeAgo(last.startedAt)}` : 'What you last sent (nothing yet)', !last?.args),
+            item('last', last?.args ? `What you last sent, ${timeAgo(last.startedAt)}` : 'What you last sent (nothing yet)', { disabled: !last?.args }),
             ...saved.map(request => item(`saved:${request.id}`, `Saved: ${request.name}`)),
             saved.length ? '' : '<span class="menu-note">No saved requests for this tool yet</span>',
-            item('schema', 'From the schema'),
+            item('schema', 'Test data from the schema', { title: `The required fields, and the ones the schema suggests a value for. A variable in ${environment} named like a field comes first.` }),
+            item('every', 'Test data for every field', { title: 'The same, with the optional fields filled in too' }),
             item('clear', 'Clear the fields'),
+            item('stage', `Stage these values in ${environment}`, { title: 'Saves each field as a variable named like it, so Pre-fill uses the value for any tool with that field' }),
         ].join('');
+    }
+
+    stage() {
+        let args;
+        try {
+            args = this.shell.serializeToolForm(this.form, schemaOf(this.workbench.tool));
+        } catch (error) {
+            this.note(`Nothing staged. ${error.message}`);
+            return;
+        }
+        this.note(this.workbench.stageValues(args));
+        this.updatePreview();
     }
 
     // --- Save ---
@@ -350,6 +374,7 @@ export class WbRequest extends WbElement {
         if (dataset.prefillBest !== undefined) return this.workbench.prefillBest();
         if (dataset.prefillSource) {
             button.closest('details.menu').open = false;
+            if (dataset.prefillSource === 'stage') return this.stage();
             return this.workbench.prefill(dataset.prefillSource, this.prefillShown || {});
         }
         if (dataset.saveRequest !== undefined) return this.openSavePanel({ toggle: true });

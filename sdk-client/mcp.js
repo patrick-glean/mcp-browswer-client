@@ -22,6 +22,7 @@ const CLIENT_INFO = { name: 'mcp-browser-client', version: __CLIENT_VERSION__ };
 const CONNECT_TIMEOUT_MS = 20_000;
 const LIST_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 120_000;
+const MAX_LIST_PAGES = 100;
 
 const HEADER_MISMATCH = -32020;
 const UNSUPPORTED_PROTOCOL_VERSION = -32022;
@@ -271,6 +272,56 @@ export function listTools(url, opts) {
 export function callTool(url, name, args, opts) {
     return withConnection(url, opts, CALL_TIMEOUT_MS, connection =>
         connection.client.callTool({ name, arguments: args }, { timeout: CALL_TIMEOUT_MS, allowInputRequired: true }));
+}
+
+// Resources and prompts are fetched fresh every time, as the Rust client does.
+const FRESH_LIST = { cacheMode: 'refresh', timeout: LIST_TIMEOUT_MS };
+
+// Every page of a list, following nextCursor.
+async function everyPage(url, method, key, listPage) {
+    const items = [];
+    let cursor;
+    for (let page = 0; page < MAX_LIST_PAGES; page++) {
+        const result = await listPage(cursor ? { cursor } : undefined);
+        items.push(...(result[key] || []));
+        cursor = result.nextCursor || undefined;
+        if (!cursor) return items;
+    }
+    log.warn(url, `Stopped after ${MAX_LIST_PAGES} pages of ${method}`);
+    return items;
+}
+
+// Returns {resources}.
+export function listResources(url, opts) {
+    return withConnection(url, opts, LIST_TIMEOUT_MS, async connection => ({
+        resources: await everyPage(url, 'resources/list', 'resources', params => connection.client.listResources(params, FRESH_LIST)),
+    }));
+}
+
+// Returns {resourceTemplates}.
+export function listResourceTemplates(url, opts) {
+    return withConnection(url, opts, LIST_TIMEOUT_MS, async connection => ({
+        resourceTemplates: await everyPage(url, 'resources/templates/list', 'resourceTemplates', params => connection.client.listResourceTemplates(params, FRESH_LIST)),
+    }));
+}
+
+// Returns the result, {contents}.
+export function readResource(url, uri, opts) {
+    return withConnection(url, opts, CALL_TIMEOUT_MS, connection =>
+        connection.client.readResource({ uri }, { cacheMode: 'refresh', timeout: CALL_TIMEOUT_MS }));
+}
+
+// Returns {prompts}.
+export function listPrompts(url, opts) {
+    return withConnection(url, opts, LIST_TIMEOUT_MS, async connection => ({
+        prompts: await everyPage(url, 'prompts/list', 'prompts', params => connection.client.listPrompts(params, FRESH_LIST)),
+    }));
+}
+
+// Returns the result, {description?, messages}.
+export function getPrompt(url, name, args, opts) {
+    return withConnection(url, opts, CALL_TIMEOUT_MS, connection =>
+        connection.client.getPrompt({ name, arguments: args }, { timeout: CALL_TIMEOUT_MS }));
 }
 
 export function forget(url) {

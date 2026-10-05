@@ -68,6 +68,21 @@ export async function call_tool_object(url, name, args = {}, { bearerToken } = {
     }
 }
 
+/** Returns {resources}, every page of the server's resource list. */
+export const list_resources = exported((url, json) => mcp.listResources(url.trim(), options(json)));
+
+/** Returns {resourceTemplates}, every page of the server's resource template list. */
+export const list_resource_templates = exported((url, json) => mcp.listResourceTemplates(url.trim(), options(json)));
+
+/** Reads a resource and returns its result, {contents}. */
+export const read_resource = exported((url, uri, json) => mcp.readResource(url.trim(), uri, options(json)));
+
+/** Returns {prompts}, every page of the server's prompt list. */
+export const list_prompts = exported((url, json) => mcp.listPrompts(url.trim(), options(json)));
+
+/** Gets a prompt with JSON-encoded arguments and returns its result, {description?, messages}. */
+export const get_prompt = exported((url, name, args, json) => mcp.getPrompt(url.trim(), name, toolArguments(args), options(json)));
+
 export function forget_server(url) {
     mcp.forget(url.trim());
 }

@@ -42,6 +42,11 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 | `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions}` |
 | `list_tools(url, options)` | `{tools, rejected, ttlMs, cacheScope, fromCache}` |
 | `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
+| `list_resources(url, options)` | `{resources}`, every page |
+| `list_resource_templates(url, options)` | `{resourceTemplates}`, every page |
+| `read_resource(url, uri, options)` | the JSON-RPC `result`, `{contents: [{uri, mimeType?, text \| blob}]}` |
+| `list_prompts(url, options)` | `{prompts}`, every page |
+| `get_prompt(url, name, argsJson, options)` | the JSON-RPC `result`, `{description?, messages}` |
 | `forget_server(url)` | nothing; drops the remembered connection |
 | `auth_begin(serverUrl, options)` | `{authorizationUrl, pending, client, newClient, authServer, scope}` |
 | `auth_finish(pendingJson, callbackJson)` | the tokens record |
@@ -51,7 +56,7 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 | `get_uptime()`, `increment_uptime()`, `get_metadata()` | the Runtime menu's health check |
 | `reset()` (optional) | nothing; drops every connection when the worker unloads the library |
 
-`options` is `{"bearerToken"?: string, "refresh"?: boolean}`. `list_tools` and `call_tool` connect on their own if needed, so they keep working after the browser restarts the worker. That's the whole interface: anything an app needs beyond MCP and sign-in, such as the Chat app's instructions, belongs to the worker.
+`options` is `{"bearerToken"?: string, "refresh"?: boolean}`. Every call connects on its own if needed, so it keeps working after the browser restarts the worker. Only the tool list is cached (for its `ttlMs`); resources, templates and prompts are fetched fresh each time, and `resources/read` and `prompts/get` send `Mcp-Name` (the URI or the prompt's name) on modern servers, as `tools/call` does. That's the whole interface: anything an app needs beyond MCP and sign-in, such as the Chat app's instructions, belongs to the worker.
 
 The auth exports do the network steps and checks but store nothing; the worker keeps their records in IndexedDB (`authStore.js`):
 
@@ -75,6 +80,7 @@ Both pass the same smoke test and send the same requests in the same order, with
 - **Legacy servers get one more request** from the SDK, a `GET` for a server-sent stream after the handshake (the mock answers 405).
 - **Sign-in differs a little.** The SDK adds `scope` to the client registration and `prompt=consent` when it asks for a refresh token.
 - **Some wording is the SDK's**: hidden-tool reasons and the wrong-issuer error.
+- **The SDK checks 2026-07-28 results more strictly.** It rejects list results (tools, resources, templates, prompts) and `resources/read` results that lack `ttlMs` and `cacheScope`, which that version requires; the Rust library accepts them. So a modern server that leaves them out lists its resources on Rust/WASM but not on the SDK, which says `Invalid result for resources/list`.
 - **One fragile spot**: the SDK only says why it hid a tool through `console.warn`, so `sdk-client/mcp.js` overrides its internal `_excludeInvalidXMcpHeaderTools` to catch the reason. Check it when upgrading the SDK.
 
 ## Page and worker messages
@@ -84,6 +90,10 @@ Both pass the same smoke test and send the same requests in the same order, with
 | `{type: 'connect-mcp', url, bearerToken?}` (`initialize-mcp` still works) | `mcp_server_connected {url, info}` or `mcp_server_error {url, action, error}` |
 | `{type: 'list_tools', url, refresh?, bearerToken?}` | `tools_list {url, tools, rejected, ttlMs, fromCache}` or `mcp_server_error` |
 | `{type: 'call_tool', call, bearerToken?, run?}`, where `call` is `{serverUrl, toolName, args}` | `tool_result {result, run}` or `tool_result {error, errorKind, run}`, plus `run_recorded {run}` to every page |
+| `{type: 'list_resources', url, bearerToken?}` (sent with `list_tools` when the server declares resources) | `resources_list {url, resources, resourceTemplates}` to every page, or `mcp_server_error` with action `list_resources`. A server without `resources/templates/list` gets an empty template list |
+| `{type: 'list_prompts', url, bearerToken?}` (likewise, for prompts) | `prompts_list {url, prompts}` to every page, or `mcp_server_error` with action `list_prompts` |
+| `{type: 'read_resource', url, uri, requestId, bearerToken?}` | `resource_read {url, requestId, result, durationMs}` or `{…, error, durationMs}`, to the sender only. Not a run |
+| `{type: 'get_prompt', url, name, args, requestId, bearerToken?}` | `prompt_got {url, requestId, result, durationMs}` or `{…, error, durationMs}`, to the sender only. Not a run |
 | `{type: 'forget-mcp', url}` | none |
 | `{type: 'auth-start', url, wwwAuthenticate?}` | `auth_redirect {url, authorizationUrl, issuer}` or `auth_error {url, error}`, to the sender only |
 | `{type: 'auth-callback', query}` (the callback's query string, from `oauth-callback.html` or pasted into a page) | `auth_callback_done {ok, url?, error?, unknownState?}` to the sender, then `auth_complete {url, status}` or `auth_error {url, error}` to every page. `unknownState` means no sign-in in this browser has that `state`: it was started in another browser, expired, or was used already |
@@ -183,9 +193,12 @@ Write messages as sentences someone can act on, and put structured data in `deta
 npm run build                       # both libraries
 npm run test:browser -- --reference # the real UI in headless Chrome, on the default TypeScript SDK library
 npm run test:browser:wasm -- --reference # the same on the Rust/WASM library
+npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema, and RFC 6570 URIs
 npm run test:rust                   # the Rust library's protocol logic
 npm run bench -- --quick            # tool-call throughput of every library, in a few minutes
 ```
+
+Pre-fill's test data comes from `public/workbench/prefill.js`, a pure function of the tool's schema and the environment's variables. Keep it deterministic (no randomness, so runs of the same values compare) and valid: a new keyword it handles gets a schema in `tests/prefill.test.mjs`, where every generated value is validated against its schema.
 
 After a rebuild, reload the page. Each load checks the worker's scripts, and the build files change with every build, so a new worker installs. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the TypeScript SDK client (…)" with the new build time.
 

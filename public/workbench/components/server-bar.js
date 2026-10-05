@@ -41,7 +41,7 @@ export class WbServerBar extends WbElement {
                 <span class="wb-spacer"></span>
                 <div class="wb-bar-actions">
                     <button type="button" id="initProtocol" class="btn-sm">Connect</button>
-                    <button type="button" id="listTools" class="btn-sm" title="Ask the server for its tools again"><span class="icon icon-refresh" aria-hidden="true"></span>Refresh tools</button>
+                    <button type="button" id="listTools" class="btn-sm" title="Ask the server again for its tools, resources and prompts"><span class="icon icon-refresh" aria-hidden="true"></span>Refresh</button>
                     <button type="button" id="serverInfoBtn" class="btn-sm" aria-haspopup="dialog">Info</button>
                     <details class="menu">
                         <summary class="btn-icon btn-sm btn-tertiary" aria-label="More for this server"><span class="wb-more" aria-hidden="true">⋯</span></summary>

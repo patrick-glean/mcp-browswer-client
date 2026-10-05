@@ -103,6 +103,33 @@ TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
 LEGACY_TOOLS = [TOOLS_BY_NAME["echo"], TOOLS_BY_NAME["count"]]
 
+# Three resources, so a listing takes two pages; text in two formats and one binary.
+PIXEL_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+RESOURCES = [
+    {"uri": "mock://readme", "name": "readme", "title": "Read me", "description": "What this mock server is for.", "mimeType": "text/markdown"},
+    {"uri": "mock://config.json", "name": "config", "title": "Configuration", "description": "The mock's settings, as JSON.", "mimeType": "application/json"},
+    {"uri": "mock://pixel.png", "name": "pixel", "title": "A pixel", "description": "A one-pixel PNG, base64 in blob.", "mimeType": "image/png"},
+]
+RESOURCE_TEMPLATES = [
+    {"uriTemplate": "mock://notes/{id}", "name": "note", "title": "A note", "description": "Note number id, made up on the spot.", "mimeType": "text/plain"},
+]
+README = "# Mock MCP Server\n\nA server for testing MCP clients: tools, resources and prompts, in either protocol era.\n"
+PROMPTS = [
+    {
+        "name": "greet",
+        "title": "Greet someone",
+        "description": "Writes a greeting in the style you ask for.",
+        "arguments": [
+            {"name": "name", "description": "Who to greet", "required": True},
+            {"name": "style", "description": "formal or casual", "required": False},
+        ],
+    },
+    {"name": "summarize_server", "title": "Summarize this server", "description": "Asks for a summary of the server, with its README attached."},
+]
+RESOURCE_NOT_FOUND = -32002
+
 
 def rpc_error(request_id, code, message, data=None):
     error = {"code": code, "message": message}
@@ -296,7 +323,7 @@ class Handler(BaseHTTPRequestHandler):
         self.label += f" (legacy {version})"
         self.respond(message["id"], {
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": False}},
+            "capabilities": {"tools": {"listChanged": False}, "resources": {}, "prompts": {}},
             "serverInfo": SERVER_INFO,
             "instructions": "A mock server for testing MCP clients.",
         }, headers={"Mcp-Session-Id": session_id})
@@ -325,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(request_id, {
                 "resultType": "complete",
                 "supportedVersions": self.supported_versions(),
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
                 "_meta": {"io.modelcontextprotocol/serverInfo": SERVER_INFO},
                 "instructions": "A mock server for testing MCP clients.",
                 "ttlMs": 60000,
@@ -335,7 +362,62 @@ class Handler(BaseHTTPRequestHandler):
             return self.list_tools(request_id, params, modern)
         if method == "tools/call":
             return self.call_tool(request_id, params, modern)
+        if method == "resources/list":
+            return self.list_page(request_id, params, modern, "resources", RESOURCES)
+        if method == "resources/templates/list":
+            return self.list_page(request_id, params, modern, "resourceTemplates", RESOURCE_TEMPLATES)
+        if method == "resources/read":
+            return self.read_resource(request_id, params, modern)
+        if method == "prompts/list":
+            return self.list_page(request_id, params, modern, "prompts", PROMPTS)
+        if method == "prompts/get":
+            return self.get_prompt(request_id, params, modern)
         return self.send_json(404 if modern else 200, rpc_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}"))
+
+    # Lists PAGE_SIZE items at a time; the cursor is where the next page starts.
+    def list_page(self, request_id, params, modern, key, items):
+        try:
+            start = int(params.get("cursor") or 0)
+        except ValueError:
+            return self.send_json(400 if modern else 200, rpc_error(request_id, INVALID_PARAMS, "Invalid cursor"))
+        result = {"resultType": "complete", "ttlMs": 30000, "cacheScope": "public"} if modern else {}
+        result[key] = items[start:start + PAGE_SIZE]
+        if start + PAGE_SIZE < len(items):
+            result["nextCursor"] = str(start + PAGE_SIZE)
+        return self.respond(request_id, result)
+
+    def read_resource(self, request_id, params, modern):
+        uri = params.get("uri") or ""
+        # Reads are cacheable in 2026-07-28, so they say for how long, as lists do.
+        result = {"resultType": "complete", "ttlMs": 30000, "cacheScope": "public"} if modern else {}
+        if uri == "mock://readme":
+            contents = [{"uri": uri, "mimeType": "text/markdown", "text": README}]
+        elif uri == "mock://config.json":
+            settings = {"mode": self.server.mode, "sse": self.server.sse, "pageSize": PAGE_SIZE}
+            contents = [{"uri": uri, "mimeType": "application/json", "text": json.dumps(settings)}]
+        elif uri == "mock://pixel.png":
+            contents = [{"uri": uri, "mimeType": "image/png", "blob": PIXEL_PNG}]
+        elif uri.startswith("mock://notes/") and uri.removeprefix("mock://notes/").isdigit():
+            contents = [{"uri": uri, "mimeType": "text/plain", "text": f"Note {uri.removeprefix('mock://notes/')}: remember to test the templates."}]
+        else:
+            return self.send_json(200, rpc_error(request_id, RESOURCE_NOT_FOUND, f"Resource not found: {uri}", {"uri": uri}))
+        return self.respond(request_id, {**result, "contents": contents})
+
+    def get_prompt(self, request_id, params, modern):
+        name, args = params.get("name"), params.get("arguments") or {}
+        result = {"resultType": "complete"} if modern else {}
+        if name == "greet":
+            if not args.get("name"):
+                return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, "greet needs the argument name"))
+            style = args.get("style") or "casual"
+            text = f"Write a {style} greeting for {args['name']}."
+            return self.respond(request_id, {**result, "description": "A greeting", "messages": [{"role": "user", "content": text_content(text)}]})
+        if name == "summarize_server":
+            return self.respond(request_id, {**result, "description": "A summary of this server", "messages": [
+                {"role": "user", "content": {"type": "resource", "resource": {"uri": "mock://readme", "mimeType": "text/markdown", "text": README}}},
+                {"role": "user", "content": text_content("Summarize what this server offers, in two sentences.")},
+            ]})
+        return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"Unknown prompt: {name}"))
 
     def list_tools(self, request_id, params, modern):
         if not modern:

@@ -4,6 +4,8 @@
 //
 // Events, with what their detail holds:
 //   tool          the selected tool changed, or its definition did   { tool, refreshed }
+//   view          the tool list switched to tools, resources or prompts   { view }
+//   item          the picked resource, template or prompt changed    { item, refreshed }
 //   request       the saved request the request pane shows changed   { request }
 //   fill          the request pane should show these arguments       { args, text }
 //   run-request   run the request pane's tool (Cmd/Ctrl+Enter)
@@ -15,17 +17,22 @@
 //   show          the response pane should show this message         { message }
 //   status        something to tell the person                       { text, error }
 //   dock          the dock opened, closed, resized or changed tab    { open, tab, height }
+//   panes         a splitter resized a pane                          { rail, tools, request }
 //   sheet         a side sheet opened or closed                      { kind: 'server' | 'variables' | null }
 //   palette       open Go to
 
-import { fromSchema } from './prefill.js';
+import { matchingVariable, testData } from './prefill.js';
 import * as store from './store.js';
-import { resolveArguments, variablesIn } from './template.js';
-import { debounce, download, plural, schemaOf, serverLabel, SOURCE_LABELS, timeAgo } from './util.js';
+import { resolveArguments, VARIABLE_NAME, variablesIn } from './template.js';
+import { debounce, download, listOf, plural, schemaOf, serverLabel, SOURCE_LABELS, timeAgo } from './util.js';
 
 const ENVIRONMENT_KEY = 'workbenchEnvironmentId';
 const DOCK_KEY = 'workbenchDock';
+const PANES_KEY = 'workbenchPanes';
 export const NEW_COLLECTION = '__new';
+
+// What identifies a resource, a resource template or a prompt in its list.
+export const itemKey = (kind, item) => (kind === 'resource' ? item.uri : kind === 'template' ? item.uriTemplate : item.name);
 
 // A stored run in the shape of the worker's tool_result, for the response pane.
 export function messageFromRun(run) {
@@ -55,6 +62,10 @@ export class Workbench {
         this.environment = null;
         // The selected server's tool the request pane shows.
         this.tool = null;
+        // What the tool list shows, 'tools', 'resources' or 'prompts', and the resource, resource
+        // template or prompt picked there: { kind: 'resource' | 'template' | 'prompt', item }.
+        this.view = 'tools';
+        this.item = null;
         // The saved request the request pane shows; its runs count as runs of it.
         this.openRequest = null;
         // The latest Run all: { id, collection, total, results: [{ request, message }], done }.
@@ -63,6 +74,8 @@ export class Workbench {
         let dock = {};
         try { dock = JSON.parse(localStorage.getItem(DOCK_KEY) || '{}'); } catch { /* start with the defaults */ }
         this.dock = { open: true, tab: 'log', height: 220, ...dock };
+        this.panes = {};
+        try { this.panes = JSON.parse(localStorage.getItem(PANES_KEY) || '{}'); } catch { /* the layout's own sizes */ }
         this.saveEnvironmentSoon = debounce(environment => store.saveEnvironment(environment), 250);
     }
 
@@ -79,12 +92,18 @@ export class Workbench {
         if (!this.environments.length) this.environments = [await store.saveEnvironment({ name: 'Default', variables: {} })];
         const active = localStorage.getItem(ENVIRONMENT_KEY) || localStorage.getItem('sandboxEnvironmentId');
         this.environment = this.environments.find(environment => environment.id === active) || this.environments[0];
-        this.shell.on('select', () => this.selectTool(null));
+        this.shell.on('select', () => {
+            this.selectTool(null);
+            this.selectItem(null);
+        });
         const toolsMayHaveChanged = ({ url }) => {
             if (url === this.shell.selectedServerUrl) this.toolsChanged();
         };
         this.shell.on('tools', toolsMayHaveChanged);
         this.shell.on('servers', toolsMayHaveChanged);
+        this.shell.on('catalog', ({ url }) => {
+            if (url === this.shell.selectedServerUrl) this.itemsChanged();
+        });
     }
 
     get server() {
@@ -144,7 +163,38 @@ export class Workbench {
     selectTool(name) {
         this.tool = name ? (this.server?.tools || []).find(tool => tool.name === name) || null : null;
         this.openRequest = null;
+        if (this.tool) this.showView('tools');
         this.emit('tool', { tool: this.tool });
+    }
+
+    // Which list the tool list shows: the request and response areas show what goes with it.
+    showView(view) {
+        if (view === this.view) return;
+        this.view = view;
+        this.emit('view', { view });
+    }
+
+    // A resource (by URI), resource template (by URI template) or prompt (by name), or null.
+    selectItem(kind, key) {
+        const found = kind ? (this.itemsOf(kind) || []).find(item => itemKey(kind, item) === key) : null;
+        this.item = found ? { kind, item: found } : null;
+        if (this.item) this.showView(kind === 'prompt' ? 'prompts' : 'resources');
+        this.emit('item', { item: this.item });
+    }
+
+    itemsOf(kind) {
+        return { resource: this.server?.resources, template: this.server?.resourceTemplates, prompt: this.server?.prompts }[kind];
+    }
+
+    // A new list keeps the selection when the item is still there.
+    itemsChanged() {
+        if (!this.item) return;
+        const { kind, item } = this.item;
+        const fresh = (this.itemsOf(kind) || []).find(candidate => itemKey(kind, candidate) === itemKey(kind, item));
+        if (!fresh) return this.selectItem(null);
+        if (JSON.stringify(fresh) === JSON.stringify(item)) return;
+        this.item = { kind, item: fresh };
+        this.emit('item', { item: this.item, refreshed: true });
     }
 
     // A new tool list keeps the selection when the tool is still there.
@@ -204,7 +254,7 @@ export class Workbench {
         return { last, saved };
     }
 
-    // One click: what you last sent, else the newest saved request, else the schema.
+    // One click: what you last sent, else the newest saved request, else test data.
     async prefillBest() {
         const { last, saved } = await this.prefillChoices();
         if (last?.args) return this.prefill('last', { last });
@@ -212,6 +262,8 @@ export class Workbench {
         return this.prefill('schema');
     }
 
+    // Sources: 'last', 'saved:<id>', 'schema' (test data for the required fields and the ones the
+    // schema suggests a value for), 'every' (test data for every field) and 'clear'.
     prefill(source, { last = null, saved = [] } = {}) {
         let args = {};
         let text = 'Cleared the fields.';
@@ -223,12 +275,49 @@ export class Workbench {
             request = saved.find(candidate => `saved:${candidate.id}` === source);
             args = request.args;
             text = `Filled from ${request.name}. Runs count as runs of it, and Save updates it.`;
-        } else if (source === 'schema') {
-            args = fromSchema(schemaOf(this.tool), this.variables);
-            text = Object.keys(args).length ? 'Filled from the schema.' : 'The schema has no defaults or examples to fill in.';
+        } else if (source === 'schema' || source === 'every') {
+            const schema = schemaOf(this.tool);
+            const { values, sources } = testData(schema, { variables: this.variables, every: source === 'every' });
+            args = values;
+            text = this.describeTestData(schema, sources, source === 'every');
         }
         this.setOpenRequest(request);
         this.emit('fill', { args, text });
+    }
+
+    describeTestData(schema, sources, every) {
+        const kinds = Object.values(sources);
+        if (!Object.keys(schema?.properties || {}).length) return 'This tool takes no arguments.';
+        if (!kinds.length) {
+            return every
+                ? "Couldn't make test data for these fields; fill them in by hand."
+                : 'Nothing to fill: every field is optional and the schema suggests no values. Test data for every field fills them anyway.';
+        }
+        const count = kind => kinds.filter(candidate => kind.includes(candidate)).length;
+        const parts = [
+            [count(['const', 'default', 'example', 'description']), 'from the schema'],
+            [count(['variable']), `staged in ${this.environment?.name || 'this environment'}`],
+            [count(['generated']), 'with generated test data'],
+        ].filter(([number]) => number).map(([number, how]) => `${number} ${how}`);
+        return `Filled ${plural(kinds.length, 'field')}: ${listOf(parts)}.`;
+    }
+
+    // Stages the request pane's values as test data: each becomes a variable in the active
+    // environment named like its field (or updates the one named alike), which Pre-fill then
+    // uses for any tool with that field. Returns what to tell the person.
+    stageValues(args) {
+        const staged = {};
+        for (const [field, value] of Object.entries(args || {})) {
+            if (value === undefined || value === null || value === '' || variablesIn(value).size) continue;
+            const name = matchingVariable(field, this.variables) || field;
+            if (!VARIABLE_NAME.test(name)) continue;
+            staged[name] = typeof value === 'string' ? value : JSON.stringify(value);
+        }
+        const names = Object.keys(staged);
+        if (!names.length) return 'Nothing to stage: fill in a field first. Fields that already use {{variables}} are left as they are.';
+        this.editEnvironment({ name: this.environment.name, variables: { ...this.variables, ...staged } });
+        const them = names.length === 1 ? 'it' : 'them';
+        return `Staged ${listOf(names)} in ${this.environment.name}: Pre-fill uses ${them} for any tool with ${names.length === 1 ? 'a field' : 'fields'} of that name.`;
     }
 
     // --- Saved requests and collections ---
@@ -379,6 +468,18 @@ export class Workbench {
         Object.assign(this.dock, changes);
         localStorage.setItem(DOCK_KEY, JSON.stringify(this.dock));
         this.emit('dock', { ...this.dock });
+    }
+
+    // Pane sizes the splitters set: the rail's and the tool list's widths in pixels, and the
+    // request pane's share of the space it splits with the response pane. A size of null goes
+    // back to the layout's own.
+    setPanes(changes) {
+        for (const [pane, size] of Object.entries(changes)) {
+            if (size === null || size === undefined) delete this.panes[pane];
+            else this.panes[pane] = size;
+        }
+        localStorage.setItem(PANES_KEY, JSON.stringify(this.panes));
+        this.emit('panes', { ...this.panes });
     }
 
     openSheet(kind) {

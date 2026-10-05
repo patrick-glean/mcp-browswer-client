@@ -93,10 +93,16 @@
                  different arrangement is different grid areas, not different components. -->
             <div id="workbench" class="wb-workbench" data-layout="b">
                 <wb-rail class="wb-area-rail" role="navigation" aria-label="Servers, saved requests and history"></wb-rail>
+                <wb-splitter class="wb-area-split-rail" data-pane="rail"></wb-splitter>
                 <wb-server-bar class="wb-area-bar" role="region" aria-label="Selected server"></wb-server-bar>
                 <wb-tools class="wb-area-tools" role="region" aria-label="Tools"></wb-tools>
+                <wb-splitter class="wb-area-split-tools" data-pane="tools"></wb-splitter>
                 <wb-request id="requestPane" class="wb-area-request wb-pane" role="region" aria-label="Request"></wb-request>
+                <wb-resource id="resourcePane" class="wb-area-request wb-pane" role="region" aria-label="Resource" hidden></wb-resource>
+                <wb-prompt id="promptPane" class="wb-area-request wb-pane" role="region" aria-label="Prompt" hidden></wb-prompt>
+                <wb-splitter class="wb-area-split-request" data-pane="request"></wb-splitter>
                 <wb-response id="responsePane" class="wb-area-response wb-pane" role="region" aria-label="Response"></wb-response>
+                <wb-contents id="contentsPane" class="wb-area-response wb-pane" role="region" aria-label="Contents" hidden></wb-contents>
             </div>
             <section id="appsPage" class="wb-apps" aria-labelledby="appsTitle" hidden>
                 <header class="wb-apps-head">
@@ -259,7 +265,7 @@
         <section class="guide-section">
             <h3>3. Run a tool</h3>
             <p>Click a tool, fill in its fields and choose Run (or press ⌘↵ or Ctrl+Enter). The result appears beside it; JSON has the whole reply. Optional fields left empty aren't sent.</p>
-            <p>Pre-fill fills the fields from what you last sent, a saved request or the tool's schema, and fields take <code>{{variables}}</code> from the environment in the top bar. Save keeps a request; run it again from Saved on the left to see what changed.</p>
+            <p>Pre-fill fills the fields from what you last sent, a saved request, or test data: the schema's examples where it has them, and generated values that fit each field where it doesn't. Fields take <code>{{variables}}</code> from the environment in the top bar, and Stage these values, in Pre-fill's menu, keeps a field's value there for any tool with that field. Save keeps a request; run it again from Saved on the left to see what changed.</p>
         </section>
 
         <section class="guide-section">
@@ -594,6 +600,7 @@
         //   servers  a server was added, changed or deleted      { url }
         //   select   the selected server changed                 { url }
         //   tools    a server's tool list arrived                { url }
+        //   catalog  a server's resources or prompts arrived, or couldn't be listed   { url }
         //   auth     sign-in started, moved on or ended          { url, pasteError }
         //   run      a call the Workbench shows is under way, done, or never sent
         //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
@@ -618,6 +625,8 @@
                 this.pendingConnects = new Map();
                 // Tool calls waiting for the worker's answer, by run id: { resolve, timer, show }.
                 this.pendingRuns = new Map();
+                // Resource reads and prompt gets waiting for theirs, by request id: { resolve, timer }.
+                this.pendingRequests = new Map();
                 // The run the response pane shows or waits for.
                 this.shownRunId = null;
                 // The Workbench (public/workbench/) once it has loaded; it fills in {{variables}}.
@@ -1087,6 +1096,28 @@
                     case 'mcp_server_error':
                         this.handleServerError(message.url, message.action, message.error);
                         break;
+                    case 'resources_list':
+                    case 'prompts_list': {
+                        const server = this.servers[message.url];
+                        if (!server) break;
+                        if (message.type === 'resources_list') {
+                            Object.assign(server, { resources: message.resources, resourceTemplates: message.resourceTemplates, resourcesError: null });
+                        } else {
+                            Object.assign(server, { prompts: message.prompts, promptsError: null });
+                        }
+                        this.saveServers();
+                        this.emit('catalog', { url: message.url });
+                        break;
+                    }
+                    case 'resource_read':
+                    case 'prompt_got': {
+                        const pending = this.pendingRequests.get(message.requestId);
+                        if (!pending) break;
+                        clearTimeout(pending.timer);
+                        this.pendingRequests.delete(message.requestId);
+                        pending.resolve(message);
+                        break;
+                    }
                     case 'auth_redirect':
                     case 'auth_callback_done':
                     case 'auth_error':
@@ -1242,12 +1273,37 @@
                 }, 50_000);
             }
 
+            // Lists the tools, and the resources and prompts when the server says it has them.
             requestTools(url, { refresh = false } = {}) {
-                this.postToWorker({
-                    type: 'list_tools',
-                    url,
-                    refresh,
-                    bearerToken: this.servers[url]?.bearerToken || undefined
+                const server = this.servers[url];
+                const bearerToken = server?.bearerToken || undefined;
+                this.postToWorker({ type: 'list_tools', url, refresh, bearerToken });
+                if (server?.capabilities?.resources) this.postToWorker({ type: 'list_resources', url, bearerToken });
+                if (server?.capabilities?.prompts) this.postToWorker({ type: 'list_prompts', url, bearerToken });
+            }
+
+            // Reads a resource, or gets a prompt filled in with its arguments. Resolves with the
+            // worker's resource_read or prompt_got, {result, durationMs} or {error}, or a stand-in
+            // when the request never went out or never came back.
+            readResource(url, uri) {
+                return this.requestFromWorker({ type: 'read_resource', url, uri });
+            }
+
+            getPrompt(url, name, args) {
+                return this.requestFromWorker({ type: 'get_prompt', url, name, args });
+            }
+
+            requestFromWorker(message) {
+                const requestId = crypto.randomUUID();
+                const sent = this.postToWorker({ ...message, requestId, bearerToken: this.servers[message.url]?.bearerToken || undefined });
+                if (!sent) return Promise.resolve({ error: { kind: 'not_sent', message: "The service worker isn't running yet. Try again in a moment." } });
+                return new Promise(resolve => {
+                    // Requests time out after 120 s in the client; past that, the worker is gone.
+                    const timer = setTimeout(() => {
+                        this.pendingRequests.delete(requestId);
+                        resolve({ error: { kind: 'timeout', message: 'No answer from the service worker within 130 seconds; the browser may have stopped it. Try again.' } });
+                    }, 130_000);
+                    this.pendingRequests.set(requestId, { resolve, timer });
                 });
             }
 
@@ -1271,6 +1327,13 @@
             handleServerError(url, action, error) {
                 if (action === 'connect') this.pendingConnects.delete(url);
                 if (!this.servers[url]) return;
+                // The tools still work; the Resources or Prompts tab says what went wrong.
+                if (action === 'list_resources' || action === 'list_prompts') {
+                    this.servers[url][action === 'list_resources' ? 'resourcesError' : 'promptsError'] = error?.message || 'Unknown error';
+                    this.saveServers();
+                    this.emit('catalog', { url });
+                    return;
+                }
                 const changes = { lastError: error?.message || 'Unknown error' };
                 if (action === 'connect') changes.status = 'failed';
                 if (error?.kind === 'auth_required') {

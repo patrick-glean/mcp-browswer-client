@@ -33,11 +33,14 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 
 ### Workbench
 - The Workbench lives in ES modules under `public/workbench/`; `index.html` loads `index.js` with `import()`, which calls `installWorkbench(appShell)`. Keep new Workbench logic there rather than in `index.html`.
-- `AppShell` (in `index.html`) is the controller: the worker, servers, sign-in and calls. It doesn't draw the Workbench; it emits `servers`, `select`, `tools`, `auth`, `run` and `recorded` events. The Workbench state (`workbench.js`) owns selection, environments, saved requests, Run all and the frame, with its own events.
-- Each part of the screen is one custom element in `components/` (rail, server bar, tools, request, response, dock, sheet, palette), extending `WbElement`. Components never call each other: they listen to and call `AppShell` and the Workbench state only, and subscribe with `this.lifetime` so they clean up when moved. A new part is a new component, not code in another one.
-- Layouts are CSS only: every component has a `wb-area-*` grid area, and a `#workbench[data-layout]` block in `workbench.css` arranges them (layout B today). Don't hard-code positions in the components.
+- `AppShell` (in `index.html`) is the controller: the worker, servers, sign-in, calls, resource reads and prompt gets. It doesn't draw the Workbench; it emits `servers`, `select`, `tools`, `catalog`, `auth`, `run` and `recorded` events. The Workbench state (`workbench.js`) owns selection (a tool, or a resource, template or prompt, and the open tab `view`), environments, saved requests, Run all, the frame and the pane sizes, with its own events.
+- Each part of the screen is one custom element in `components/` (rail, server bar, tools, request, resource, prompt, response, contents, splitter, dock, sheet, palette), extending `WbElement`. Components never call each other: they listen to and call `AppShell` and the Workbench state only, and subscribe with `this.lifetime` so they clean up when moved. A new part is a new component, not code in another one.
+- Layouts are CSS only: every component has a `wb-area-*` grid area, and a `#workbench[data-layout]` block in `workbench.css` arranges them (layout B today). Don't hard-code positions in the components. Components that share an area take turns by hiding themselves for the other tabs (`view`).
+- Pane sizes are CSS variables (`--rail-width`, `--tools-width`, `--request-fr`, `--response-fr`) that `wb-splitter` sets from `workbench.panes` (saved in `localStorage` `workbenchPanes`). The layout wraps them in `clamp()` or `minmax()` so a saved size can't break a narrower window. Splitters must stay usable from the keyboard (arrow keys, Home, End) and reset on double-click.
+- Resource reads and prompt gets aren't tool calls: they aren't recorded as runs. Resource lists aren't cached in the libraries; only `tools/list` is.
 - Every tool call is recorded as a run in `handleToolCall`, whatever its source. Recording must never fail the call; log a warning instead.
 - `{{variables}}` are resolved in the page, which has the tool's schema for type conversion, before `call_tool` goes out. The worker gets the sent arguments plus the arguments as written in `run.args`.
+- Pre-fill's test data (`prefill.js`) takes hints first (`const`, a variable named like the field, `default`, examples, an example in the description) and generates the rest. It must stay deterministic and valid for the schema: `npm run test:unit` validates it with Ajv. Staged test data is environment variables named like fields, never a separate store.
 - Runs compare on a hash of the result with sorted keys and no `_meta`. A saved request's runs compare with each other, and other calls with the same tool and sent arguments.
 - Never put credentials in Workbench records. Arguments are stored as written, and tokens travel only in `mcpOptions`.
 - The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `chat` and `reply`; treat `sandbox` (from before the rename) as `workbench`.
@@ -63,7 +66,7 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] Glean first in the Guide; `npm run start:glean` for an origin Glean allows
 
 ### Done (the Workbench, milestone 1 of the app builder)
-- [x] Pre-fill from what was last sent, saved requests and the schema; environments with `{{variables}}`
+- [x] Pre-fill from what was last sent, saved requests and test data from the schema (hints, staged variables, then generated values); environments with `{{variables}}`, and staging a request's values as variables
 - [x] Saved requests in collections, running again and Run all with what changed, and a line diff
 - [x] History of every tool call (Workbench, chat, tool calls in replies), kept in IndexedDB
 - [x] Export and import of saved requests, collections and environments
@@ -79,6 +82,8 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] The agent loop's names are plain (conversation, model, context, instructions), with `chat_contexts` version 2 and the page moving its old settings over
 - [x] Runs compare a result without `resultType` as complete, so switching libraries doesn't show "Changed"
 - [x] The TypeScript SDK library is the default (`DEFAULT_CLIENT`); Rust/WASM is the alternative to compare against
+- [x] Resources (every page, templates with RFC 6570 URIs, text and binary reads) and prompts (arguments with test data, messages) in both libraries and the Workbench, on both eras
+- [x] Resizable Workbench panes (rail, tool list, request and response), kept across reloads
 
 ### Next
 - [ ] App builder milestone 2: workflow steps and the Chat app as a manifest (a shape, allowed tools, pinned arguments, instructions and output checks)
@@ -86,8 +91,8 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [ ] Client ID metadata documents (the spec's preferred registration), step-up authorization, token revocation on sign-out
 - [ ] Durable state in IndexedDB (server config, era cache, conversations)
 - [ ] `input_required` / elicitation UI (multi round-trip requests)
-- [ ] `subscriptions/listen` for list-change notifications
-- [ ] Resources and prompts
+- [ ] `subscriptions/listen` for list-change notifications and resource subscriptions
+- [ ] Completions for prompt and resource template arguments
 - [ ] MCP Apps (`io.modelcontextprotocol/ui`) in sandboxed iframes
 
 ## Testing Requirements

@@ -153,6 +153,11 @@ function check(name, ok, detail = '') {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
 }
 
+// Worth knowing but neither a pass nor a fail, such as what a third-party server offers.
+function notice(name, detail) {
+    console.log(`NOTE  ${name}  (${detail})`);
+}
+
 // A small Chrome DevTools Protocol client for one page target.
 async function openPage(match = () => true) {
     let target;
@@ -309,11 +314,15 @@ async function toolNames(page, url, ms) {
     return names || [];
 }
 
-// Picks the server and tool, fills in the fields and runs it, as a person would.
+// Picks the server and tool, fills in the fields and runs it, as a person would. The tool list
+// comes a moment after the connection, so wait for the tool's row.
 async function callTool(page, url, tool, values, ms = 20000) {
     await page.run(`(() => {
         ${showWorkbench};
         ${serverRow(url)}.click();
+    })()`);
+    await page.waitFor(`!!${toolRow(tool)}`, ms);
+    await page.run(`(() => {
         ${toolRow(tool)}.click();
         for (const [name, value] of Object.entries(${JSON.stringify(values)})) {
             document.querySelector('#requestForm [name="' + name + '"]').value = value;
@@ -539,7 +548,7 @@ async function main() {
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
         check('inspector: Info shows what the server said about itself',
-            /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities tools/.test(inspector.connection), inspector.connection);
+            /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities prompts resources tools/.test(inspector.connection), inspector.connection);
         // The mock has too few tools to be grouped, so the grouping is checked on GitHub's names.
         const groups = await page.run(`import('./workbench/components/tools.js').then(({ groupTools }) => {
             const names = ['get_me', 'list_issues', 'get_issue', 'create_issue', 'add_issue_comment', 'list_pull_requests', 'get_pull_request',
@@ -560,6 +569,96 @@ async function main() {
         check('inspector: Download saves the server details and tool list as JSON',
             report?.server === modernUrl && report.tools.length === 4 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
+
+        // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
+        const showView = view => page.run(`document.querySelector('wb-tools [data-view="${view}"]').click()`);
+        const shownContents = `(() => {
+            const pane = document.getElementById('contentsPane');
+            return pane.querySelector('.run-summary') ? pane.innerText.replace(/\\s+/g, ' ') : null;
+        })()`;
+        const setInput = (form, name, value) => `(() => {
+            const input = document.querySelector('#${form} [name="${name}"]');
+            input.value = ${JSON.stringify(value)};
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        })();`;
+        const readItem = async (kind, key, setup = '') => {
+            await page.run(`(() => {
+                document.getElementById('contentsPane').innerHTML = '';
+                document.querySelector('#toolList [data-${kind}="${key}"]').click();
+                ${setup}
+                document.querySelector('#resourcePane [data-read]').click();
+            })()`);
+            return page.waitFor(shownContents, 10000);
+        };
+        const getPrompt = async (name, setup = '') => {
+            await page.run(`(() => {
+                document.getElementById('contentsPane').innerHTML = '';
+                document.querySelector('#toolList [data-prompt="${name}"]').click();
+                ${setup}
+                document.querySelector('#promptPane [data-get]').click();
+            })()`);
+            return page.waitFor(shownContents, 10000);
+        };
+        await page.run(`${serverRow(modernUrl)}.click()`);
+        await page.waitFor(`!document.querySelector('wb-tools [data-view="resources"]').disabled && !document.querySelector('wb-tools [data-view="prompts"]').disabled`, 5000);
+        await showView('resources');
+        const listed = await page.waitFor(`(() => {
+            const rows = [...document.querySelectorAll('#toolList .wb-pick')].map(row => Object.entries(row.dataset)[0].join(':'));
+            return rows.length === 4 ? rows.join(', ') + ' (' + document.querySelector('wb-tools [data-view="resources"] .wb-meta').textContent + ')' : null;
+        })()`, 5000);
+        check('resources: the Resources tab lists every page of resources, then the templates',
+            listed === 'resource:mock://readme, resource:mock://config.json, resource:mock://pixel.png, template:mock://notes/{id} (4)', listed);
+        const readme = await readItem('resource', 'mock://readme');
+        check('resources: reading a text resource shows its text', /OK/.test(readme || '') && /# Mock MCP Server/.test(readme || ''), readme?.slice(0, 120));
+        const pixel = await readItem('resource', 'mock://pixel.png');
+        const pixelImage = await page.waitFor(`(() => {
+            const image = document.querySelector('#contentsPane img.wb-content-image');
+            return image?.complete && image.naturalWidth ? image.naturalWidth + 'x' + image.naturalHeight : null;
+        })()`, 5000);
+        check('resources: a binary resource shows as an image, with its size and a download',
+            pixelImage === '1x1' && /70 bytes of image\/png · Download/.test(pixel || ''), `${pixelImage}; ${pixel?.slice(0, 120)}`);
+        const note = await readItem('template', 'mock://notes/{id}', setInput('resourceForm', 'id', '42'));
+        check('resources: a template\'s fields make the URI it reads', /mock:\/\/notes\/42/.test(note || '') && /Note 42/.test(note || ''), note?.slice(0, 120));
+        const missing = await readItem('template', 'mock://notes/{id}', setInput('resourceForm', 'id', 'nope'));
+        check('resources: one the server doesn\'t have comes back as its error', /Failed/.test(missing || '') && /Resource not found/.test(missing || ''), missing?.slice(0, 160));
+        await showView('prompts');
+        const greeting = await getPrompt('greet', setInput('promptForm', 'name', 'Ada') + setInput('promptForm', 'style', 'formal'));
+        check('prompts: a prompt\'s arguments go to the server and its messages come back', /Write a formal greeting for Ada\./.test(greeting || ''), greeting?.slice(0, 120));
+        const withoutName = await getPrompt('greet', setInput('promptForm', 'name', ''));
+        check('prompts: a missing required argument comes back as the server\'s error', /Failed/.test(withoutName || '') && /needs the argument name/.test(withoutName || ''), withoutName?.slice(0, 160));
+        const summary = await getPrompt('summarize_server');
+        check('prompts: a message can carry a resource, which shows with its text',
+            /mock:\/\/readme/.test(summary || '') && /# Mock MCP Server/.test(summary || '') && /Summarize what this server offers/.test(summary || ''), summary?.slice(0, 160));
+        await page.run(`${serverRow(`${HOST}:${PORTS.legacy}/`)}.click()`);
+        await page.waitFor(`!document.querySelector('wb-tools [data-view="resources"]').disabled`, 5000);
+        await showView('resources');
+        const legacyReadme = await readItem('resource', 'mock://readme');
+        check('resources: a 2025-era server lists and reads them too', /# Mock MCP Server/.test(legacyReadme || ''), legacyReadme?.slice(0, 120));
+        await page.run(`${serverRow(modernUrl)}.click()`);
+        await showView('tools');
+        const toolsBack = await page.run(`['requestPane', 'responsePane'].every(id => !document.getElementById(id).hidden)
+            && ['resourcePane', 'promptPane', 'contentsPane'].every(id => document.getElementById(id).hidden)`);
+        check('resources and prompts: back on Tools, the tool panes return', toolsBack);
+
+        // Splitters, at a width where request and response sit side by side.
+        await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+        const toolsWidth = `Math.round(document.querySelector('wb-tools').getBoundingClientRect().width)`;
+        const handle = await page.waitFor(`(() => {
+            const box = document.querySelector('.wb-area-split-tools').getBoundingClientRect();
+            return box.height ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : null;
+        })()`, 5000);
+        const before = await page.run(toolsWidth);
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: handle.x, y: handle.y });
+        await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: handle.x, y: handle.y, button: 'left', clickCount: 1 });
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: handle.x + 60, y: handle.y, button: 'left', buttons: 1 });
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: handle.x + 60, y: handle.y, button: 'left', clickCount: 1 });
+        const dragged = await page.run(toolsWidth);
+        const kept = await page.run(`Math.round(JSON.parse(localStorage.getItem('workbenchPanes') || '{}').tools || 0)`);
+        await page.run(`document.querySelector('.wb-area-split-tools').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+        const reset = await page.run(toolsWidth);
+        await page.send('Emulation.clearDeviceMetricsOverride');
+        check('splitters: dragging an edge resizes the pane beside it and keeps the size, and a double-click resets it',
+            dragged === before + 60 && kept === dragged && reset === before, `${before} → ${dragged} (kept ${kept}) → ${reset}`);
 
         const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
         check('the Chat app\'s tool picker is populated', !!picker, picker);
@@ -729,6 +828,34 @@ async function main() {
         await setField('text', '{{nope}}');
         const unknownVariable = await submitRequest();
         check('variables: an unknown variable stops the call and names itself', /\{\{nope\}\} isn't a variable/.test(unknownVariable || ''), unknownVariable);
+
+        // Test data: echo_region suggests nothing for its required fields, so Pre-fill makes some.
+        await openTool(modernUrl, 'echo_region');
+        await prefillFrom('schema');
+        const generatedFill = await page.waitFor(`(() => {
+            const region = ${field('region')};
+            const text = ${field('text')};
+            return region && text ? { region, text, note: ${requestNote} } : null;
+        })()`, 5000);
+        const generatedRun = generatedFill && await submitRequest();
+        check('pre-fill: test data fills required fields the schema suggests nothing for, and the call goes through',
+            /2 with generated test data/.test(generatedFill?.note || '') && !!generatedRun?.includes(`Echo from ${generatedFill.region}: ${generatedFill.text}`),
+            generatedFill ? `${generatedFill.note} ${generatedRun || ''}` : 'not filled');
+        // Staged values become variables named like their fields, which fill those fields anywhere.
+        await setField('region', 'Zürich');
+        await prefillFrom('stage');
+        const stagedNote = await page.waitFor(`${requestNote}.startsWith('Staged') ? ${requestNote} : null`, 5000);
+        await openTool(modernUrl, 'echo');
+        await prefillFrom('schema');
+        const stagedText = await page.waitFor(`${field('text')} || null`, 5000);
+        const stagedValue = await page.run(`appShell.workbench.variables.text`);
+        check('pre-fill: staged values fill a field of the same name in another tool, ahead of its example',
+            /^Staged region and text in Default/.test(stagedNote || '') && stagedText === '{{text}}' && stagedValue === generatedFill?.text,
+            `${stagedNote}; ${stagedText}`);
+        await page.run(`(() => {
+            const { region, text, ...rest } = appShell.workbench.variables;
+            appShell.workbench.editEnvironment({ name: appShell.workbench.environment.name, variables: rest });
+        })()`);
 
         await openTool(modernUrl, 'echo');
         await page.run(`document.querySelector('#requestPane [data-prefill-best]').click()`);
@@ -1166,6 +1293,16 @@ async function main() {
                 if (connection?.status !== 'connected') continue;
                 const names = await toolNames(page, target.url, 30000);
                 check(`${target.label} (public): lists ${target.tool}`, names.includes(target.tool), names.join(', '));
+                const offers = await page.waitFor(`(() => {
+                    const s = appShell.servers[${JSON.stringify(target.url)}];
+                    const caps = s?.capabilities || {};
+                    if ((caps.resources && !s.resources && !s.resourcesError) || (caps.prompts && !s.prompts && !s.promptsError)) return null;
+                    const part = (declared, items, error, what) => error ? what + " couldn't be listed: " + error
+                        : !declared && !items?.length ? 'no ' + what : items.length + ' ' + what;
+                    return part(caps.resources, s.resources && [...s.resources, ...(s.resourceTemplates || [])], s.resourcesError, 'resources')
+                        + '; ' + part(caps.prompts, s.prompts, s.promptsError, 'prompts');
+                })()`, 30000);
+                notice(`${target.label} (public): resources and prompts`, offers || 'still listing after 30 s');
                 if (!names.includes(target.tool)) continue;
                 const reply = await callTool(page, target.url, target.tool, target.args, 60000);
                 check(`${target.label} (public): calls ${target.tool}`,

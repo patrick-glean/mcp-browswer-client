@@ -171,7 +171,7 @@ function mcpError(error) {
 
 function broadcastMcpError(url, action, error, started) {
     broadcastToClients({ type: 'mcp_server_error', url, action, error });
-    const what = action === 'list_tools' ? 'Listing tools' : 'Connecting';
+    const what = { list_tools: 'Listing tools', list_resources: 'Listing resources', list_prompts: 'Listing prompts' }[action] || 'Connecting';
     const after = started === undefined ? '' : ` after ${formatDuration(performance.now() - started)}`;
     logger.error(`${what} failed${after}: ${error.message}`, { server: url, detail: errorDetail(error) });
 }
@@ -190,6 +190,9 @@ function describeServer(url, info) {
 
 // Where a tool call came from, as the trace describes it. The sources are the runs' (see recordRun).
 const CALL_ORIGINS = { workbench: 'the page', chat: 'a chat message', reply: 'a tool call in a reply' };
+
+const METHOD_NOT_FOUND = -32601;
+const counted = (count, one) => `${count} ${one}${count === 1 ? '' : 's'}`;
 
 function listNames(names, max = 8) {
     if (names.length <= max) return names.join(', ');
@@ -390,6 +393,77 @@ async function handleClientMessage(event) {
                 });
             } catch (error) {
                 broadcastMcpError(url, 'list_tools', mcpError(error), started);
+            }
+            break;
+        }
+        case 'list_resources': {
+            const url = message.url;
+            if (!mcpClient) {
+                broadcastMcpError(url, 'list_resources', { kind: 'internal', message: 'The MCP client is not loaded.' });
+                break;
+            }
+            const started = performance.now();
+            try {
+                const { resources = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_resources(url, options)));
+                let resourceTemplates = [];
+                try {
+                    ({ resourceTemplates = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_resource_templates(url, options))));
+                } catch (error) {
+                    // Servers without templates may not have the method at all.
+                    const failure = mcpError(error);
+                    if (failure.code !== METHOD_NOT_FOUND) logger.warn(`Couldn't list resource templates: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                }
+                broadcastToClients({ type: 'resources_list', url, resources, resourceTemplates });
+                const templates = resourceTemplates.length ? ` and ${counted(resourceTemplates.length, 'template')}` : '';
+                logger.info(`Listed ${counted(resources.length, 'resource')}${templates} in ${formatDuration(performance.now() - started)}`, { server: url });
+            } catch (error) {
+                broadcastMcpError(url, 'list_resources', mcpError(error), started);
+            }
+            break;
+        }
+        case 'list_prompts': {
+            const url = message.url;
+            if (!mcpClient) {
+                broadcastMcpError(url, 'list_prompts', { kind: 'internal', message: 'The MCP client is not loaded.' });
+                break;
+            }
+            const started = performance.now();
+            try {
+                const { prompts = [] } = JSON.parse(await withAuth(url, message, {}, options => mcpClient.list_prompts(url, options)));
+                broadcastToClients({ type: 'prompts_list', url, prompts });
+                const names = prompts.map(prompt => prompt.name);
+                logger.info(`Listed ${counted(names.length, 'prompt')} in ${formatDuration(performance.now() - started)}${names.length ? `: ${listNames(names)}` : ''}`, { server: url });
+            } catch (error) {
+                broadcastMcpError(url, 'list_prompts', mcpError(error), started);
+            }
+            break;
+        }
+        // A resource read or a prompt get the page asked for, answered to that page only. They
+        // aren't tool calls, so they don't go into the run history.
+        case 'read_resource':
+        case 'get_prompt': {
+            const { url, requestId } = message;
+            const reading = message.type === 'read_resource';
+            const what = reading ? message.uri : message.name;
+            const reply = fields => event.source?.postMessage({ type: reading ? 'resource_read' : 'prompt_got', url, requestId, ...fields });
+            if (!mcpClient) {
+                reply({ error: { kind: 'internal', message: 'The MCP client is not loaded.' } });
+                break;
+            }
+            const started = performance.now();
+            try {
+                const result = JSON.parse(await withAuth(url, message, {}, options => (reading
+                    ? mcpClient.read_resource(url, message.uri, options)
+                    : mcpClient.get_prompt(url, message.name, JSON.stringify(message.args || {}), options))));
+                const durationMs = performance.now() - started;
+                const size = reading ? counted(result.contents?.length ?? 0, 'item') : counted(result.messages?.length ?? 0, 'message');
+                logger.info(`${reading ? 'Read' : 'Got the prompt'} ${what} in ${formatDuration(durationMs)}: ${size}`, { server: url });
+                reply({ result, durationMs });
+            } catch (error) {
+                const failure = mcpError(error);
+                const durationMs = performance.now() - started;
+                logger.error(`Couldn't ${reading ? 'read' : 'get the prompt'} ${what}: ${failure.message}`, { server: url, detail: errorDetail(failure) });
+                reply({ error: failure, durationMs });
             }
             break;
         }

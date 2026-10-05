@@ -25,10 +25,11 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 ### Web Interface
 - Page: [public/index.html](mdc:public/index.html)
   - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the Chat app) and the Guide
-  - `AppShell`, the controller: talks to the service worker, owns servers, sign-in and tool calls, and emits events instead of drawing UI
+  - `AppShell`, the controller: talks to the service worker, owns servers, sign-in, tool calls, resource reads and prompt gets, and emits events instead of drawing UI
 - Workbench: [public/workbench/](mdc:public/workbench/index.js)
-  - One custom element per part of the screen in `components/` (rail, server bar, tools, request, response, dock, sheet, palette)
-  - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`
+  - One custom element per part of the screen in `components/` (rail, server bar, tools with the Resources and Prompts tabs, request, resource, prompt, response, contents, splitter, dock, sheet, palette)
+  - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`, sized by the splitters' CSS variables
+  - Resource templates' URIs in `uri-template.js` (RFC 6570); Pre-fill's test data in `prefill.js`
 
 ## Build System
 - `npm run build` builds every library: `npm run build:sdk` ([sdk-client/build.mjs](mdc:sdk-client/build.mjs), esbuild) and `npm run build:wasm` ([wasm-build.sh](mdc:wasm-build.sh), [Cargo.toml](mdc:Cargo.toml))
@@ -36,6 +37,7 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`
+- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, and resource template URIs against RFC 6570's examples
 - `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
 
 ## Naming
