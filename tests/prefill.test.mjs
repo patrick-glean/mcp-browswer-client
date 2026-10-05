@@ -67,7 +67,23 @@ const SCHEMAS = {
         required: ['tree'],
     },
     'nullable types': object({ note: { type: ['string', 'null'] }, count: { type: ['null', 'integer'], minimum: 2 } }),
+    // Shortened from Glean's enterprise_search and meeting_lookup: two required fields and many
+    // optional filters, described for a model rather than a person.
+    'a search with many filters': object({
+        query: { type: 'string', description: 'important keywords that help find relevant documents.' },
+        after: { type: 'string', description: 'filter to documents updated after this date. value must be in "YYYY-MM-DD" format. ONLY when the user has mentioned a specific time frame (e.g. last week, past month)' },
+        updated: { type: 'string', description: 'value can be one of ["today", "yesterday", "past_week"]. ONLY when the user has mentioned a time frame (e.g. last week)' },
+        owner: { type: 'string', description: 'Value can be a person\'s name, "me" or "myteam". Do NOT use other team names' },
+        num_results: { type: 'integer' },
+        cursor: { type: 'string', description: 'pagination cursor from a previous search response.' },
+        type: { type: 'string', enum: ['pull', 'spreadsheet', 'direct message'] },
+        calendar_ids: { type: 'array', items: { type: 'string' }, description: 'Calendar IDs (e.g. a team calendar). Google IDs are emails like "c_abc123@group.calendar.google.com"; Outlook ones are like "AAMkAD...".' },
+        peer: { type: 'string', description: "(optional) Email address of another person (e.g. 'What meetings does alice@company.com have today?', 'Show me Bob's calendar')." },
+        participants: { type: 'array', items: { type: 'string' } },
+    }, ['query', 'after']),
 };
+
+const day = daysAgo => new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
 
 const problems = (schema, values) => {
     const validate = ajv.compile(schema);
@@ -125,6 +141,83 @@ test('optional fields stay empty unless the schema suggests a value or every fie
     assert.deepEqual(testData(schema, { every: true }).values, { query: 'test', limit: 5 });
 });
 
+test('descriptions give examples and the values a field takes, as MCP servers write them', () => {
+    const value = (key, description, prop = { type: 'string' }) => testData(object({ [key]: { ...prop, description } })).values[key];
+    // Glean
+    assert.equal(value('updated', 'filter to documents updated on or after this date, value can be one of ["today", "yesterday", "past_week"].'), 'today');
+    assert.equal(value('owner', 'filter to documents created by this person. Value can be a person\'s name, "me" or "myteam". Do NOT use other team names, only "myteam" is supported'), 'me');
+    assert.equal(value('freshness', 'Optional recency filter. Values:\n- "pd" (past day), "pw" (past week)\nMap the stated window to the closest value (e.g. "this week" -> pw).'), 'pd');
+    assert.equal(value('extension', 'File extension to filter code files by. Accepts common extensions like "py", "js", "ts" etc.'), 'py');
+    assert.equal(value('after', '(required) Inclusive start of the date range. Use keywords: "today", "yesterday". Or use YYYY-MM-DD for specific dates.'), 'today');
+    assert.equal(value('start_date', 'Start date in YYYY-MM-DD format.\n\nExamples:\n- "2025-01-01" -> January 1, 2025'), '2025-01-01');
+    assert.equal(value('query', 'Search query for people.\n\nExamples:\n- "John Smith" -> Find people named John Smith'), 'John Smith');
+    assert.equal(value('mime_type', 'For file-backed types: the MIME type of the bytes (e.g. image/png).'), 'image/png');
+    // Context7 and Hugging Face
+    assert.equal(value('libraryName', "Use the official library name with proper punctuation — e.g., 'Next.js' instead of 'nextjs'."), 'Next.js');
+    assert.deepEqual(value('filters', 'Optional hub filter tags (e.g. ["text-generation"], ["language:en"]).', { type: 'array', items: { type: 'string' } }), ['text-generation']);
+    assert.deepEqual(value('operations', 'Details to return. Defaults to ["overview"].', { type: 'array', items: { type: 'string', enum: ['overview', 'dataset_structure'] } }), ['overview']);
+    assert.equal(value('limit', 'Row count. Defaults to 5 and is clamped to 1-100.', { type: 'integer' }), 5);
+});
+
+test("prose in a description isn't taken for a value", () => {
+    const filled = (key, description, prop = { type: 'string' }) => testData(object({ [key]: { ...prop, description } }));
+    const value = (...args) => filled(...args).values[args[0]];
+    // A bare word with more words after it, and a quote that's an apostrophe.
+    assert.equal(value('container', 'Scope the search to a container (e.g., a Google Drive folder, Confluence space).'), 'test');
+    assert.equal(value('calendar', 'Which calendar (e.g. "what\'s on the team calendar this week").'), 'test');
+    // A sentence for a field that doesn't take free text, a format, a shortened example, and a
+    // value the description says not to use.
+    assert.equal(value('peer', "Email address of another person (e.g. 'What meetings does alice@company.com have today?')."), 'test@example.com');
+    assert.equal(value('after', 'value must be in "YYYY-MM-DD" format, when the user mentioned a time frame (e.g. last week).'), day(7));
+    assert.equal(value('calendar_id', 'Outlook IDs are opaque strings like "AAMkAD...".'), '1');
+    assert.equal(value('sort', 'Do not use values like "latest".'), 'test');
+    assert.equal(filled('sort', 'Do not use values like "latest".').sources.sort, 'generated');
+    // A closing quote isn't taken for an opening one.
+    assert.equal(value('query', "Good: 'How to set up auth in Express.js' or 'React useEffect cleanup examples'. Bad: 'auth'."), 'test');
+});
+
+test("defaults and examples that say nothing aren't suggestions", () => {
+    const { values, sources } = testData(object({
+        query: { type: 'string', default: null },
+        language: { type: 'string', default: null, description: 'The programming language of code snippets to retrieve. Eligible values: csharp javascript python' },
+        tags: { type: 'array', items: { type: 'string' }, default: [] },
+        note: { type: 'string', examples: ['', 'remember the milk'] },
+    }));
+    assert.deepEqual(values, { query: 'test', language: 'python', tags: ['test'], note: 'remember the milk' });
+    assert.deepEqual(sources, { query: 'generated', language: 'generated', tags: 'generated', note: 'example' });
+});
+
+test('what a description says a field holds comes before guesses from its name', () => {
+    const { values } = testData(object({
+        author: { type: 'string', description: 'Email address of the person who wrote it.' },
+        peer: { type: 'string', description: '(optional) Email address of another person.' },
+        after: { type: 'string', description: 'Only notes written on or after this day, as YYYY-MM-DD.' },
+        before: { type: 'string', description: 'Only notes written before this day, as YYYY-MM-DD.' },
+        since: { type: 'string', description: 'Only results updated since then (ISO 8601 timestamp).' },
+        container: { type: 'string', description: 'URL of the folder to search in.' },
+        data: { type: 'string', description: 'The replacement file bytes, base64-encoded.' },
+        query: { type: 'string', description: 'Search terms, with dates written as YYYY-MM-DD.' },
+        owner: { type: 'string', description: 'Who owns the repository.' },
+    }));
+    assert.deepEqual(values, {
+        author: 'test@example.com',
+        peer: 'test@example.com',
+        after: day(7),
+        before: day(0),
+        since: `${day(7)}T00:00:00Z`,
+        container: 'https://example.com',
+        data: 'dGVzdA==',
+        query: 'test',
+        owner: 'modelcontextprotocol',
+    });
+});
+
+test('optional pagination cursors stay empty, even with every field filled', () => {
+    const schema = object({ query: { type: 'string' }, cursor: { type: 'string' }, page_token: { type: 'string' }, nextToken: { type: 'string' } }, ['query']);
+    assert.deepEqual(testData(schema, { every: true }).values, { query: 'test' });
+    assert.deepEqual(testData(object({ cursor: { type: 'string' } })).values, { cursor: 'test' });
+});
+
 test('staged variables are used ignoring case, dashes and underscores, and resolve to valid values', () => {
     const schema = SCHEMAS['a search with limits'];
     const variables = { Query: 'whisper', LIMIT: '10' };
@@ -150,6 +243,17 @@ test('common field names get plausible values', () => {
         userId: { type: 'string' },
         valid: { type: 'string' },
         limit: { type: 'integer', maximum: 3 },
+        num_results: { type: 'integer' },
+        to: { type: 'string' },
+        participants: { type: 'array', items: { type: 'string' } },
+        question: { type: 'string' },
+        subject: { type: 'string' },
+        branch: { type: 'string' },
+        file_path: { type: 'string' },
+        start_date: { type: 'string' },
+        end_date: { type: 'string' },
+        weekday: { type: 'string' },
+        update: { type: 'string' },
     }));
     assert.deepEqual(values, {
         email: 'test@example.com',
@@ -161,6 +265,17 @@ test('common field names get plausible values', () => {
         userId: '1',
         valid: 'test',
         limit: 3,
+        num_results: 5,
+        to: 'test@example.com',
+        participants: ['test@example.com'],
+        question: 'What is MCP?',
+        subject: 'Hello from MCP Browser Client',
+        branch: 'main',
+        file_path: 'README.md',
+        start_date: day(7),
+        end_date: day(0),
+        weekday: 'test',
+        update: 'test',
     });
 });
 
