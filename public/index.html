@@ -67,8 +67,8 @@
                     <!-- The MCP client libraries in public/mcp-clients.js; the first is the default. -->
                     <label class="client-choice">Library
                         <select id="clientSelect" title="Switches every tab's MCP client library at once; servers connect again on their next request">
-                            <option value="wasm">Rust/WASM</option>
                             <option value="sdk">TypeScript SDK</option>
+                            <option value="wasm">Rust/WASM</option>
                         </select>
                     </label>
                     <div class="button-row">
@@ -187,7 +187,7 @@
                 <span class="icon icon-x" aria-hidden="true"></span>
             </button>
         </div>
-        <p class="guide-intro">Everything runs in this page and a service worker its tabs share, so there's nothing to install. The MCP client is a library you choose under Runtime: Rust compiled to WebAssembly, or the official TypeScript SDK. Pick a server, then follow the steps. The guide stays open while you work. You can also add a server with + beside Servers: paste its URL, or your work email to find your company's Glean.</p>
+        <p class="guide-intro">Everything runs in this page and a service worker its tabs share, so there's nothing to install. The MCP client is a library you choose under Runtime: the official TypeScript SDK, or Rust compiled to WebAssembly. Pick a server, then follow the steps. The guide stays open while you work. You can also add a server with + beside Servers: paste its URL, or your work email to find your company's Glean.</p>
 
         <section class="guide-section">
             <h3>1. Pick a server</h3>
@@ -283,7 +283,7 @@
                 <dt>HTTP 401</dt>
                 <dd>The server wants you to sign in, or a token. Choose Sign in in the bar above the tools, or paste a token under Info, then choose Connect.</dd>
                 <dt>Old behavior after a rebuild</dt>
-                <dd>Reload the page; the log should show "Loaded the Rust/WASM client" (or whichever library Runtime has chosen) with the new build time. If it doesn't, open Runtime in the top bar and reload the MCP client.</dd>
+                <dd>Reload the page; the log should show "Loaded the TypeScript SDK client" (or whichever library Runtime has chosen) with the new build time. If it doesn't, open Runtime in the top bar and reload the MCP client.</dd>
             </dl>
         </section>
     </aside>

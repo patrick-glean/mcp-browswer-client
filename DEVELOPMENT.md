@@ -26,8 +26,10 @@ The browser can stop the worker whenever it's idle, so every message is handled 
 
 | Name | Library | Source | Built by | Output |
 | --- | --- | --- | --- | --- |
-| `wasm` (default) | Rust/WASM client | `src/`: exports in `lib.rs`, protocol in `mcp/`, sign-in in `oauth/`, requests in `http.rs` | `npm run build:wasm` (`wasm-build.sh`, wasm-bindgen `no-modules`) | `public/mcp_browser_client.js`, `public/mcp_browser_client_bg.wasm`, `public/build.js` |
-| `sdk` | TypeScript SDK client | `sdk-client/`: the interface in `index.js` over [`@modelcontextprotocol/client`](https://github.com/modelcontextprotocol/typescript-sdk); `mcp.js` connections, `oauth.js` sign-in, `trace.js` the HTTP trace | `npm run build:sdk` (esbuild) | `public/sdk_client.js`, `public/build-sdk.js` |
+| `sdk` (default) | TypeScript SDK client | `sdk-client/`: the interface in `index.js` over [`@modelcontextprotocol/client`](https://github.com/modelcontextprotocol/typescript-sdk); `mcp.js` connections, `oauth.js` sign-in, `trace.js` the HTTP trace | `npm run build:sdk` (esbuild) | `public/sdk_client.js`, `public/build-sdk.js` |
+| `wasm` | Rust/WASM client | `src/`: exports in `lib.rs`, protocol in `mcp/`, sign-in in `oauth/`, requests in `http.rs` | `npm run build:wasm` (`wasm-build.sh`, wasm-bindgen `no-modules`) | `public/mcp_browser_client.js`, `public/mcp_browser_client_bg.wasm`, `public/build.js` |
+
+The default is `DEFAULT_CLIENT` in `mcp-clients.js`, which the worker runs until a page picks one, and the first option in the Runtime menu, which is what a page picks when you haven't. Keep the two the same.
 
 Service workers can't `import()` on demand, so each library is a script the worker fetches and evaluates. Its build file (`build.js`, `build-sdk.js`) holds the output's hash and is imported by `mcp-clients.js`, which makes every rebuild a worker update.
 
@@ -179,13 +181,13 @@ Write messages as sentences someone can act on, and put structured data in `deta
 
 ```bash
 npm run build                       # both libraries
+npm run test:browser -- --reference # the real UI in headless Chrome, on the default TypeScript SDK library
+npm run test:browser:wasm -- --reference # the same on the Rust/WASM library
 npm run test:rust                   # the Rust library's protocol logic
-npm run test:browser -- --reference # the real UI in headless Chrome, on the Rust/WASM library
-npm run test:browser:sdk            # the same on the TypeScript SDK library
 npm run bench -- --quick            # tool-call throughput of every library, in a few minutes
 ```
 
-After a rebuild, reload the page. Each load checks the worker's scripts, and the build files change with every build, so a new worker installs. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the Rust/WASM client (…)" with the new build time.
+After a rebuild, reload the page. Each load checks the worker's scripts, and the build files change with every build, so a new worker installs. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the TypeScript SDK client (…)" with the new build time.
 
 If the old build is still running, the new worker may be waiting: Chrome sometimes keeps it waiting despite `skipWaiting()`. Close the app's other tabs, or open DevTools → Application → Service workers and choose skipWaiting (or Unregister, then reload). Clear site data as well if saved servers or chat history get in the way.
 

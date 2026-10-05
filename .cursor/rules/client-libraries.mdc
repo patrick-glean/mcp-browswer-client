@@ -5,7 +5,7 @@ alwaysApply: true
 ---
 # MCP Client Library Rules
 
-The app runs whichever MCP client library the page picks (Rust/WASM in `src/`, TypeScript SDK in `sdk-client/`). Follow these rules when changing a library, the worker or the page:
+The app runs whichever MCP client library the page picks: the TypeScript SDK one in `sdk-client/` by default, or Rust/WASM in `src/`. Follow these rules when changing a library, the worker or the page:
 
 1. **One interface for every library**:
    - Libraries export the functions in DEVELOPMENT.md ("The interface"): MCP and sign-in calls take and return JSON strings and reject with a JSON `McpError {kind, message, status?, code?, data?}`
@@ -19,8 +19,8 @@ The app runs whichever MCP client library the page picks (Rust/WASM in `src/`, T
    - Handle errors at each step: `Result<T, JsValue>` in Rust, rejections with `McpError` in JavaScript, try/catch in the worker, error replies handled in the page
 
 3. **Testing Process**:
-   - Rebuild the library you changed (`npm run build:wasm` or `npm run build:sdk`)
-   - Run the smoke test on every library: `npm run test:browser -- --reference` and `npm run test:browser:sdk`
+   - Rebuild the library you changed (`npm run build:sdk` or `npm run build:wasm`)
+   - Run the smoke test on every library: `npm run test:browser -- --reference` (the default, TypeScript SDK) and `npm run test:browser:wasm -- --reference`
    - Run `npm run bench -- --quick` after changing a library's request path
    - In a browser: reload; if the old build still runs, the new worker is waiting (close other tabs or use skipWaiting in DevTools)
 

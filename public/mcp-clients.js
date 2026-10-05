@@ -2,8 +2,8 @@
 // exports the same functions (connect, list_tools, call_tool, auth_begin, ...; see DEVELOPMENT.md),
 // so the worker uses whichever it loaded and switches between them while it runs.
 //
-//   wasm  the Rust client in src/, built by wasm-build.sh into mcp_browser_client_bg.wasm
 //   sdk   sdk-client/ on @modelcontextprotocol/client, built by sdk-client/build.mjs into sdk_client.js
+//   wasm  the Rust client in src/, built by wasm-build.sh into mcp_browser_client_bg.wasm
 //
 // Adding a library means a loader here; the Runtime menu, the smoke test (--client=) and the
 // benchmark read this list. Service workers can't import() modules on demand, so each library is
@@ -15,9 +15,13 @@ import { SDK_SHA256 } from './build-sdk.js';
 
 // `logSource` is the source its log entries show in the log.
 export const MCP_CLIENTS = {
-    wasm: { name: 'wasm', label: 'Rust/WASM client', logSource: 'wasm', build: WASM_SHA256 },
     sdk: { name: 'sdk', label: 'TypeScript SDK client', logSource: 'sdk', build: SDK_SHA256 },
+    wasm: { name: 'wasm', label: 'Rust/WASM client', logSource: 'wasm', build: WASM_SHA256 },
 };
+
+// What runs until a page picks a library. The Runtime menu in index.html lists it first, which is
+// the page's default.
+export const DEFAULT_CLIENT = MCP_CLIENTS.sdk;
 
 // no-cache revalidates with the server, so a rebuilt library is picked up on the next load instead
 // of whenever the HTTP cache expires.

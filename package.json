@@ -6,15 +6,15 @@
   "scripts": {
     "start": "http-server public -p 8080 -c-1",
     "start:glean": "http-server public -a 127.0.0.1 -p 8888 -c-1",
-    "build": "npm run build:wasm && npm run build:sdk",
-    "build:wasm": "./wasm-build.sh",
+    "build": "npm run build:sdk && npm run build:wasm",
     "build:sdk": "node sdk-client/build.mjs",
+    "build:wasm": "./wasm-build.sh",
     "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
     "start:mock-mcp": "python3 test_mcp_server.py",
     "start:reference-mcp": "venv/bin/python tests/reference_server.py",
     "test:rust": "cargo test --lib",
     "test:browser": "node tests/browser-smoke.mjs",
-    "test:browser:sdk": "node tests/browser-smoke.mjs --client=sdk",
+    "test:browser:wasm": "node tests/browser-smoke.mjs --client=wasm",
     "test:public": "node tests/browser-smoke.mjs --public",
     "bench": "node tests/bench.mjs"
   },

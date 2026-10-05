@@ -3,9 +3,10 @@
 // servers (modern, streaming, legacy, dual-era, strict CORS, token-protected, OAuth sign-in) and, with
 // --reference, a server built on the official Python SDK. --public also connects to the public
 // servers the in-app guide suggests, through the guide's own buttons (needs internet access).
-// --client= picks the MCP client library the app runs on, a name from public/mcp-clients.js.
+// --client= picks the MCP client library the app runs on, a name from public/mcp-clients.js; without
+// it, the app runs on its default library, as a first visit does.
 //
-//   node tests/browser-smoke.mjs [--client=wasm|sdk] [--reference] [--public]
+//   node tests/browser-smoke.mjs [--client=sdk|wasm] [--reference] [--public]
 //
 // Needs Node 22+, Google Chrome (or CHROME_PATH), python3, and for --reference the venv that
 // setup.sh creates. Exits non-zero if any check fails.
@@ -17,13 +18,13 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MCP_CLIENTS } from '../public/mcp-clients.js';
+import { DEFAULT_CLIENT, MCP_CLIENTS } from '../public/mcp-clients.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WITH_REFERENCE = process.argv.includes('--reference');
 const WITH_PUBLIC = process.argv.includes('--public');
 // The MCP client library under test.
-const CLIENT_NAME = process.argv.find(arg => arg.startsWith('--client='))?.slice('--client='.length) ?? 'wasm';
+const CLIENT_NAME = process.argv.find(arg => arg.startsWith('--client='))?.slice('--client='.length) ?? DEFAULT_CLIENT.name;
 const CLIENT = MCP_CLIENTS[CLIENT_NAME];
 if (!CLIENT) throw new Error(`--client must be ${Object.keys(MCP_CLIENTS).join(' or ')}, not ${CLIENT_NAME}`);
 const HOST = 'http://127.0.0.1';
@@ -420,7 +421,8 @@ async function main() {
                 tx.onerror = () => reject(tx.error);
             };
         })`);
-        await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/?client=${CLIENT.name}` });
+        // The default library needs no ?client=: a first visit runs on it.
+        await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/${CLIENT === DEFAULT_CLIENT ? '' : `?client=${CLIENT.name}`}` });
         const healthy = await page.waitFor(`
             document.getElementById('sw-status').classList.contains('healthy') &&
             document.getElementById('client-status').classList.contains('healthy') &&

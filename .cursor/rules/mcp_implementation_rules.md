@@ -1,7 +1,7 @@
 # MCP Implementation Rules and Progress
 
 ## Overview
-This file tracks the MCP client libraries our service worker runs and the app built on them, a system for testing MCP client libraries in the browser and building agentic apps on them. There are two libraries with one interface (DEVELOPMENT.md): Rust compiled to WASM (`src/mcp/`, with sign-in in `src/oauth/` and shared HTTP in `src/http.rs`), and the official TypeScript SDK behind an adapter (`sdk-client/`). `public/mcp-clients.js` lists them, `public/client-runtime.js` keeps the chosen one loaded, and the service worker (`public/sw.js`) routes page messages to it. The reference is the MCP specification itself (https://modelcontextprotocol.io/specification/2026-07-28); `rust-mcp-schema` and the official SDKs are useful for cross-checking types and behavior.
+This file tracks the MCP client libraries our service worker runs and the app built on them, a system for testing MCP client libraries in the browser and building agentic apps on them. There are two libraries with one interface (DEVELOPMENT.md): the official TypeScript SDK behind an adapter (`sdk-client/`), the default, and Rust compiled to WASM (`src/mcp/`, with sign-in in `src/oauth/` and shared HTTP in `src/http.rs`). `public/mcp-clients.js` lists them, `public/client-runtime.js` keeps the chosen one loaded, and the service worker (`public/sw.js`) routes page messages to it. The reference is the MCP specification itself (https://modelcontextprotocol.io/specification/2026-07-28); `rust-mcp-schema` and the official SDKs are useful for cross-checking types and behavior.
 
 ## Target Protocol
 - Primary: MCP `2026-07-28` ("modern"): stateless, with protocol version, client info and client capabilities in `_meta` on every request, and `server/discover` instead of a handshake.
@@ -78,6 +78,7 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] The library interface is MCP, sign-in and runtime status only; the Chat app's instructions live in the worker (`public/chat-instructions.js`)
 - [x] The agent loop's names are plain (conversation, model, context, instructions), with `chat_contexts` version 2 and the page moving its old settings over
 - [x] Runs compare a result without `resultType` as complete, so switching libraries doesn't show "Changed"
+- [x] The TypeScript SDK library is the default (`DEFAULT_CLIENT`); Rust/WASM is the alternative to compare against
 
 ### Next
 - [ ] App builder milestone 2: workflow steps and the Chat app as a manifest (a shape, allowed tools, pinned arguments, instructions and output checks)
@@ -91,5 +92,5 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 
 ## Testing Requirements
 - Protocol logic that doesn't touch the browser (SSE parsing, header encoding, era classification, envelopes) gets native unit tests in its module.
-- Changes to a library, the connection flow, sign-in, the service worker or the Workbench and Apps UI must pass `npm run test:browser -- --reference` and `npm run test:browser:sdk -- --reference`, which cover modern, legacy, SSE, dual-era, strict-CORS, token-protected and OAuth mock servers, sign-in and refresh, the layout and inspector, the Workbench, the Chat app, the official Python SDK server, a service worker restart, a second tab, unreachable servers and what the log records. `npm run test:public` adds the public servers the in-app Guide suggests.
+- Changes to a library, the connection flow, sign-in, the service worker or the Workbench and Apps UI must pass `npm run test:browser -- --reference` (the default, TypeScript SDK) and `npm run test:browser:wasm -- --reference`, which cover modern, legacy, SSE, dual-era, strict-CORS, token-protected and OAuth mock servers, sign-in and refresh, the layout and inspector, the Workbench, the Chat app, the official Python SDK server, a service worker restart, a second tab, unreachable servers and what the log records. `npm run test:public` adds the public servers the in-app Guide suggests.
 - New server behaviors should be added to `test_mcp_server.py` (standard library only) rather than mocked in the client.

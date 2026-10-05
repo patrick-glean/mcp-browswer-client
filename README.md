@@ -4,7 +4,7 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 Everything runs in a web page and a service worker that every open tab shares. There's nothing to install or configure on anyone's machine: open the site, add servers, sign in, and every control is in the page.
 
-- **MCP client libraries, swapped while it runs.** There are two: one in Rust compiled to WebAssembly, and one on the official TypeScript SDK. Both implement the same interface, pass the same browser test and run in the same benchmark. Runtime, in the top bar, switches between them. See [MCP client libraries](#mcp-client-libraries).
+- **MCP client libraries, swapped while it runs.** There are two: one on the official TypeScript SDK, which runs by default, and one in Rust compiled to WebAssembly. Both implement the same interface, pass the same browser test and run in the same benchmark. Runtime, in the top bar, switches between them. See [MCP client libraries](#mcp-client-libraries).
 - **The agent loop.** Apps holds the apps built on the libraries. The first, Chat, sends your messages to a model that is an MCP tool, tells it which tools your servers have, and runs the tool calls it writes in its replies. See [The agent loop](#the-agent-loop).
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
 - **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and conversations live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
@@ -25,25 +25,25 @@ The MCP client is a library the service worker loads. Pages never speak MCP: the
 
 | Library | Source | Download (gzipped) |
 | --- | --- | --- |
-| Rust/WASM (`wasm`, the default) | `src/`, compiled with wasm-bindgen | 563 KB (200 KB), module and bindings |
-| TypeScript SDK (`sdk`) | `sdk-client/`, an adapter over [`@modelcontextprotocol/client`](https://github.com/modelcontextprotocol/typescript-sdk) 2.3 | 340 KB (94 KB) |
+| TypeScript SDK (`sdk`, the default) | `sdk-client/`, an adapter over [`@modelcontextprotocol/client`](https://github.com/modelcontextprotocol/typescript-sdk) 2.3 | 340 KB (94 KB) |
+| Rust/WASM (`wasm`) | `src/`, compiled with wasm-bindgen | 563 KB (200 KB), module and bindings |
 
-**Switching.** Choose Runtime, then Library, or add `?client=sdk` (or `?client=wasm`) to the address. Every tab switches at once, and the worker remembers the choice when the browser restarts it. Connections don't carry over, so each server connects again on its next request. The log names the library that loaded ("Loaded the TypeScript SDK client (…)"), and its entries carry the library's name as their source.
+**Switching.** Choose Runtime, then Library, or add `?client=wasm` (or `?client=sdk`) to the address. Every tab switches at once, and the worker remembers the choice when the browser restarts it. Connections don't carry over, so each server connects again on its next request. The log names the library that loaded ("Loaded the TypeScript SDK client (…)"), and its entries carry the library's name as their source.
 
-**Comparing.** The browser smoke test runs on either library (`npm run test:browser` and `npm run test:browser:sdk`), and both pass every check. They send the same requests in the same order; [DEVELOPMENT.md](DEVELOPMENT.md#how-the-two-differ) lists the small differences. `npm run bench` measures tool-call throughput four ways: each library alone against an in-memory server, over HTTP against the mock server, a cold start, and calls through the whole app. `/bench/` in the app runs the same benchmark in your browser.
+**Comparing.** The browser smoke test runs on either library (`npm run test:browser` on the default, `npm run test:browser:wasm` on the Rust one), and both pass every check. They send the same requests in the same order; [DEVELOPMENT.md](DEVELOPMENT.md#how-the-two-differ) lists the small differences. `npm run bench` measures tool-call throughput four ways: each library alone against an in-memory server, over HTTP against the mock server, a cold start, and calls through the whole app. `/bench/` in the app runs the same benchmark in your browser.
 
 On an Apple M4 with Chrome 154, in October 2026:
 
-| | Rust/WASM | TypeScript SDK |
+| | TypeScript SDK | Rust/WASM |
 | --- | --- | --- |
-| Through the whole app, one call at a time | 189 calls/s | 185 calls/s |
+| Through the whole app, one call at a time | 185 calls/s | 189 calls/s |
 | Through the whole app, six in flight | 322 calls/s | 322 calls/s |
-| The library alone: a small JSON reply | 51 µs | 48 µs |
-| The library alone: a small streamed (SSE) reply | 52 µs | 129 µs |
-| The library alone: a 1 MB result | 9.6 ms | 4.6 ms |
-| Cold start: load, connect, first call | about 15 ms | about 30 ms |
+| The library alone: a small JSON reply | 48 µs | 51 µs |
+| The library alone: a small streamed (SSE) reply | 129 µs | 52 µs |
+| The library alone: a 1 MB result | 4.6 ms | 9.6 ms |
+| Cold start: load, connect, first call | about 30 ms | about 15 ms |
 
-The library isn't what limits tool calls. Through the whole app both run at the same rate, and most of each call's 5 ms is the app's own work around it: the messages between page and worker, the run history and the log. On their own, the Rust library is faster with streamed replies and starts faster, and the SDK is faster with big results. Both are kept, because two independent implementations of one interface are what make these comparisons possible. [Adding a library](DEVELOPMENT.md#adding-a-library) puts a third one through the same tests.
+The library isn't what limits tool calls. Through the whole app both run at the same rate, and most of each call's 5 ms is the app's own work around it: the messages between page and worker, the run history and the log. On their own, the SDK library is faster with big results, and the Rust one is faster with streamed replies and starts faster. The SDK library is the default: it's the official implementation, a smaller download, and as fast through the app. The Rust one is kept as a second, independent implementation of the same interface, which is what makes these comparisons possible. [Adding a library](DEVELOPMENT.md#adding-a-library) puts a third one through the same tests.
 
 ## The agent loop
 
@@ -153,7 +153,7 @@ flowchart LR
     subgraph browser [The browser]
         Page["Pages: the Workbench and apps"]
         SW["Service worker: routing, sign-in, runs, the agent loop"]
-        Lib["MCP client library: Rust/WASM or TypeScript SDK"]
+        Lib["MCP client library: TypeScript SDK or Rust/WASM"]
         DB[("IndexedDB: tokens, runs, conversations")]
     end
     Page -- "messages" --> SW
@@ -177,7 +177,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 
 - Node.js 22+ and Google Chrome (to build the TypeScript SDK library and run the tests)
 - Python 3.x (the mock MCP server uses only the standard library)
-- Rust, for the Rust/WASM library: install via rustup, `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- Rust, to build the Rust/WASM library: install via rustup, `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
 1. Run the setup script once. It installs the dependencies and builds both libraries:
 
@@ -205,18 +205,18 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 
 - `npm start`: Start the web server on port 8080 with caching off
 - `npm run start:glean`: The same on `http://127.0.0.1:8888`, an origin Glean allows (see [Glean](#glean))
-- `npm run build`: Build both MCP client libraries: Rust/WASM (`npm run build:wasm`) and the TypeScript SDK one (`npm run build:sdk`)
+- `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
 - `npm run test:rust`: Run the Rust library's unit tests
-- `npm run test:browser`: Run the browser smoke test on the Rust/WASM library (add `-- --reference` to include the Python SDK server); `npm run test:browser:sdk` runs it on the TypeScript SDK library
+- `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
 - `npm run bench`: Load-test tool calls on every library against the mock server and an in-memory one, plus a cold start and calls through the whole app (`-- --quick` for a fast pass)
 
 ### Changing a library
 
-1. Edit the Rust library in `src/` (protocol in `src/mcp/`, sign-in in `src/oauth/`, exports in `src/lib.rs`), or the TypeScript SDK one in `sdk-client/`.
-2. Rebuild it: `npm run build:wasm` or `npm run build:sdk`.
+1. Edit the TypeScript SDK library in `sdk-client/`, or the Rust one in `src/` (protocol in `src/mcp/`, sign-in in `src/oauth/`, exports in `src/lib.rs`).
+2. Rebuild it: `npm run build:sdk` or `npm run build:wasm`.
 3. Reload the page. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the … client" with the new build time.
 
 Each library's build writes a small file with the output's hash (`public/build.js`, `public/build-sdk.js`). The worker imports both, so every rebuild is a worker update that the next reload installs. Commit the build outputs with the source: the site is what's committed in `public/`.
@@ -309,7 +309,7 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 6. **Save and run again.** Back in the Workbench, choose `ticket`, then Pre-fill (the schema gives `prefix` its default, `T-`) and Save. In the rail, run it twice with ▶. The second result says Changed since the last run, and Changes has the line that differs, because `ticket` returns the next number every time. A saved `echo` says Same as the last run.
 7. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including the chat's.
 8. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
-9. **The other library.** Open Runtime and choose TypeScript SDK under Library, then run the saved `echo` again. The log shows "Loaded the TypeScript SDK client", the server connects again, and the result is Same as the last run.
+9. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
 
 ### More server behaviors
 
@@ -378,10 +378,10 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 ### Automated tests
 
 ```bash
-npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
-npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the Rust/WASM library
-npm run test:browser:sdk             # the same on the TypeScript SDK library (--client= picks any library in mcp-clients.js)
+npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
+npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
+npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
@@ -396,7 +396,7 @@ The dock's Log collects entries from three kinds of source, shown in the third c
 
 - **page**: this tab (service worker registration, uncaught errors)
 - **worker**: the service worker: each connect, tool listing and tool call with how long it took, failures with their error kind and status, and which library it loaded
-- **wasm** or **sdk**: the MCP client library itself: why it chose a protocol (fallbacks, version retries, reconnects), tools it hid, and log messages the server sent
+- **sdk** or **wasm**: the MCP client library itself: why it chose a protocol (fallbacks, version retries, reconnects), tools it hid, and log messages the server sent
 
 The level menu decides what's shown: Errors, Warnings and errors, Info (the default), or Everything, which adds the HTTP trace. Each request shows its MCP headers and body, and each reply its status, timing and body; bodies over 4 KB are cut short. Entries are kept even while hidden, so after a failure you can switch to Everything and see what led to it. Filter by text or server URL, and open Details for the structured data behind an entry. The dock's Trace tab shows only the HTTP trace.
 

@@ -1,12 +1,11 @@
 // The MCP client library this service worker runs: whichever the page last asked for (set_client),
 // from the list in mcp-clients.js. The choice is kept in Cache Storage, so a worker the browser
 // restarts loads the same one.
-import { MCP_CLIENTS, loadMcpClient } from './mcp-clients.js';
+import { DEFAULT_CLIENT, MCP_CLIENTS, loadMcpClient } from './mcp-clients.js';
 import { log, logger } from './logger.js';
 
 const SETTINGS_CACHE = 'mcp-client-settings';
 const CHOICE_KEY = '/settings/client';
-const DEFAULT_CLIENT = MCP_CLIENTS.wasm;
 
 let instance = null;
 // The library `instance` is, and the one to run: they differ while a switch is under way.
