@@ -21,7 +21,7 @@
 //   sheet         a side sheet opened or closed                      { kind: 'server' | 'variables' | null }
 //   palette       open Go to
 
-import { matchingVariable, testData } from './prefill.js';
+import { fieldTestData, matchingVariable, testData } from './prefill.js';
 import * as store from './store.js';
 import { resolveArguments, VARIABLE_NAME, variablesIn } from './template.js';
 import { debounce, download, listOf, plural, schemaOf, serverLabel, SOURCE_LABELS, timeAgo } from './util.js';
@@ -30,6 +30,15 @@ const ENVIRONMENT_KEY = 'workbenchEnvironmentId';
 const DOCK_KEY = 'workbenchDock';
 const PANES_KEY = 'workbenchPanes';
 export const NEW_COLLECTION = '__new';
+
+// Where one field's test data came from, as Fill says it.
+const FIELD_SOURCES = {
+    const: "the schema's const",
+    default: 'its default',
+    example: "the schema's example",
+    description: 'from its description',
+    generated: 'generated',
+};
 
 // What identifies a resource, a resource template or a prompt in its list.
 export const itemKey = (kind, item) => (kind === 'resource' ? item.uri : kind === 'template' ? item.uriTemplate : item.name);
@@ -262,8 +271,8 @@ export class Workbench {
         return this.prefill('schema');
     }
 
-    // Sources: 'last', 'saved:<id>', 'schema' (test data for the required fields and the ones the
-    // schema suggests a value for), 'every' (test data for every field) and 'clear'.
+    // Sources: 'last', 'saved:<id>', 'schema' (test data for the required fields, as opening the
+    // tool fills them), 'every' (test data for every field) and 'clear'.
     prefill(source, { last = null, saved = [] } = {}) {
         let args = {};
         let text = 'Cleared the fields.';
@@ -276,13 +285,26 @@ export class Workbench {
             args = request.args;
             text = `Filled from ${request.name}. Runs count as runs of it, and Save updates it.`;
         } else if (source === 'schema' || source === 'every') {
-            const schema = schemaOf(this.tool);
-            const { values, sources } = testData(schema, { variables: this.variables, every: source === 'every' });
-            args = values;
-            text = this.describeTestData(schema, sources, source === 'every');
+            ({ args, text } = this.testDataFor(schemaOf(this.tool), { every: source === 'every' }));
         }
         this.setOpenRequest(request);
         this.emit('fill', { args, text });
+    }
+
+    // Test data for a schema's required fields, or with `every` for all of them: { args, count,
+    // text }, where count is how many fields got a value and text says where they came from.
+    testDataFor(schema, { every = false } = {}) {
+        const { values, sources } = testData(schema, { variables: this.variables, every });
+        return { args: values, count: Object.keys(sources).length, text: this.describeTestData(schema, sources, every) };
+    }
+
+    // Test data for one field (`limit`, or `filter.owner` inside an object): { value, source, how },
+    // or null when it gets none, such as an optional pagination cursor.
+    testDataForField(schema, path) {
+        const data = fieldTestData(schema, path, { variables: this.variables });
+        if (!data) return null;
+        const how = data.source === 'variable' ? `staged in ${this.environment?.name || 'this environment'}` : FIELD_SOURCES[data.source];
+        return { ...data, how };
     }
 
     describeTestData(schema, sources, every) {
@@ -291,7 +313,7 @@ export class Workbench {
         if (!kinds.length) {
             return every
                 ? "Couldn't make test data for these fields; fill them in by hand."
-                : 'Nothing to fill: every field is optional and the schema suggests no values. Test data for every field fills them anyway.';
+                : "Nothing to fill: every field is optional. Fill, beside a field's name, fills that one, and Test data for every field fills them all.";
         }
         const count = kind => kinds.filter(candidate => kind.includes(candidate)).length;
         const parts = [
@@ -299,7 +321,7 @@ export class Workbench {
             [count(['variable']), `staged in ${this.environment?.name || 'this environment'}`],
             [count(['generated']), 'with generated test data'],
         ].filter(([number]) => number).map(([number, how]) => `${number} ${how}`);
-        return `Filled ${plural(kinds.length, 'field')}: ${listOf(parts)}.`;
+        return `Filled ${plural(kinds.length, every ? 'field' : 'required field')}: ${listOf(parts)}.`;
     }
 
     // Stages the request pane's values as test data: each becomes a variable in the active

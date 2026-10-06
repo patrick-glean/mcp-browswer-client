@@ -193,12 +193,15 @@ Write messages as sentences someone can act on, and put structured data in `deta
 npm run build                       # both libraries
 npm run test:browser -- --reference # the real UI in headless Chrome, on the default TypeScript SDK library
 npm run test:browser:wasm -- --reference # the same on the Rust/WASM library
-npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema, and RFC 6570 URIs
+npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema and real servers' descriptions, and RFC 6570 URIs
 npm run test:rust                   # the Rust library's protocol logic
 npm run bench -- --quick            # tool-call throughput of every library, in a few minutes
 ```
 
 Pre-fill's test data comes from `public/workbench/prefill.js`, a pure function of the tool's schema and the environment's variables. Keep it deterministic (no randomness, so runs of the same values compare) and valid: a new keyword it handles gets a schema in `tests/prefill.test.mjs`, where every generated value is validated against its schema.
+
+- `testData(schema, { variables, every })` fills the required fields, which is what the request pane does when a tool opens (and the resource and prompt panes when one is picked); `every` fills the optional ones too. `fieldTestData(schema, path, { variables })` fills one field, by the path the form names it with (`limit`, `filter.owner`), the way `every` would. That's Fill beside a field's name: `addFillButtons` and `fillField` in `public/workbench/util.js`, which find fields by the `data-field` that AppShell's `renderInputField` puts on each card.
+- Values from descriptions are where Pre-fill most often goes wrong, since servers describe their tools for models: examples of what a person might ask, mappings ("this week" -> pw) and fields not to fill. A description's value has to follow a cue (examples, or a list of the values a field takes), be quoted with quotes that pair up or be one bare token that ends its phrase, and fit the field. A phrase only goes into a field that takes free text. When a server's description fills something that makes no sense, add it to the "prose in a description" test, shortened, before changing the rules.
 
 After a rebuild, reload the page. Each load checks the worker's scripts, and the build files change with every build, so a new worker installs. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the TypeScript SDK client (…)" with the new build time.
 

@@ -1,10 +1,11 @@
-// The request area while the tool list shows prompts: the picked prompt's arguments, filled in with
-// Pre-fill's test data, and Get. The messages the server returns show in wb-contents. Arguments
-// are text, and take {{variables}} like a tool's fields.
+// The request area while the tool list shows prompts: the picked prompt's arguments, the required
+// ones filled in with Pre-fill's test data, and Get. Fill beside an argument fills that one. The
+// messages the server returns show in wb-contents. Arguments are text, and take {{variables}}
+// like a tool's fields.
 
 import { testData } from '../prefill.js';
 import { resolveArguments } from '../template.js';
-import { escapeHtml, serverLabel } from '../util.js';
+import { addFillButtons, escapeHtml, fillField, serverLabel } from '../util.js';
 import { WbElement } from './base.js';
 
 // A prompt's arguments as a schema, for the shared form fields and Pre-fill's test data.
@@ -26,9 +27,17 @@ export class WbPrompt extends WbElement {
         this.workbench.on('run-request', () => {
             if (!this.hidden) this.get();
         }, signal);
+        this.workbench.on('environment', () => {
+            const form = this.$('#promptForm');
+            if (form && this.schema) addFillButtons(form, this.schema, this.workbench);
+        }, signal);
         this.addEventListener('submit', event => {
             event.preventDefault();
             this.get();
+        }, { signal });
+        this.addEventListener('click', event => {
+            const path = event.target.closest('[data-fill-field]')?.dataset.fillField;
+            if (path) fillField(this.$('#promptForm'), this.schema, path, this);
         }, { signal });
     }
 
@@ -73,6 +82,7 @@ export class WbPrompt extends WbElement {
         const ordered = [...names.filter(name => required.has(name)), ...names.filter(name => !required.has(name))];
         for (const name of ordered) form.appendChild(this.shell.renderInputField(name, this.schema.properties[name], required.has(name)));
         if (names.length) this.shell.fillToolForm(form, this.schema, testData(this.schema, { variables: this.workbench.variables }).values);
+        addFillButtons(form, this.schema, this.workbench);
     }
 
     async get() {

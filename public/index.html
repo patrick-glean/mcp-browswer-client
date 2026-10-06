@@ -259,13 +259,13 @@
         <section class="guide-section">
             <h3>2. Check the connection</h3>
             <p>The bar above the tools shows the server's status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake. Info has everything the server said about itself.</p>
-            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code> and <code>ticket</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code> and <code>search_notes</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
         </section>
 
         <section class="guide-section">
             <h3>3. Run a tool</h3>
-            <p>Click a tool, fill in its fields and choose Run (or press ⌘↵ or Ctrl+Enter). The result appears beside it; JSON has the whole reply. Optional fields left empty aren't sent.</p>
-            <p>Pre-fill fills the fields from what you last sent, a saved request, or test data: the schema's examples where it has them, and generated values that fit each field where it doesn't. Fields take <code>{{variables}}</code> from the environment in the top bar, and Stage these values, in Pre-fill's menu, keeps a field's value there for any tool with that field. Save keeps a request; run it again from Saved on the left to see what changed.</p>
+            <p>Click a tool: its required fields start with test data. Change what you like and choose Run (or press ⌘↵ or Ctrl+Enter). The result appears beside it; JSON has the whole reply. Optional fields left empty aren't sent.</p>
+            <p>Fill, beside a field's name, fills that field with test data: the schema's default or example where it has one, and a value made to fit the field where it doesn't. Pre-fill brings back what you last sent or a saved request, and its menu fills every field with test data at once. Fields take <code>{{variables}}</code> from the environment in the top bar, and Stage these values, in Pre-fill's menu, keeps a field's value there for any tool with that field. Save keeps a request; run it again from Saved on the left to see what changed. <code>search_notes</code>, on the mock, has 20 fields to try it on.</p>
         </section>
 
         <section class="guide-section">
@@ -1461,10 +1461,12 @@
                 }
             }
 
-            // A labelled field for one schema property; objects nest their properties' fields.
+            // A labelled field for one schema property; objects nest their properties' fields. The
+            // card's data-field is the field's path, as its inputs' names use it.
             renderInputField(key, prop, isRequired, path = key) {
                 const inputCard = document.createElement('div');
                 inputCard.className = 'tool-input-card';
+                inputCard.dataset.field = path;
                 // Names, types and descriptions come from the server, so they're escaped.
                 let label = `<label><strong>${escapeHtml(key)}</strong> (${escapeHtml(schemaType(prop) || 'string')})`;
                 if (isRequired) label += '<span class="required-mark">*</span>';

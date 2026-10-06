@@ -66,7 +66,7 @@ Its layout, from left to right:
 - **The rail**: your servers (with their status, tool count, or Sign in), saved requests grouped in collections, and the latest runs. Add a server with +: paste its URL, or enter your work email to find your company's Glean.
 - **The server bar**, across the top: the selected server's status and protocol, sign-in, Connect, Refresh (its tools, resources and prompts) and Info.
 - **Tools, Resources and Prompts**: what the selected server offers, a tab each, with a filter (and, for tools, annotation filters). Resources and Prompts open when the server declares them; see [Resources and prompts](#resources-and-prompts).
-- **The request pane**: the tool's arguments, with Pre-fill, Save and Run, and tabs for Sends (the arguments as they'll go out) and Schema.
+- **The request pane**: the tool's arguments, the required ones filled with test data and each with Fill beside its name, with Pre-fill, Save and Run, and tabs for Sends (the arguments as they'll go out) and Schema.
 - **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON and Runs (every run of this request).
 - **The dock**, along the bottom: Log, Trace (every HTTP request and response) and Runs (every call). Collapse it, or drag its top edge.
 
@@ -74,20 +74,21 @@ Drag the edges between the rail, the tool list and the request and response pane
 
 The top bar switches between the Workbench and Apps, picks the environment and opens Variables, and has Go to (⌘K or Ctrl+K) for any server, tool or saved request. ⌘↵ or Ctrl+Enter runs the request, ⌘S or Ctrl+S saves it, `/` jumps to the tool filter and Escape closes menus and side sheets.
 
-- **Pre-fill.** One click fills a tool's fields from what you last sent to it, or else your newest saved request for it, or else test data. The menu beside it picks a source:
+- **Test data.** Opening a tool fills its required fields with test data, and leaves the optional ones empty: a tool with 20 fields, 5 of them required, opens with those 5 filled. Fill, beside any field's name, fills just that field, so you can fill some optional fields by hand and others with Fill. Its tooltip shows the value and where it comes from. A field's test data is the first of:
+  - its `const`
+  - a variable named like it in the active environment, ignoring case, `-` and `_` (staged test data; see below)
+  - its `default`, unless that's `null` or empty
+  - its first example, from `examples` or from its description: "e.g. 'react'", "for example `eu-west-1`", or the values it lists ('one of "today", "past_week"', 'can be a person's name, "me" or "myteam"'). Descriptions written for models often give examples of what a person might ask rather than values, so prose doesn't count: "e.g. last week" isn't the value `last`, and a whole question only goes into a field that takes free text.
+  - a generated value that fits its type, format, pattern, length, range, `multipleOf` and enum. Common names get plausible text (`email`, `url`, `query`, `owner` and `repo`, `question`, IDs, dates and so on), and so does what a description says a field holds: a date as YYYY-MM-DD (a range starts a week before it ends, today), an email address, a URL. Optional pagination cursors get no test data, since only an earlier response has one. Nothing is random, so the same tool always gets the same values and their runs compare.
+
+  The note under the title says how many fields came from the schema, from staged variables, or were generated.
+- **Pre-fill.** One click fills a tool's fields from what you last sent to it, or else your newest saved request for it, or else test data for the required fields. The menu beside it picks a source:
   - what you last sent
   - any saved request for the tool
-  - test data from the schema, for the required fields and any field the schema suggests a value for. Each field takes the first of:
-    - its `const`
-    - a variable named like it in the active environment, ignoring case, `-` and `_` (staged test data; see below)
-    - its `default`
-    - its first example, from `examples` or from its description ("e.g. 'react'")
-    - a generated value that fits its type, format, pattern, length, range, `multipleOf` and enum, with plausible text for common names: `email`, `url`, `query`, `owner` and `repo`, `language`, IDs, dates and so on. Nothing is random, so the same tool always gets the same values and their runs compare.
-
-    The note under the title says how many fields came from the schema, from staged variables, or were generated.
-  - test data for every field: the same, with the optional fields filled in too
+  - test data for the required fields, as opening the tool fills them
+  - test data for every field: the optional ones too
   - nothing (clears the fields)
-- **Staged test data.** Stage these values, at the bottom of the Pre-fill menu, saves each field's value as a variable named like the field in the active environment (or updates the one named alike). From then on, Pre-fill fills that field in any tool with it, ahead of the schema's own examples, so a set of test data per environment is a matter of choosing the environment. Edit or remove staged values under Variables.
+- **Staged test data.** Stage these values, at the bottom of the Pre-fill menu, saves each field's value as a variable named like the field in the active environment (or updates the one named alike). From then on, it's that field's test data in any tool with the field, ahead of the schema's own examples: a required field gets it when the tool opens, an optional one from Fill. So a set of test data per environment is a matter of choosing the environment. Edit or remove staged values under Variables.
 - **Environments and variables.** Choose an environment in the top bar and edit its variables under Variables.
   - Write `{{name}}` in any field, number fields included. The field shows what it becomes, such as `→ hi world · from Default`.
   - A field that is exactly one variable gets the variable's value converted to the field's type: a number, true or false, or JSON for objects and arrays. Text around variables stays text.
@@ -125,7 +126,7 @@ The Workbench doubles as an inspector, in the spirit of the MCP Inspector but wi
 When a server declares resources or prompts, the client lists them as soon as it connects (every page, and again with Refresh), and their tabs beside Tools show how many there are.
 
 - **Resources**: each resource with its title and URI, then the resource templates. Pick one and choose Read (or press ⌘↵ or Ctrl+Enter). A template gets a field for each of its variables (RFC 6570, such as `{id}` or `{+path}`), filled in with Pre-fill's test data and taking `{{variables}}`, with the URI they make shown below. What comes back shows on the right: text, with JSON indented; images, and audio with a player; other binary data with its size and a download.
-- **Prompts**: each prompt with how many arguments it takes. Pick one to fill in its arguments (required ones first, with test data), then choose Get. The messages come back on the right, each with its role, and with any image or resource they carry.
+- **Prompts**: each prompt with how many arguments it takes. Pick one to fill in its arguments (required ones first, and filled with test data; Fill beside an optional one fills it), then choose Get. The messages come back on the right, each with its role, and with any image or resource they carry.
 - **Errors**: a resource the server doesn't have, or a prompt missing an argument, shows the server's error. If a list can't be fetched, its tab says why, and the tools keep working.
 
 Each tab keeps what its last read or get returned, with a JSON tab for the raw result. Reads and gets aren't tool calls, so they don't go into the run history.
@@ -228,7 +229,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
-- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, the same every time) and the URIs resource templates make
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time) and the URIs resource templates make
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
@@ -324,16 +325,17 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 
 With `npm start` and `npm run start:mock-mcp` running, open http://localhost:8080:
 
-1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count` and `ticket`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
-2. **Run a tool.** Choose `echo`, type `hi` into `text` and choose Run. The result reads `Echo: hi`.
+1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket` and `search_notes`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
+2. **Run a tool.** Choose `echo`: `text` starts with `hello`, the schema's example. Type `hi` into it and choose Run. The result reads `Echo: hi`.
 3. **Header parameters.** Run `echo_region` with region `Zürich`. The result reads `Echo from Zürich: …`; the mock checks that the `Mcp-Param-Region` header carried the same value, base64-encoded because it isn't ASCII.
-4. **The log.** In the dock you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 4 tools in 5 ms`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Trace has each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
-5. **Chat through a tool.** Open Apps. Under Model, choose the mock and `echo`, tick "Your message goes here" on `text`, and send `hello`. The reply `Echo: hello` joins the conversation.
-6. **Save and run again.** Back in the Workbench, choose `ticket`, then Pre-fill (the schema gives `prefix` its default, `T-`) and Save. In the rail, run it twice with ▶. The second result says Changed since the last run, and Changes has the line that differs, because `ticket` returns the next number every time. A saved `echo` says Same as the last run.
-7. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including the chat's.
-8. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
-9. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
-10. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
+4. **Test data.** Choose `search_notes`, which has 20 fields, 5 of them required. Those 5 start with test data the mock accepts: `test`, a week ago to today, `test@example.com` and `5`. The other 15 are folded away under "15 optional fields". Open them, choose Fill beside `owner` (it becomes `me`, a value its description lists), type `eu-central-1` into `region` and choose Run: the result shows the 7 arguments that went out. `cursor` has no Fill, since a pagination cursor only comes from an earlier response.
+5. **The log.** In the dock you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 5 tools in 5 ms`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Trace has each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
+6. **Chat through a tool.** Open Apps. Under Model, choose the mock and `echo`, tick "Your message goes here" on `text`, and send `hello`. The reply `Echo: hello` joins the conversation.
+7. **Save and run again.** Back in the Workbench, choose `ticket`, then Fill beside `prefix` (it takes its default, `T-`) and Save. In the rail, run it twice with ▶. The second result says Changed since the last run, and Changes has the line that differs, because `ticket` returns the next number every time. A saved `echo` says Same as the last run.
+8. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including the chat's.
+9. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
+10. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
+11. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
 
 ### More server behaviors
 
@@ -405,13 +407,13 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
-npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema, and resource template URIs
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, and resource template URIs
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (each Pre-fill source, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 

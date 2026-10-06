@@ -40,7 +40,8 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - Resource reads and prompt gets aren't tool calls: they aren't recorded as runs. Resource lists aren't cached in the libraries; only `tools/list` is.
 - Every tool call is recorded as a run in `handleToolCall`, whatever its source. Recording must never fail the call; log a warning instead.
 - `{{variables}}` are resolved in the page, which has the tool's schema for type conversion, before `call_tool` goes out. The worker gets the sent arguments plus the arguments as written in `run.args`.
-- Pre-fill's test data (`prefill.js`) takes hints first (`const`, a variable named like the field, `default`, examples, an example in the description) and generates the rest. It must stay deterministic and valid for the schema: `npm run test:unit` validates it with Ajv. Staged test data is environment variables named like fields, never a separate store.
+- Pre-fill's test data (`prefill.js`) takes hints first (`const`, a variable named like the field, `default`, examples, a value its description gives) and generates the rest. It must stay deterministic and valid for the schema: `npm run test:unit` validates it with Ajv. Staged test data is environment variables named like fields, never a separate store.
+- Opening a tool fills only its required fields; Fill beside a field fills that one (`fieldTestData`). Never fill optional fields unasked, and never generate an optional pagination cursor. A value from a description must be one the description gives as a value, not prose: add the description to `tests/prefill.test.mjs` when one fills something that makes no sense.
 - Runs compare on a hash of the result with sorted keys and no `_meta`. A saved request's runs compare with each other, and other calls with the same tool and sent arguments.
 - Never put credentials in Workbench records. Arguments are stored as written, and tokens travel only in `mcpOptions`.
 - The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `chat` and `reply`; treat `sandbox` (from before the rename) as `workbench`.
@@ -84,6 +85,7 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] The TypeScript SDK library is the default (`DEFAULT_CLIENT`); Rust/WASM is the alternative to compare against
 - [x] Resources (every page, templates with RFC 6570 URIs, text and binary reads) and prompts (arguments with test data, messages) in both libraries and the Workbench, on both eras
 - [x] Resizable Workbench panes (rail, tool list, request and response), kept across reloads
+- [x] Test data for the required fields when a tool opens, Fill beside each field, and values from descriptions only when they're values
 
 ### Next
 - [ ] App builder milestone 2: workflow steps and the Chat app as a manifest (a shape, allowed tools, pinned arguments, instructions and output checks)

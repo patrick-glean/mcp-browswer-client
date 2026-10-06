@@ -129,6 +129,20 @@ async function stopChrome(chrome) {
     clearTimeout(force);
 }
 
+// Chrome can still be saving its preferences as it exits, which puts a file back into the
+// directory being removed. A profile left in the temp directory isn't a failed check.
+async function removeProfile(profile) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            rmSync(profile, { recursive: true, force: true });
+            return;
+        } catch {
+            await sleep(300);
+        }
+    }
+    notice('cleanup', `couldn't delete Chrome's profile, ${profile}`);
+}
+
 function stopAll() {
     for (const child of children) child.kill();
 }
@@ -432,10 +446,11 @@ async function main() {
         })`);
         // The default library needs no ?client=: a first visit runs on it.
         await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/${CLIENT === DEFAULT_CLIENT ? '' : `?client=${CLIENT.name}`}` });
+        // Until the navigation commits, the page is still the seed page, which has none of these.
         const healthy = await page.waitFor(`
-            document.getElementById('sw-status').classList.contains('healthy') &&
-            document.getElementById('client-status').classList.contains('healthy') &&
-            !!appShell.serviceWorker && !!appShell.workbench`);
+            !!document.getElementById('sw-status')?.classList.contains('healthy') &&
+            !!document.getElementById('client-status')?.classList.contains('healthy') &&
+            typeof appShell !== 'undefined' && !!appShell.serviceWorker && !!appShell.workbench`);
         check('app loads with the service worker, the MCP client and the Workbench running', !!healthy);
         const carriedOver = await page.waitFor(`(() => {
             const shown = [...document.querySelectorAll('#chatMessages .chat-msg')].map(m => m.textContent);
@@ -473,11 +488,11 @@ async function main() {
         check('logs: the worker reports the client build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -542,7 +557,7 @@ async function main() {
         check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
         check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 4)', inspector.filtered);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 5)', inspector.filtered);
         check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
@@ -567,7 +582,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 4 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 5 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
@@ -786,13 +801,15 @@ async function main() {
         };
         const runRows = `[...document.querySelectorAll('#runsList tr[data-open-run]')]`;
 
+        const fillBeside = path => page.run(`document.querySelector('#requestForm [data-fill-field="${path}"]').click()`);
+
         await openTool(modernUrl, 'echo');
-        await prefillFrom('schema');
-        const echoFromSchema = await page.waitFor(`${field('text')} || null`, 5000);
+        const echoOnOpen = await page.waitFor(`${field('text')} ? { text: ${field('text')}, note: ${requestNote} } : null`, 5000);
         await openTool(modernUrl, 'count');
-        await prefillFrom('schema');
-        const countFromSchema = await page.waitFor(`${field('n')} || null`, 5000);
-        check('pre-fill: From the schema fills in examples and defaults', echoFromSchema === 'hello' && countFromSchema === '3', `${echoFromSchema}, ${countFromSchema}`);
+        const countOnOpen = await page.waitFor(`${field('n')} || null`, 5000);
+        check('pre-fill: opening a tool fills its required fields with the schema\'s examples and defaults',
+            echoOnOpen?.text === 'hello' && echoOnOpen.note === 'Filled 1 required field: 1 from the schema.' && countOnOpen === '3',
+            `${JSON.stringify(echoOnOpen)}, ${countOnOpen}`);
 
         await page.run(`(() => {
             document.getElementById('editEnvBtn').click();
@@ -857,9 +874,43 @@ async function main() {
             appShell.workbench.editEnvironment({ name: appShell.workbench.environment.name, variables: rest });
         })()`);
 
+        // search_notes has twenty fields, five of them required, described the way servers write
+        // descriptions for models, and it turns away arguments a real server would.
+        await openTool(modernUrl, 'search_notes');
+        const notesOnOpen = await page.waitFor(`(() => {
+            const form = document.getElementById('requestForm');
+            const filled = [...form.querySelectorAll('[name]')].filter(input => input.value).map(input => input.name).sort();
+            return filled.length ? {
+                filled: filled.join(', '), note: ${requestNote}, folded: !form.querySelector('.wb-optional').open,
+                fills: form.querySelectorAll('[data-fill-field]').length, cursorFill: !!form.querySelector('[data-fill-field="cursor"]'),
+            } : null;
+        })()`, 5000);
+        check('pre-fill: opening a tool with many fields fills only the required ones, and offers Fill beside each of the others',
+            notesOnOpen?.filled === 'after, author, before, limit, query' && notesOnOpen.note === 'Filled 5 required fields: 5 with generated test data.'
+                && notesOnOpen.folded && notesOnOpen.fills === 21 && !notesOnOpen.cursorFill,
+            JSON.stringify(notesOnOpen));
+        await page.run(`document.querySelector('#requestForm .wb-optional').open = true`);
+        await fillBeside('owner');
+        await fillBeside('updated');
+        const filledNote = await page.run(requestNote);
+        await setField('region', 'eu-central-1');
+        const notesRun = await submitRequest();
+        const notesSent = JSON.parse(notesRun?.match(/Searched with (\{[^{}]*\})/)?.[1] || 'null');
+        check('pre-fill: the server takes the test data, and gets the required fields plus the ones filled one by one',
+            Object.keys(notesSent || {}).sort().join(', ') === 'after, author, before, limit, owner, query, region, updated'
+                && notesSent.owner === 'me' && notesSent.updated === 'today' && notesSent.region === 'eu-central-1'
+                && notesSent.author === 'test@example.com' && notesSent.after < notesSent.before && filledNote === 'Filled updated with "today" (from its description).',
+            `${filledNote} ${(notesRun || '').slice(0, 240)}`);
+        await prefillFrom('every');
+        const everyNote = await page.waitFor(`${requestNote}.startsWith('Filled 19 fields') ? ${requestNote} : null`, 5000);
+        const everyRun = await submitRequest();
+        check('pre-fill: test data for every field leaves out the pagination cursor, and the server takes all of it',
+            !!everyNote && /No notes match/.test(everyRun || '') && /"request_id"/.test(everyRun || '') && !/"cursor"/.test(everyRun || ''),
+            `${everyNote}; ${(everyRun || '').slice(0, 200)}`);
+
         await openTool(modernUrl, 'echo');
         await page.run(`document.querySelector('#requestPane [data-prefill-best]').click()`);
-        const lastSentText = await page.waitFor(`${field('text')} || null`, 5000);
+        const lastSentText = await page.waitFor(`${requestNote}.startsWith('Filled from what you last sent') && ${field('text')}`, 5000);
         check('pre-fill: one click brings back what you last sent, variables and all', lastSentText === '{{greeting}} world', lastSentText);
 
         const saveAs = async (name, collection) => {
@@ -884,7 +935,12 @@ async function main() {
         const crumb = await page.run(`document.querySelector('#requestPane .wb-crumb').innerText.replace(/\\s+/g, ' ')`);
         check('saved requests: the request pane says which saved request it shows', crumb.endsWith('echo › Greeting'), crumb);
         await openTool(modernUrl, 'ticket');
-        await prefillFrom('schema');
+        const prefixOnOpen = await page.run(field('prefix'));
+        await fillBeside('prefix');
+        const prefixFilled = await page.waitFor(`${field('prefix')} ? { prefix: ${field('prefix')}, note: ${requestNote}, focused: document.activeElement?.name } : null`, 5000);
+        check('pre-fill: an optional field stays empty until Fill beside it fills it, here with its default',
+            prefixOnOpen === '' && prefixFilled?.prefix === 'T-' && prefixFilled.note === 'Filled prefix with "T-" (its default).' && prefixFilled.focused === 'prefix',
+            `${JSON.stringify(prefixOnOpen)} then ${JSON.stringify(prefixFilled)}`);
         const savedTicket = await saveAs('Next ticket', 'Smoke');
         const savedNames = await page.waitFor(`(() => {
             const names = [...document.querySelectorAll('#savedList .saved-group')].filter(group => group.querySelector('.saved-group-name')?.textContent === 'Smoke')
@@ -1349,7 +1405,7 @@ async function main() {
         }
         page?.close();
         await stopChrome(chrome);
-        rmSync(profile, { recursive: true, force: true });
+        await removeProfile(profile);
     }
 
     const failed = results.filter(r => !r.ok);

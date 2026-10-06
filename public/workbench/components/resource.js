@@ -1,11 +1,12 @@
 // The request area while the tool list shows resources: the picked resource, or a resource
 // template with a field for each of its variables and the URI they make, and Read. What the
-// server returns shows in wb-contents. Template fields take {{variables}} and Pre-fill's test data.
+// server returns shows in wb-contents. Template fields take {{variables}} and Pre-fill's test data,
+// and Fill puts a field's test data back.
 
 import { testData } from '../prefill.js';
 import { resolveArguments } from '../template.js';
 import { expandTemplate, templateVariables } from '../uri-template.js';
-import { escapeHtml, serverLabel } from '../util.js';
+import { addFillButtons, escapeHtml, fillField, serverLabel } from '../util.js';
 import { WbElement } from './base.js';
 
 // A template's variables as a schema, for the shared form fields and Pre-fill's test data.
@@ -19,12 +20,20 @@ export class WbResource extends WbElement {
     setup(signal) {
         this.workbench.on('view', () => this.render(), signal);
         this.workbench.on('item', ({ refreshed }) => (refreshed ? this.showUri() : this.render()), signal);
-        this.workbench.on('environment', () => this.showUri(), signal);
+        this.workbench.on('environment', () => {
+            const form = this.$('#resourceForm');
+            if (form && this.schema) addFillButtons(form, this.schema, this.workbench);
+            this.showUri();
+        }, signal);
         this.workbench.on('run-request', () => {
             if (!this.hidden) this.read();
         }, signal);
         this.addEventListener('input', event => {
             if (event.target.closest('#resourceForm')) this.showUri();
+        }, { signal });
+        this.addEventListener('click', event => {
+            const path = event.target.closest('[data-fill-field]')?.dataset.fillField;
+            if (path) fillField(this.$('#resourceForm'), this.schema, path, this);
         }, { signal });
         this.addEventListener('submit', event => {
             event.preventDefault();
@@ -74,6 +83,7 @@ export class WbResource extends WbElement {
         const form = this.$('#resourceForm');
         for (const name of names) form.appendChild(this.shell.renderInputField(name, this.schema.properties[name], true));
         if (names.length) this.shell.fillToolForm(form, this.schema, testData(this.schema, { variables: this.workbench.variables }).values);
+        addFillButtons(form, this.schema, this.workbench);
         this.showUri();
     }
 

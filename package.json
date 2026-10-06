@@ -13,7 +13,7 @@
     "start:mock-mcp": "python3 test_mcp_server.py",
     "start:reference-mcp": "venv/bin/python tests/reference_server.py",
     "test:rust": "cargo test --lib",
-    "test:unit": "node --test tests/",
+    "test:unit": "node --test \"tests/*.test.mjs\"",
     "test:browser": "node tests/browser-smoke.mjs",
     "test:browser:wasm": "node tests/browser-smoke.mjs --client=wasm",
     "test:public": "node tests/browser-smoke.mjs --public",
