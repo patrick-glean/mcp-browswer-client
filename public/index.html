@@ -276,7 +276,7 @@
         <section class="guide-section">
             <h3>2. Check the connection</h3>
             <p>The bar above the tools shows the server's status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake. Info has everything the server said about itself.</p>
-            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code> and <code>search_notes</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code>, <code>search_notes</code> and <code>make_screen</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
         </section>
 
         <section class="guide-section">
@@ -287,12 +287,18 @@
 
         <section class="guide-section">
             <h3>4. Chat through a tool</h3>
-            <p>Open Apps in the top bar. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
+            <p>Open Apps in the top bar, then Chat. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
             <p>A model tool with a list field can run an agent loop: tick "The conversation goes here" on it, and the model also gets the instructions, your servers' tools and the conversation so far. Tool calls it writes in its reply run, and their results join the conversation.</p>
         </section>
 
         <section class="guide-section">
-            <h3>5. Read the log</h3>
+            <h3>5. Build an app</h3>
+            <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, and a rule that sends the text box to a tool and puts its answer in the output. It runs beside the builder, and What happened shows each step.</p>
+            <p>Each part of the screen has an id. In a call, <code>{{input}}</code> is what the text box holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock, choose HTML from a tool and <code>make_screen</code> for a screen a tool made.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>6. Read the log</h3>
             <p>The dock at the bottom lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Trace has every HTTP request and response, and Runs every call. Copy or Download the log to share a problem.</p>
         </section>
 

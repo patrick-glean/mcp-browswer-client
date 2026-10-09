@@ -21,6 +21,7 @@ Examples:
 import argparse
 import base64
 import hashlib
+import html
 import json
 import re
 import threading
@@ -139,6 +140,17 @@ TOOLS = [
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
+    {
+        # An app's screen can be HTML a tool returns, as an embedded text/html resource.
+        "name": "make_screen",
+        "title": "Make a screen",
+        "description": "Makes an HTML page for an app's screen: a text box (question), a button (ask) and an output (answer).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"title": {"type": "string", "description": "The page's heading.", "default": "Ask the mock"}},
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
 ]
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
@@ -157,6 +169,32 @@ RESOURCE_TEMPLATES = [
     {"uriTemplate": "mock://notes/{id}", "name": "note", "title": "A note", "description": "Note number id, made up on the spot.", "mimeType": "text/plain"},
 ]
 README = "# Mock MCP Server\n\nA server for testing MCP clients: tools, resources and prompts, in either protocol era.\n"
+# What make_screen returns. Its script must never run where an app shows the screen.
+SCREEN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <style>
+    body { margin: 0; padding: 24px; font: 15px/1.5 system-ui, sans-serif; }
+    main { display: grid; gap: 12px; max-width: 560px; }
+    input { padding: 8px 10px; font: inherit; }
+    button { justify-self: start; padding: 8px 18px; font: inherit; }
+    #answer { min-height: 40px; padding: 10px; background: #f3f3f3; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{title}</h1>
+    <label for="question">Question</label>
+    <input id="question" placeholder="Ask the mock something">
+    <button id="ask" type="button">Ask</button>
+    <div id="answer" aria-live="polite"></div>
+  </main>
+  <script>document.getElementById('answer').textContent = 'The screen ran its own script';</script>
+</body>
+</html>
+"""
 PROMPTS = [
     {
         "name": "greet",
@@ -516,6 +554,12 @@ class Handler(BaseHTTPRequestHandler):
             if problems:
                 return self.respond(request_id, {**result, "content": [text_content("; ".join(problems))], "isError": True})
             text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+        elif name == "make_screen":
+            page = SCREEN_HTML.replace("{title}", html.escape(str(args.get("title") or "Ask the mock")))
+            return self.respond(request_id, {**result, "content": [
+                text_content("Here is the screen."),
+                {"type": "resource", "resource": {"uri": "mock://screen.html", "mimeType": "text/html", "text": page}},
+            ]})
         else:
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")
