@@ -1,0 +1,622 @@
+/*
+ * The Apps page's rail and the app builder (public/apps/), on top of styles.css and the
+ * Workbench's shared pieces (.wb-row, .wb-chip, .wb-form). Colors come from the --theme-* tokens.
+ */
+
+apps-rail,
+app-header,
+app-screen,
+app-flow,
+app-preview {
+    display: block;
+    min-width: 0;
+}
+
+/* ---------- The rail ---------- */
+
+apps-rail {
+    overflow-y: auto;
+    border-right: 1px solid var(--theme-border-light);
+    background: var(--theme-background-light);
+}
+
+.apps-rail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 6px 4px;
+}
+
+@media (max-width: 860px) {
+    apps-rail {
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid var(--theme-border-light);
+    }
+}
+
+/* ---------- The builder ---------- */
+
+.app-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 24px 32px;
+}
+
+.app-builder-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.app-build {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+app-preview {
+    position: sticky;
+    top: 0;
+}
+
+@media (max-width: 1100px) {
+    .app-builder-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    app-preview {
+        position: static;
+    }
+}
+
+.app-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+
+.app-head-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 240px;
+}
+
+.app-head-text input {
+    min-height: 0;
+    padding: 2px 8px;
+    margin-left: -8px;
+    border-color: transparent;
+    background: transparent;
+}
+
+.app-head-text input:hover:not(:focus) {
+    border-color: var(--theme-border-light);
+}
+
+.app-name {
+    font-family: var(--font-heading);
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.75rem;
+    letter-spacing: -0.03rem;
+}
+
+.app-description {
+    color: var(--theme-text-secondary);
+    font-size: 0.8125rem;
+}
+
+.app-version {
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.app-menu .menu-list {
+    right: 0;
+}
+
+.app-intro {
+    max-width: 860px;
+    margin-top: 6px;
+    font-size: 0.8125rem;
+}
+
+/* A numbered part of the builder: Screen, Flow, Try it. */
+.app-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+}
+
+.app-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.app-section-head h3 {
+    display: flex;
+    align-items: center;
+    font-size: 1rem;
+    line-height: 1.5rem;
+}
+
+.app-step {
+    display: inline-grid;
+    width: 22px;
+    height: 22px;
+    margin-right: 10px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.app-section-note {
+    margin-top: -4px;
+    font-size: 0.8125rem;
+}
+
+.app-section code,
+.app-found code {
+    padding: 0 4px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background-mid);
+    font-size: 0.75rem;
+}
+
+/* Small labelled fields, side by side where there's room. */
+.app-field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 120px;
+}
+
+.app-field > span {
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+.app-field-narrow {
+    flex: 0 0 72px;
+    min-width: 72px;
+}
+
+.app-section input:where([type='text']),
+.app-section textarea,
+.app-section select {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 0.8125rem;
+}
+
+.app-section select {
+    padding-right: 30px;
+}
+
+.app-invalid {
+    border-color: var(--theme-error) !important;
+}
+
+/* ---------- Screen ---------- */
+
+.app-components {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-component {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+}
+
+.app-component:hover {
+    border-color: var(--theme-border-dark);
+}
+
+.app-component-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.app-id-mark {
+    color: var(--theme-text-secondary);
+    font: 0.75rem var(--font-mono);
+}
+
+.app-section .app-id input {
+    width: 150px;
+    min-height: 24px;
+    padding: 0 6px;
+    border-color: transparent;
+    background: transparent;
+    font-size: 0.75rem;
+}
+
+.app-section .app-id input:hover,
+.app-section .app-id input:focus {
+    border-color: var(--theme-border-dark);
+    background: var(--theme-background);
+}
+
+.app-component-props {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+}
+
+.app-component-props textarea {
+    min-height: 0;
+}
+
+.app-field-error {
+    font-size: 0.75rem;
+}
+
+.app-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-add-label,
+.app-chips-label {
+    margin-right: 2px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+.app-chips-label + .wb-chip ~ .app-chips-label {
+    margin-left: 8px;
+}
+
+.app-html-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-html-status {
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.app-html-status.text-error {
+    color: var(--theme-error);
+}
+
+.app-html-source {
+    font-size: 0.75rem !important;
+    line-height: 1.125rem;
+    white-space: pre;
+}
+
+.app-found {
+    font-size: 0.75rem;
+    line-height: 1.375rem;
+}
+
+.app-kind {
+    color: var(--theme-text-secondary);
+}
+
+/* ---------- A call: server, tool and its fields ---------- */
+
+.app-call {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.app-call-pick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+}
+
+.app-call-help {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 0.75rem;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.app-args {
+    gap: 10px;
+}
+
+.app-args:empty {
+    display: none;
+}
+
+.app-args .tool-input-card > label {
+    font-size: 0.75rem;
+}
+
+.app-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-chips .wb-chip {
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    font-size: 0.6875rem;
+}
+
+/* ---------- Flow ---------- */
+
+.app-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-rule {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--theme-border-light);
+    border-left: 3px solid var(--theme-primary-highlight);
+    border-radius: var(--radius-300);
+}
+
+.app-rule:hover {
+    border-color: var(--theme-border-dark);
+    border-left-color: var(--theme-link);
+}
+
+.app-rule-incomplete {
+    border-left-color: var(--theme-warning-dark);
+}
+
+.app-rule-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.app-rule-number {
+    flex: none;
+    width: 20px;
+    color: var(--theme-text-secondary);
+    font: 600 0.75rem/1.25rem var(--font-mono);
+}
+
+.app-rule-sentence {
+    display: -webkit-box;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.app-rule-actions {
+    display: flex;
+    flex: none;
+    gap: 2px;
+}
+
+.app-rule-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.app-rule-label {
+    padding-top: 7px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-rule-when {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.app-rule-when select {
+    flex: 1;
+    min-width: 140px;
+}
+
+.app-routes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.app-route-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+}
+
+.app-section .app-route select {
+    width: auto;
+}
+
+.app-route [data-route-show] {
+    flex: 1 1 150px;
+    width: auto;
+}
+
+.app-route-word {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+.app-route-add {
+    display: flex;
+    gap: 4px;
+}
+
+.app-rule-problems {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: var(--radius-200);
+    background: var(--theme-warning-background);
+    color: var(--theme-warning-foreground);
+    font-size: 0.75rem;
+    list-style: none;
+}
+
+/* ---------- Try it ---------- */
+
+.app-frame-box {
+    overflow: hidden;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-300);
+    box-shadow: var(--shadow-sm);
+}
+
+.app-frame {
+    display: block;
+    width: 100%;
+    height: clamp(220px, var(--app-frame-height, 360px), 640px);
+    border: none;
+}
+
+.app-trace-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.app-trace-head h4 {
+    color: var(--theme-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-trace {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    margin: 0;
+    padding: 8px 10px;
+    overflow-y: auto;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+    font-size: 0.75rem;
+    list-style: none;
+}
+
+.app-trace-entry {
+    display: grid;
+    grid-template-columns: auto 14px minmax(0, 1fr);
+    gap: 6px;
+    align-items: baseline;
+}
+
+.app-trace-time {
+    color: var(--theme-text-secondary);
+    font: 0.6875rem var(--font-mono);
+}
+
+.app-trace-mark {
+    color: var(--theme-text-secondary);
+    text-align: center;
+}
+
+.app-trace-text {
+    overflow-wrap: anywhere;
+}
+
+.app-trace-event {
+    margin-top: 6px;
+    font-weight: 600;
+}
+
+.app-trace-event:first-child {
+    margin-top: 0;
+}
+
+.app-trace-ok .app-trace-mark {
+    color: var(--theme-success-foreground);
+}
+
+.app-trace-error .app-trace-mark,
+.app-trace-error .app-trace-text {
+    color: var(--theme-error);
+}
+
+.app-trace-note .app-trace-text {
+    color: var(--theme-text-secondary);
+}
+
+.app-trace .link-button {
+    font-size: 0.75rem;
+}

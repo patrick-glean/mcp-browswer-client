@@ -68,7 +68,7 @@ export function serverState(server, authStatus) {
 }
 
 // Where a run came from, as people see it. Runs saved before the rename say 'sandbox'.
-export const SOURCE_LABELS = { workbench: 'Workbench', sandbox: 'Workbench', collection: 'Run all', chat: 'Chat', reply: 'From a reply' };
+export const SOURCE_LABELS = { workbench: 'Workbench', sandbox: 'Workbench', collection: 'Run all', app: 'App', chat: 'Chat', reply: 'From a reply' };
 
 // A run's verdict: same, changed, first (nothing to compare with) or failed.
 export function verdictOf(run) {

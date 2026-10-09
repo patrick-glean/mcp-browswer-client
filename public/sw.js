@@ -189,7 +189,9 @@ function describeServer(url, info) {
 }
 
 // Where a tool call came from, as the trace describes it. The sources are the runs' (see recordRun).
-const CALL_ORIGINS = { workbench: 'the page', chat: 'a chat message', reply: 'a tool call in a reply' };
+const CALL_ORIGINS = { workbench: 'the page', app: 'an app', chat: 'a chat message', reply: 'a tool call in a reply' };
+// Calls a page asked for itself: the Workbench's, and those of the apps you build, which run in the page.
+const PAGE_SOURCES = new Set(['workbench', 'app']);
 
 const METHOD_NOT_FOUND = -32601;
 const counted = (count, one) => `${count} ${one}${count === 1 ? '' : 's'}`;
@@ -467,19 +469,21 @@ async function handleClientMessage(event) {
             }
             break;
         }
-        case 'call_tool':
+        case 'call_tool': {
+            const source = PAGE_SOURCES.has(message.source) ? message.source : 'workbench';
             if (!mcpClient) {
                 // Not a call, so not in history, but the page waits on this run id.
                 event.source?.postMessage({
                     type: 'tool_result',
                     error: 'The MCP client is not loaded',
                     run: message.run?.id ? { id: message.run.id, outcome: 'failed', changed: null } : null,
-                    source: 'workbench'
+                    source
                 });
                 break;
             }
-            await handleToolCall({ source: 'workbench', call: message.call, message, event });
+            await handleToolCall({ source, call: message.call, message, event });
             break;
+        }
         case 'get_chat_instructions':
             event.source?.postMessage({ type: 'chat_instructions', instructions: CHAT_INSTRUCTIONS });
             break;
@@ -705,7 +709,7 @@ async function modelArguments(model, conversationId) {
 }
 
 // Every tool call goes through here, whichever part of the app asked for it (`source`: workbench,
-// chat or reply). `call` is {serverUrl, toolName, args}; for the chat, the model with its fields.
+// app, chat or reply). `call` is {serverUrl, toolName, args}; for the chat, the model with its fields.
 async function handleToolCall({ source, call, message, event }) {
     const toolArgs = source === 'chat' ? await modelArguments(call, message.conversationId) : { ...(call.args || {}) };
     const server = call.serverUrl;
@@ -719,7 +723,7 @@ async function handleToolCall({ source, call, message, event }) {
     try {
         // Only calls the page asked for directly may bring a token; calls started from chat or
         // from a reply use the one the page registered for the server.
-        result = await withAuth(server, source === 'workbench' ? message : {}, {}, options =>
+        result = await withAuth(server, PAGE_SOURCES.has(source) ? message : {}, {}, options =>
             mcpClient.call_tool(server, tool, JSON.stringify(toolArgs), options)
         );
     } catch (err) {
@@ -777,7 +781,7 @@ async function handleToolCall({ source, call, message, event }) {
 // Saves the call and compares its result with the last run of the same request. Pages asking for
 // a call send `run` details: the arguments as written (with {{variables}}), the saved request it
 // came from and the environment. History failing must never fail the call, so errors only log.
-// Sources are handleToolCall's: workbench (collection for Run all), chat and reply.
+// Sources are handleToolCall's: workbench (collection for Run all), app, chat and reply.
 async function recordRun(attempt, { outcome, result = null, error = null, durationMs }) {
     const details = attempt.message?.run || {};
     const record = {

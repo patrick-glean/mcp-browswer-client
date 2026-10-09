@@ -330,6 +330,11 @@ body.wb-resizing-rows * {
         grid-template-columns: minmax(0, 1fr);
     }
 
+    .wb-apps {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
     .wb-dock-head {
         flex-wrap: wrap;
         height: auto;
@@ -1536,16 +1541,29 @@ wb-palette {
     background: var(--theme-error);
 }
 
-/* ---------- Apps ---------- */
+/* ---------- Apps (the builder's own styles are in apps/apps.css) ---------- */
 
 .wb-apps {
+    display: grid;
+    flex: 1;
+    grid-template-columns: clamp(180px, 16vw, 232px) minmax(0, 1fr);
+    min-height: 0;
+}
+
+.apps-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+.apps-chat {
     display: flex;
     flex: 1;
     flex-direction: column;
     gap: 12px;
-    min-height: 0;
     padding: 16px 24px;
-    overflow: auto;
 }
 
 .wb-apps-head h2 {

@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="./tokens.css">
     <link rel="stylesheet" href="./styles.css">
     <link rel="stylesheet" href="./workbench/workbench.css">
+    <link rel="stylesheet" href="./apps/apps.css">
 </head>
 <body>
     <div class="wb-app">
@@ -104,46 +105,62 @@
                 <wb-response id="responsePane" class="wb-area-response wb-pane" role="region" aria-label="Response"></wb-response>
                 <wb-contents id="contentsPane" class="wb-area-response wb-pane" role="region" aria-label="Contents" hidden></wb-contents>
             </div>
-            <section id="appsPage" class="wb-apps" aria-labelledby="appsTitle" hidden>
-                <header class="wb-apps-head">
-                    <h2 id="appsTitle">Chat</h2>
-                    <p class="text-secondary">The first app, an agent loop: the model is an MCP tool. Tick the field your message goes to, and a list field for the conversation, which also tells the model which tools your servers have. Tool calls in its reply run, and their results join the conversation.</p>
-                </header>
-                <div class="chat-card">
-                    <section class="chat-card-left panel" aria-label="Conversation">
-                        <div id="chatMessages" class="chat-messages"></div>
-                        <div class="chat-input-row">
-                            <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
-                            <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
+            <section id="appsPage" class="wb-apps" aria-label="Apps" hidden>
+                <!-- public/apps/: the rail of apps, and the builder for the ones you make. -->
+                <apps-rail class="apps-rail" role="navigation" aria-label="Apps"></apps-rail>
+                <div class="apps-main">
+                    <section id="chatApp" class="apps-chat" aria-labelledby="appsTitle">
+                        <header class="wb-apps-head">
+                            <h2 id="appsTitle">Chat</h2>
+                            <p class="text-secondary">The built-in app, an agent loop: the model is an MCP tool. Tick the field your message goes to, and a list field for the conversation, which also tells the model which tools your servers have. Tool calls in its reply run, and their results join the conversation.</p>
+                        </header>
+                        <div class="chat-card">
+                            <section class="chat-card-left panel" aria-label="Conversation">
+                                <div id="chatMessages" class="chat-messages"></div>
+                                <div class="chat-input-row">
+                                    <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
+                                    <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
+                                </div>
+                                <div id="chatConversation" class="chat-conversation"></div>
+                            </section>
+                            <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
+                                <div class="chat-model-card">
+                                    <div class="panel-title">Model</div>
+                                    <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
+                                    <div class="chat-server-select-row">
+                                        <label for="chatServerSelect">Server</label>
+                                        <select id="chatServerSelect"></select>
+                                    </div>
+                                    <div class="chat-tool-select-row">
+                                        <label for="chatToolSelect">Tool</label>
+                                        <select id="chatToolSelect"></select>
+                                    </div>
+                                    <form id="chatToolConfigForm" class="chat-tool-config"></form>
+                                </div>
+                                <div class="chat-context">
+                                    <div class="panel-header">
+                                        <div class="panel-title">Instructions and context</div>
+                                        <button id="addContextBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
+                                            <span class="icon icon-plus" aria-hidden="true"></span>
+                                        </button>
+                                    </div>
+                                    <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
+                                    <div id="contextList" class="context-list"></div>
+                                    <div id="contextEditor" class="context-editor"></div>
+                                </div>
+                            </aside>
                         </div>
-                        <div id="chatConversation" class="chat-conversation"></div>
                     </section>
-                    <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
-                        <div class="chat-model-card">
-                            <div class="panel-title">Model</div>
-                            <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
-                            <div class="chat-server-select-row">
-                                <label for="chatServerSelect">Server</label>
-                                <select id="chatServerSelect"></select>
+                    <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
+                        <app-header></app-header>
+                        <div class="app-builder-body">
+                            <div class="app-build">
+                                <app-screen></app-screen>
+                                <app-flow></app-flow>
                             </div>
-                            <div class="chat-tool-select-row">
-                                <label for="chatToolSelect">Tool</label>
-                                <select id="chatToolSelect"></select>
-                            </div>
-                            <form id="chatToolConfigForm" class="chat-tool-config"></form>
+                            <app-preview></app-preview>
                         </div>
-                        <div class="chat-context">
-                            <div class="panel-header">
-                                <div class="panel-title">Instructions and context</div>
-                                <button id="addContextBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
-                                    <span class="icon icon-plus" aria-hidden="true"></span>
-                                </button>
-                            </div>
-                            <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
-                            <div id="contextList" class="context-list"></div>
-                            <div id="contextEditor" class="context-editor"></div>
-                        </div>
-                    </aside>
+                    </section>
                 </div>
             </section>
         </main>
@@ -605,6 +622,7 @@
         //   run      a call the Workbench shows is under way, done, or never sent
         //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
         //   recorded the worker saved a run in history           (the run's summary)
+        //   mode     the page switched to the Workbench or Apps  { mode }
         class AppShell {
             constructor() {
                 this.events = new EventTarget();
@@ -1534,7 +1552,8 @@
             }
 
             // Adds a server (or picks it if it's already listed), shows it in the Workbench and connects.
-            addServer(url, alias = '', { connect = true } = {}) {
+            // Without `show`, it's added and connected where you are, as an app's "Add it" does.
+            addServer(url, alias = '', { connect = true, show = true } = {}) {
                 if (!this.servers[url]) {
                     const now = new Date().toISOString();
                     this.servers[url] = {
@@ -1549,8 +1568,10 @@
                     this.saveServers();
                     this.emit('servers', { url });
                 }
-                this.selectServer(url);
-                showMode('workbench');
+                if (show) {
+                    this.selectServer(url);
+                    showMode('workbench');
+                }
                 if (connect) this.connectMcpServer(url);
             }
 
@@ -1583,15 +1604,17 @@
             }
 
             // Calls a tool with its arguments as written; the Workbench fills in {{variables}}
-            // first. Resolves with the worker's tool_result (or a stand-in when the call never went
-            // out); with `show`, the response pane follows the call through 'run' events.
-            runTool({ url, tool, args, requestId = null, collectionRunId = null, show = true }) {
+            // first, unless the caller sends `sentArgs` it filled in itself (apps fill in their
+            // screen's values). Resolves with the worker's tool_result (or a stand-in when the call
+            // never went out); with `show`, the response pane follows the call through 'run' events.
+            // `source` is where the run says it came from: 'workbench' or 'app'.
+            runTool({ url, tool, args, sentArgs = null, environmentName = null, requestId = null, collectionRunId = null, show = true, source = 'workbench' }) {
                 const notSent = error => {
                     if (show) this.emit('run', { phase: 'not-sent', error });
                     return Promise.resolve({ type: 'tool_result', error, errorKind: 'not_sent', run: null });
                 };
-                let prepared = { sentArgs: args, environmentName: null };
-                if (this.workbench) {
+                let prepared = { sentArgs: sentArgs || args, environmentName };
+                if (this.workbench && !sentArgs) {
                     try {
                         prepared = this.workbench.prepare(tool, args);
                     } catch (error) {
@@ -1603,6 +1626,7 @@
                     type: 'call_tool',
                     call: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
                     run: { id: runId, args, requestId, collectionRunId, environmentName: prepared.environmentName },
+                    source,
                     bearerToken: this.servers[url]?.bearerToken || undefined
                 });
                 if (!sent) return notSent("The service worker isn't running yet. Try again in a moment.");
@@ -1729,10 +1753,14 @@
             for (const entry of window.opener?.logPanel?.entries || []) appShell.logPanel.add(entry);
         } else {
             appShell.startServiceWorker();
-            // The Workbench's components and its state (environments, saved requests, runs).
+            // The Workbench's components and its state (environments, saved requests, runs), then
+            // the Apps page's builder, which uses the Workbench's environments.
             import('./workbench/index.js')
                 .then(({ installWorkbench }) => installWorkbench(appShell))
-                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }));
+                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }))
+                .then(() => import('./apps/index.js'))
+                .then(({ installApps }) => installApps(appShell, { showMode }))
+                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the app builder: ${error.message}` }));
         }
 
         window.addEventListener('error', event => {
@@ -1770,6 +1798,7 @@
             document.getElementById('appsPage').hidden = !apps;
             document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === document.body.dataset.mode)));
             localStorage.setItem('mode', document.body.dataset.mode);
+            appShell.emit('mode', { mode: document.body.dataset.mode });
             if (apps) {
                 // The chat's server list may have changed while it was hidden.
                 renderModelServerSelect();
