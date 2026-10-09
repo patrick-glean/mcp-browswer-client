@@ -89,7 +89,7 @@ Both pass the same smoke test and send the same requests in the same order, with
 | --- | --- |
 | `{type: 'connect-mcp', url, bearerToken?}` (`initialize-mcp` still works) | `mcp_server_connected {url, info}` or `mcp_server_error {url, action, error}` |
 | `{type: 'list_tools', url, refresh?, bearerToken?}` | `tools_list {url, tools, rejected, ttlMs, fromCache}` or `mcp_server_error` |
-| `{type: 'call_tool', call, bearerToken?, run?}`, where `call` is `{serverUrl, toolName, args}` | `tool_result {result, run}` or `tool_result {error, errorKind, run}`, plus `run_recorded {run}` to every page |
+| `{type: 'call_tool', call, bearerToken?, run?, source?}`, where `call` is `{serverUrl, toolName, args}` and `source` is `workbench` (the default) or `app`, for [apps you build](#apps-you-build) | `tool_result {result, run}` or `tool_result {error, errorKind, run}`, plus `run_recorded {run}` to every page |
 | `{type: 'list_resources', url, bearerToken?}` (sent with `list_tools` when the server declares resources) | `resources_list {url, resources, resourceTemplates}` to every page, or `mcp_server_error` with action `list_resources`. A server without `resources/templates/list` gets an empty template list |
 | `{type: 'list_prompts', url, bearerToken?}` (likewise, for prompts) | `prompts_list {url, prompts}` to every page, or `mcp_server_error` with action `list_prompts` |
 | `{type: 'read_resource', url, uri, requestId, bearerToken?}` | `resource_read {url, requestId, result, durationMs}` or `{…, error, durationMs}`, to the sender only. Not a run |
@@ -110,9 +110,9 @@ The worker logs only a message's type and target, never its payload, so bearer t
 
 ### Runs (the Workbench's history)
 
-Every tool call becomes a run, whichever part of the app made it: `handleToolCall` in `sw.js` records it at its one success point and its one failure point (`recordRun`), in the `runs` store of `public/workbench/store.js`. Workbench calls have `source` `workbench` (or `collection` from Run all; runs saved before the rename say `sandbox`), the chat's model calls `chat` and tool calls found in its replies `reply`.
+Every tool call becomes a run, whichever part of the app made it: `handleToolCall` in `sw.js` records it at its one success point and its one failure point (`recordRun`), in the `runs` store of `public/workbench/store.js`. Workbench calls have `source` `workbench` (or `collection` from Run all; runs saved before the rename say `sandbox`), calls from the apps you build `app`, the chat's model calls `chat` and tool calls found in its replies `reply`.
 
-- **What the page sends:** `call_tool`'s `call.args` are the arguments to send, with `{{variables}}` already filled in by the page (`public/workbench/template.js`, which knows the tool's schema). `run` is `{id, args, requestId?, collectionRunId?, environmentName?}`: the page's id for the run, so it can wait for this answer; the arguments as written; the saved request and Run all it came from; and the environment whose variables it used.
+- **What the page sends:** `call_tool`'s `call.args` are the arguments to send, with `{{variables}}` already filled in by the page (`public/workbench/template.js`, which knows the tool's schema; an app fills in its screen's values the same way). `run` is `{id, args, requestId?, collectionRunId?, environmentName?}`: the page's id for the run, so it can wait for this answer; the arguments as written; the saved request and Run all it came from; and the environment whose variables it used.
 - **What comes back:** `tool_result.run` and `run_recorded.run` are `{id, startedAt, durationMs, outcome, changed, previousRunId}`, and `run_recorded` adds `source`, `serverUrl`, `toolName`, `requestId` and `errorKind` for the history views. `outcome` is `ok`, `tool_error` (`isError` results) or `failed`. `changed` is `true` or `false` against the previous run of the same request, or `null` for the first.
 - **Comparing:** runs of a saved request compare with each other, and other calls with earlier calls of the same tool and sent arguments (`compareKey`). Results are compared by a SHA-256 of their JSON with keys sorted and every `_meta` removed (`resultHash`, `public/workbench/runs.js`).
 - **In the page:** `AppShell` turns these messages into events for the Workbench's components: `run` (`pending`, `done` or `not-sent`, for the call the response pane shows) and `recorded` (every `run_recorded`). See the README's Workbench section for how the components fit together.
@@ -143,6 +143,56 @@ The Chat app (Apps in the top bar) is the first app built on the libraries, and 
 | `{type: 'reply_tool_call', toolCall, conversationId}` | runs one JSON-RPC tool call as if a reply had made it |
 
 **Where it's kept:** conversations in IndexedDB `chat_contexts` (`public/chatStorage.js`), a record per conversation and one per message, keyed by `conversationId`; the model in `localStorage` `chatModel`, the context in `chatContext`, and the last conversation in `lastChatConversation` (each tab's own in `sessionStorage` `chatConversation`). The first version of the loop called conversations engrams, the model a tap and the context imprints. Version 2 of `chat_contexts` moves engram records over when the worker first opens it, and the page moves the old `localStorage` keys (`lastEngramId`, `cbusTapConfig`, `mcp_module_metadata`) once; the old placeholder `{{cbus_message}}` still works.
+
+## Apps you build
+
+The app builder is in `public/apps/`, ES modules that `index.html` loads after the Workbench (`installApps`, which needs the Workbench's environments). An app runs in the page: its flow in `runner.js`, its screen in a sandboxed frame. Its calls go to the worker like the Workbench's, so the worker knows nothing about apps beyond a run's `source`. The builder's components (`components/`: rail, header, Screen, Flow, Try it) share the Apps state (`apps.js`) besides AppShell and the Workbench state, the way the Workbench's do; its events are `list`, `shown`, `app` (`{part: 'screen' | 'flow' | 'name' | 'version', by}`), `restart` and `highlight`.
+
+**An app**, as `store.js` keeps it in IndexedDB `mcp_apps`, keyed by `id`:
+
+```js
+{ id, name, description, version, createdAt, updatedAt, downloadedAt, serverNames?,
+  screen: { kind: 'components', components: [{ id, type, …props }] }
+       or { kind: 'html', html, from: { serverUrl, toolName, args } | null },
+  flow: [{ id, when: { element, event }, call: { serverUrl, toolName, args },
+           then: [{ if: 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }] }] }
+```
+
+- Components are `title` and `text` (`text`), `textbox` (`label`, `placeholder`, `lines`, `value`), `button` (`label`) and `output` (`label`, `placeholder`). An id matches `[A-Za-z_][A-Za-z0-9_-]*` and isn't `text`, `structured`, `json`, `result` or `error`, the names a tool's answer brings to a rule (`elementIdProblem`). Only components get ids in the HTML they make (`componentsHtml`), so the HTML's elements are the components.
+- Events are `click`, `enter`, `change` and `open`, whose element is `''` (`EVENTS_BY_KIND` says which elements have which).
+- A call has the shape saved requests have, `{serverUrl, toolName, args}`, with arguments as written (`{{question}}` and all).
+- `version` is the last download's number. A download makes a new one when `updatedAt` is after `downloadedAt`. `serverNames` are the names an imported app's DML gave its servers, for "Add it".
+
+**Running it** (`runner.js`):
+
+1. `frameDocument` makes the frame's document from the screen's HTML: its scripts, `<base>` and `<meta http-equiv>` removed; a Content-Security-Policy first in `<head>` (`default-src 'none'`, scripts only with the runtime's nonce, inline styles, `data:` and `blob:` images and media); and the runtime, `frameRuntime` injected as source, last in `<body>`. The frame is `sandbox="allow-scripts"`, so its origin is opaque: no storage, cookies or service worker, and no forms, pop-ups or top navigation. The runtime keeps links from navigating, and strips scripts, frames and forms from HTML it shows.
+2. The frame and the page talk in `postMessage`s that carry the token this load of the frame was given (the page also checks `event.source`). The frame sends `ready {values}`, `event {element, event, values}` and `size {height}`; the page sends `config {config}`, `show {element, value, how, failed}`, `busy {elements, busy}` and `highlight {elements}`. `config` (`frameConfig`) is what the flow waits for (`watch`) and which elements' values it reads (`read`). A second `load` of the frame means it went to another page, and the app stops until Restart.
+3. `AppRunner.fire` runs the rules for an event top to bottom (`rulesFor`), each seeing the event's values plus what the rules before it showed. `callArguments` fills `{{name}}` from the screen's values, then the active environment's variables, converting a whole `{{name}}` to the field's type with the tool's schema; a name that's neither fails the rule before any call. The call is `AppShell.runTool({…, sentArgs, source: 'app', show: false})`: the worker records a run with source `app`, the arguments as written in `args` and as sent in `sentArgs`. A rule whose call is still out doesn't start again.
+4. `answerOf` turns the `tool_result` into `{ok, values: {text, structured, json, result, error}}`; `isError` and `input_required` results fail, with their text as the error. Each route for the outcome renders its `show` (`renderTemplate`: paths walk objects by key and arrays by index, objects show as JSON, a name with no value shows as nothing) and sends it to its element.
+
+Edits apply at once and are saved 300 ms after the last one (`Apps.change`). A screen edit reloads the frame after a pause; a flow edit only sends the frame a new `config`. Only edits may call `change`: AppShell's `fillToolForm` announces the values it fills with an `input` event, so the call editor ignores that event and any write that changes nothing.
+
+**DML** (`dml.js`) is an app written as XML: `toDml` writes it and `fromDml` reads it, with errors that name the line. Neither needs a DOM, so the worker or Node can use them; `parseXml` reads elements, attributes, text, CDATA, comments and the XML declaration, and refuses a DOCTYPE.
+
+| Element | Attributes | Inside |
+| --- | --- | --- |
+| `<app>` | `dml` (the DML version, 1), `id`, `name`, `version` | `<description>`, `<screen>`, `<servers>`, `<flow>` |
+| `<screen>` | `src`: the HTML's file in the zip; `built-from="components"` | components, or the `<from>` call that made the HTML and, in a DML file on its own, `<html>` (as CDATA) |
+| `<title>`, `<text>` | `id` | their text |
+| `<textbox>` | `id`, `label`, `placeholder`, `lines`, `value` | |
+| `<button>` | `id`, `label` | |
+| `<output>` | `id`, `label`, `placeholder` | |
+| `<from>`, `<call>` | `server`, `tool` | `<arg name="…">`: text as written, or JSON with `type="json"` |
+| `<servers>` | | `<server url="…" name="…">` for each server it calls, for people reading it and for Import |
+| `<flow>` | | its `<when>`s, in order |
+| `<when>` | `element` (none for `open`), `event` | a `<call>`, then its `<then>`s |
+| `<then>` | `if` (`ok`, the default, or `error`), `into`, `how` (`replace`, the default, `append` or `html`) | what to show, a template |
+
+A file in a newer DML version is refused with a message saying so. Rule ids aren't written; Import gives each rule a new one.
+
+**The zip** (`zip.js`): `zip()` writes files stored, with UTF-8 names and CRC-32s; `unzip()` reads stored and deflated entries (`DecompressionStream('deflate-raw')`) and checks every CRC. A download holds `app.dml`, `index.html` (`screenHtml`) and `README.md` (`readmeFor`, which says the flow in words with `describeRule`). Import takes the zip's `app.dml` (or any `.dml` in it) with the files beside it, or a `.dml` file alone.
+
+**Testing:** `tests/apps.test.mjs` (in `npm run test:unit`) round-trips DML and zips and checks the flow's helpers and the screen's HTML. The smoke test builds an app through the UI. Chrome runs a sandboxed frame in a process of its own, so the frame is a DevTools target of its own: the smoke test's `frameRun` evaluates in it through its own connection.
 
 ## Logging
 
@@ -193,7 +243,7 @@ Write messages as sentences someone can act on, and put structured data in `deta
 npm run build                       # both libraries
 npm run test:browser -- --reference # the real UI in headless Chrome, on the default TypeScript SDK library
 npm run test:browser:wasm -- --reference # the same on the Rust/WASM library
-npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema and real servers' descriptions, and RFC 6570 URIs
+npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema and real servers' descriptions, RFC 6570 URIs, and the app builder's DML, zips and flow
 npm run test:rust                   # the Rust library's protocol logic
 npm run bench -- --quick            # tool-call throughput of every library, in a few minutes
 ```

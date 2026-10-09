@@ -24,12 +24,16 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 ### Web Interface
 - Page: [public/index.html](mdc:public/index.html)
-  - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the Chat app) and the Guide
-  - `AppShell`, the controller: talks to the service worker, owns servers, sign-in, tool calls, resource reads and prompt gets, and emits events instead of drawing UI
+ - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the Chat app and the app builder) and the Guide
+ - `AppShell`, the controller: talks to the service worker, owns servers, sign-in, tool calls, resource reads and prompt gets, and emits events instead of drawing UI
 - Workbench: [public/workbench/](mdc:public/workbench/index.js)
   - One custom element per part of the screen in `components/` (rail, server bar, tools with the Resources and Prompts tabs, request, resource, prompt, response, contents, splitter, dock, sheet, palette)
   - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`, sized by the splitters' CSS variables
   - Resource templates' URIs in `uri-template.js` (RFC 6570); Pre-fill's test data in `prefill.js`
+- App builder: [public/apps/](mdc:public/apps/index.js)
+ - An app is a screen (components, or HTML from a tool call) and a flow (rules: when, call, then); the state is `apps.js`, the components are in `components/` (rail, header, Screen, Flow, Try it)
+ - `runner.js` runs an app: its screen in a sandboxed frame (`frameRuntime`, `frameDocument`), its flow in the page, each call through `AppShell.runTool` with source `app`
+ - `flow.js` (templates, arguments, problems, sentences) and `screen.js` are pure; `dml.js` reads and writes the DML an app downloads as, `zip.js` the zip, `store.js` keeps apps in IndexedDB `mcp_apps`
 
 ## Build System
 - `npm run build` builds every library: `npm run build:sdk` ([sdk-client/build.mjs](mdc:sdk-client/build.mjs), esbuild) and `npm run build:wasm` ([wasm-build.sh](mdc:wasm-build.sh), [Cargo.toml](mdc:Cargo.toml))
@@ -37,9 +41,10 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`
-- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, and resource template URIs against RFC 6570's examples
+- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs), [tests/apps.test.mjs](mdc:tests/apps.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, resource template URIs against RFC 6570's examples, and the app builder's DML, zips and flow
 - `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
 
 ## Naming
 - Say "MCP client library" (or "library") for the pluggable protocol implementation, and use `client` in code: `set_client`, `client_loaded`, `client_status`, `?client=`, `--client=`
 - The Chat app's agent loop says conversation (`conversationId`), model (`set_chat_model`, `messageField`, `conversationField`), context (`set_chat_context`) and instructions (`public/chat-instructions.js`). Its first version's names (engram, CBus tap, imprints, bootrom) only survive in the code that moves old stored data over
+- The app builder says app, screen, component, element (anything with an id), flow, rule (`when`, `call`, `then`), route (one `then`) and DML (the markup an app downloads as, `app.dml`)

@@ -33,10 +33,16 @@ The app runs whichever MCP client library the page picks: the TypeScript SDK one
    - Never log tokens, `Authorization` values or sign-in secrets; shorten session IDs
 
 6. **The agent loop** (Chat app, in `sw.js`):
-   - The model is an MCP tool; tool calls are JSON-RPC requests in code blocks of its reply
-   - Nothing sent to the model may contain credentials (`serversForModel` strips static tokens)
-   - Every call, including the model's and those from its replies, is recorded as a run
+ - The model is an MCP tool; tool calls are JSON-RPC requests in code blocks of its reply
+ - Nothing sent to the model may contain credentials (`serversForModel` strips static tokens)
+ - Every call, including the model's and those from its replies, is recorded as a run
 
-7. **Documentation**:
+7. **Apps you build** (`public/apps/`):
+ - The flow runs in the page and calls tools only through `AppShell.runTool` with source `app`, so every call is a run and the worker needs nothing app-specific
+ - The screen runs in a `sandbox="allow-scripts"` frame under the policy `frameDocument` sets: no network, no scripts but the runtime, no access to the page. It only reports events and shows what the page sends, with each message's token checked; never give it more
+ - Only calls a rule names are made; values from the screen fill arguments as `{{id}}`, never credentials
+ - DML is the app's portable form: change `dml.js`'s reader and writer together, keep old files readable, and raise `DML_VERSION` for a change older readers can't read
+
+8. **Documentation**:
    - Update DEVELOPMENT.md for new interface functions, messages and patterns
    - Update the README when behavior a user sees changes

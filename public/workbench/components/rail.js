@@ -239,7 +239,7 @@ export class WbRail extends WbElement {
                         <span class="wb-meta">${escapeHtml(timeAgo(run.startedAt))}</span>
                     </button>
                 </li>`).join('')
-            : '<li class="wb-list-note">No runs yet. Every tool call lands here, from the Workbench and the Chat app.</li>';
+            : '<li class="wb-list-note">No runs yet. Every tool call lands here, from the Workbench and from apps.</li>';
     }
 
     // --- Clicks ---

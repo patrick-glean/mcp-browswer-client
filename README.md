@@ -5,7 +5,8 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 Everything runs in a web page and a service worker that every open tab shares. There's nothing to install or configure on anyone's machine: open the site, add servers, sign in, and every control is in the page.
 
 - **MCP client libraries, swapped while it runs.** There are two: one on the official TypeScript SDK, which runs by default, and one in Rust compiled to WebAssembly. Both implement the same interface, pass the same browser test and run in the same benchmark. Runtime, in the top bar, switches between them. See [MCP client libraries](#mcp-client-libraries).
-- **The agent loop.** Apps holds the apps built on the libraries. The first, Chat, sends your messages to a model that is an MCP tool, tells it which tools your servers have, and runs the tool calls it writes in its replies. See [The agent loop](#the-agent-loop).
+- **The agent loop.** Apps holds the apps built on the libraries. The built-in one, Chat, sends your messages to a model that is an MCP tool, tells it which tools your servers have, and runs the tool calls it writes in its replies. See [The agent loop](#the-agent-loop).
+- **Apps you build.** An app is a screen and a flow: *when* something happens on the screen, *call* a tool, *then* put what it returns back on the screen. Build the screen from components or take HTML a tool returns, try the app as you go, and download it as a zip with its flow written down as DML. See [Building apps](#building-apps).
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
 - **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and conversations live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
 
@@ -15,7 +16,7 @@ It speaks MCP 2026-07-28 and falls back automatically for servers still on the o
 
 Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.io/mcp-browswer-client/). The Guide (top right, and open on your first visit) has one-click buttons for public MCP servers that need no account, such as Hugging Face and Microsoft Learn. Choose one, click a tool, fill in its fields and choose Run. The log at the bottom shows what happened.
 
-Runtime, in the top bar, shows which MCP client library is running and switches it. The Workbench is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed. Apps holds the Chat app, an agent loop over your servers' tools.
+Runtime, in the top bar, shows which MCP client library is running and switches it. The Workbench is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed. Apps holds the Chat app, an agent loop over your servers' tools, and the apps you build: New app starts one that already works.
 
 For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your Glean MCP server URL) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
 
@@ -47,7 +48,7 @@ The library isn't what limits tool calls. Through the whole app both run at the 
 
 ## The agent loop
 
-Apps, in the top bar, holds the apps built on the libraries. The first, Chat, is an agent loop over your servers' tools, run by the service worker:
+Apps, in the top bar, holds the apps built on the libraries: the built-in Chat app, and the ones you build (see [Building apps](#building-apps)). Chat is an agent loop over your servers' tools, run by the service worker:
 
 - **The model is an MCP tool** on any server you've added. Choose it under Model, tick "Your message goes here" on the text field that should get what you type, and tick "The conversation goes here" on a list field to send the conversation.
 - **Tool choice.** With a conversation field, the model gets the built-in instructions (how to ask for a tool call), every server you've added with its tools' names, descriptions and schemas, and the context you add under Instructions and context, followed by the conversation. Static tokens are left out of what the model sees. Without a conversation field, the model gets only your message.
@@ -55,7 +56,59 @@ Apps, in the top bar, holds the apps built on the libraries. The first, Chat, is
 - **Everything is recorded.** The model's calls and the tool calls from its replies are runs like any other. The dock's Runs shows each one with its arguments and result, and any of them can be opened in the Workbench and run again.
 - **Conversation** shows the conversation's ID, with New conversation to start over. Conversations are kept in this browser's IndexedDB.
 
-The loop is in `public/sw.js` (`handleToolCall`, `modelArguments` and `runReplyToolCall`), and the built-in instructions are in `public/chat-instructions.js`. [DEVELOPMENT.md](DEVELOPMENT.md#the-agent-loop) has its messages and where it keeps what. Next are apps described by a manifest, holding the model, the tools it may use, pinned arguments, instructions and checks on the output, so other apps can be built the same way.
+The loop is in `public/sw.js` (`handleToolCall`, `modelArguments` and `runReplyToolCall`), and the built-in instructions are in `public/chat-instructions.js`. [DEVELOPMENT.md](DEVELOPMENT.md#the-agent-loop) has its messages and where it keeps what.
+
+## Building apps
+
+An app is a **screen** and a **flow**. The screen is what people see. The flow is a list of rules, each of which says *when* something happens on the screen, which tool to *call* with what, and *then* where on the screen its answer goes. Open Apps, then New app: it starts with a title, a text box, a button and an output, and one rule that sends the text box to the first tool on your servers that takes text and puts its answer in the output. It works at once, so you can change it one step at a time and watch what happens.
+
+The builder has three parts:
+
+1. **Screen.** Build it from components (Title, Text, Text box, Button, Output), each with an id, or choose HTML from a tool: pick a tool that returns a page (an embedded `text/html` resource, `structuredContent.html`, or HTML in its text, as a model writes it in a ```` ```html ```` block), choose Get the HTML, or paste HTML in. The flow names elements by id either way, and the builder lists the ones it found.
+2. **Flow.** Each rule reads as a sentence, and says what keeps it from running (an element that's gone from the screen, a server you haven't added):
+   - **When**: a button is clicked, a text box gets Enter (⌘↵ or Ctrl+Enter in a text box with several lines) or changes, or the app opens.
+   - **Call**: a server and a tool, with the tool's own fields, as in the Workbench. In a field, `{{question}}` is what the screen's `question` element holds when the rule runs; a name that isn't on the screen is a variable from the active environment. A field that is exactly one `{{name}}` gets the value in the field's type, so `{{count}}` fills a number field with a number.
+   - **Then**: if it works, and if it fails, put something into an element, replacing what it shows, after what it shows, or as HTML. What to put is a template: `{{text}}` is the text the tool returned, `{{structured.name}}` a value from its structured content, `{{json.items.0.title}}` a value from its text read as JSON, `{{result}}` the whole result, `{{error}}` why it failed, and `{{question}}` what the screen held. A result the tool marks `isError` counts as failing.
+3. **Try it.** The app runs beside the builder, as people will use it, and What happened lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App, and Open in the Workbench shows it there. Point at a rule or a component to see its elements outlined on the screen. Restart runs the app from the start, with its "when the app opens" rules.
+
+Rules that wait for the same thing run top to bottom, and each sees what the ones before it put on the screen. A rule whose call is still out doesn't start again. Renaming a component takes the flow with it.
+
+**The screen runs on its own.** It's in a sandboxed frame with an origin of its own, so it can't read this page, its storage or your sign-ins. A policy keeps it off the network and keeps its own scripts (and `on…` attributes) from running: the flow is what makes it do things, and only the calls the flow names are made. HTML put on the screen as HTML loses its scripts, frames and forms first.
+
+**Download** saves the app as a zip, and each download is a version: the first is 1, and a download after any change is the next number.
+
+- `app.dml`: the app as markup, its components (or, for HTML, which call made it) and its flow
+- `index.html`: the screen, the base artifact people see
+- `README.md`: the flow in words, and the servers it calls
+
+Download's menu has `app.dml` alone, with an HTML screen inside it. Import, in the rail, takes either back; an app with the same id is replaced, so importing a download restores it, and a rule whose server you haven't added offers to add it. Apps are kept in this browser's IndexedDB (`mcp_apps`).
+
+A DML file reads like the flow it describes:
+
+```xml
+<app dml="1" id="…" name="Ask the docs" version="3">
+  <screen src="index.html" built-from="components">
+    <title id="title">Ask the docs</title>
+    <textbox id="question" label="Question" placeholder="What do you want to know?"/>
+    <button id="ask" label="Ask"/>
+    <output id="answer" label="Answer"/>
+  </screen>
+  <servers>
+    <server url="https://learn.microsoft.com/api/mcp" name="Microsoft Learn"/>
+  </servers>
+  <flow>
+    <when element="ask" event="click">
+      <call server="https://learn.microsoft.com/api/mcp" tool="microsoft_docs_search">
+        <arg name="query">{{question}}</arg>
+      </call>
+      <then if="ok" into="answer">{{text}}</then>
+      <then if="error" into="answer">{{error}}</then>
+    </when>
+  </flow>
+</app>
+```
+
+This is the first step. Next, apps get steps that chain (a rule waiting for another's answer), the Chat app's agent loop as a part of the flow (a model, its instructions and the conversation), and MCP Apps' UI resources as screens; after that, a download that runs on its own as a static site.
 
 ## Workbench
 
@@ -101,7 +154,7 @@ The top bar switches between the Workbench and Apps, picks the environment and o
   - A saved request's runs compare with each other. Other calls compare with earlier calls of the same tool with the same arguments.
   - `_meta` is ignored, since servers put request IDs and timings there.
 - **Run all** runs a collection's requests in the order they were saved. The response pane fills in a report as they run, then sums up how many were the same, changed or failed. Each row opens that run.
-- **History**: the rail shows the latest runs, and the dock's Runs every tool call, wherever it came from: the Workbench, Run all, the Chat app's model, and tool calls found in its replies.
+- **History**: the rail shows the latest runs, and the dock's Runs every tool call, wherever it came from: the Workbench, Run all, the apps you build, the Chat app's model, and tool calls found in its replies.
   - Open one to see its arguments and result, then run it again or save it.
   - Only the selected server narrows the dock's list.
 - **Export and Import**, in the ⋯ menu beside Saved, move saved requests, collections and environments as one JSON file. History isn't exported.
@@ -175,8 +228,11 @@ flowchart LR
         Page["Pages: the Workbench and apps"]
         SW["Service worker: routing, sign-in, runs, the agent loop"]
         Lib["MCP client library: TypeScript SDK or Rust/WASM"]
-        DB[("IndexedDB: tokens, runs, conversations")]
+        DB[("IndexedDB: tokens, runs, conversations, apps")]
+        Screen["An app's screen: a sandboxed frame"]
     end
+    Screen -- "what happened" --> Page
+    Page -- "what to show" --> Screen
     Page -- "messages" --> SW
     SW -- "results, events, log" --> Page
     SW --> Lib
@@ -185,7 +241,7 @@ flowchart LR
     Lib -- "Streamable HTTP" --> Model["A model, as an MCP tool"]
 ```
 
-1. **Pages** draw the UI, in as many tabs as you like. They send the worker messages and never speak MCP or see a token.
+1. **Pages** draw the UI, in as many tabs as you like. They send the worker messages and never speak MCP or see a token. An app you build runs its flow in the page, and its screen in a sandboxed frame that only tells the page what happened and shows what the page sends it.
 2. **The service worker** is shared by every tab. It loads the chosen library, routes each message to it, keeps sign-ins, runs and conversations in IndexedDB, and runs the Chat app's agent loop.
 3. **The MCP client library** speaks MCP to servers over Streamable HTTP: era detection, sessions, streamed replies, header parameters, and sign-in's network steps. It stores nothing.
 4. **A model is just another MCP tool**, so the loop works with any server that offers one.
@@ -229,7 +285,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
-- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time) and the URIs resource templates make
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, and the app builder's DML, zips and flow
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
@@ -254,6 +310,8 @@ The Workbench is built from components (custom elements in `public/workbench/com
 
 The layout is CSS: each component sits in a named grid area, set by the `data-layout` block for `#workbench` in `workbench.css`. To try another arrangement, add a layout there and set `data-layout` on `#workbench`; the components don't change. Components can share an area and take turns: the request area holds the tool, resource and prompt panes, and the response area the response and contents panes, each showing itself only for its tab. The splitters sit in zero-width grid tracks of their own and set `--rail-width`, `--tools-width`, `--request-fr` and `--response-fr`, which the layout uses with limits, so a size kept from a wider window can't squeeze the others.
 
+The app builder (`public/apps/`) is built the same way: components for the Apps page's rail, the app's header, its screen, its flow and Try it, which share the Apps state (`apps.js`) besides AppShell and the Workbench's. [DEVELOPMENT.md](DEVELOPMENT.md#apps-you-build) has how an app runs and the DML it's written in.
+
 ### Project Structure
 
 ```text
@@ -273,8 +331,19 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   ├── trace.js           # The HTTP trace, with redaction
 │   └── build.mjs          # Bundles it with esbuild into public/sdk_client.js
 ├── public/                 # The site
-│   ├── index.html         # The page: top bar, layout, Apps (Chat), the Guide, and AppShell,
-│   │                      #   which owns the worker, servers, sign-in and calls
+│   ├── index.html         # The page: top bar, layout, Apps (Chat and the builder), the Guide,
+│   │                      #   and AppShell, which owns the worker, servers, sign-in and calls
+│   ├── apps/              # The apps you build (ES modules)
+│   │   ├── index.js       # Starts the Apps page: loads the apps, defines the builder's components
+│   │   ├── apps.js        # Shared state: the shown app, edits, downloads, imports, the starter app
+│   │   ├── apps.css       # The rail and the builder's styles
+│   │   ├── components/    # Rail, header, Screen, Flow and Try it, and the call editor they share
+│   │   ├── flow.js        # Rules: templates, call arguments, renaming, problems, sentences
+│   │   ├── screen.js      # Components to HTML, the elements of HTML, the HTML in a tool's answer
+│   │   ├── runner.js      # Runs an app: the sandboxed frame's runtime and the flow in the page
+│   │   ├── dml.js         # An app as DML (XML), read and written without a DOM
+│   │   ├── zip.js         # The download's zip: written stored, read stored or deflated
+│   │   └── store.js       # IndexedDB storage for apps (mcp_apps)
 │   ├── sw.js              # The service worker: messages, sign-in, runs, the agent loop
 │   ├── mcp-clients.js     # The MCP client libraries and how to load each
 │   ├── client-runtime.js  # Keeps the chosen library loaded in the worker and forwards its logs
@@ -306,6 +375,7 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   └── icons/             # Feather icons, rendered as CSS masks (MIT)
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
+│   ├── apps.test.mjs      # The app builder's DML, zip, flow and screen
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
 ├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS
@@ -325,7 +395,7 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 
 With `npm start` and `npm run start:mock-mcp` running, open http://localhost:8080:
 
-1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket` and `search_notes`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
+1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket`, `search_notes` and `make_screen`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
 2. **Run a tool.** Choose `echo`: `text` starts with `hello`, the schema's example. Type `hi` into it and choose Run. The result reads `Echo: hi`.
 3. **Header parameters.** Run `echo_region` with region `Zürich`. The result reads `Echo from Zürich: …`; the mock checks that the `Mcp-Param-Region` header carried the same value, base64-encoded because it isn't ASCII.
 4. **Test data.** Choose `search_notes`, which has 20 fields, 5 of them required. Those 5 start with test data the mock accepts: `test`, a week ago to today, `test@example.com` and `5`. The other 15 are folded away under "15 optional fields". Open them, choose Fill beside `owner` (it becomes `me`, a value its description lists), type `eu-central-1` into `region` and choose Run: the result shows the 7 arguments that went out. `cursor` has no Fill, since a pagination cursor only comes from an earlier response.
@@ -336,10 +406,11 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 9. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
 10. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
 11. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
+12. **Build an app.** In Apps, choose New app. Its rule reads `When run is clicked, call echo on Mock server with text = {{input}}; …`. Under Try it, type `hi` into the app's Input and choose Run: the Output shows `Echo: hi`, and What happened lists the click, the call, the answer and where it went. Change the rule's "If it works" text to `You said {{input}}: {{text}}` and run it again. Then choose HTML from a tool in Screen, pick `make_screen` and Get the HTML: the screen becomes the mock's page, its `question`, `ask` and `answer` are listed, and the rule says what it can't find any more. Choose `ask` under When and `answer` under Then, and the new screen works the same way. Download saves `new-app-v1.zip`.
 
 ### More server behaviors
 
-`test_mcp_server.py` needs only Python's standard library. Besides its tools, it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
+`test_mcp_server.py` needs only Python's standard library. Besides its tools (one of which, `make_screen`, returns an app's screen as an HTML resource), it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
 
 | Flag | What the mock does |
 | --- | --- |
@@ -407,13 +478,13 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
-npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, and resource template URIs
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, and the app builder's DML, zips and flow
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 

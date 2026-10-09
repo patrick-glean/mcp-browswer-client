@@ -44,8 +44,15 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - Opening a tool fills only its required fields; Fill beside a field fills that one (`fieldTestData`). Never fill optional fields unasked, and never generate an optional pagination cursor. A value from a description must be one the description gives as a value, not prose: add the description to `tests/prefill.test.mjs` when one fills something that makes no sense.
 - Runs compare on a hash of the result with sorted keys and no `_meta`. A saved request's runs compare with each other, and other calls with the same tool and sent arguments.
 - Never put credentials in Workbench records. Arguments are stored as written, and tokens travel only in `mcpOptions`.
-- The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `chat` and `reply`; treat `sandbox` (from before the rename) as `workbench`.
+- The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `app`, `chat` and `reply`; treat `sandbox` (from before the rename) as `workbench`.
 - Saved requests, steps and app manifests share one shape for a call, `{serverUrl, toolName, args}`. Keep it that way, so saved requests can become workflow steps.
+
+### Apps you build
+- An app is a screen and a flow (`public/apps/`). The flow runs in the page and calls tools only through `AppShell.runTool` with `source: 'app'` and the arguments it filled in (`sentArgs`), so each call is a run and the worker has no app logic.
+- The screen runs in a `sandbox="allow-scripts"` frame under `frameDocument`'s policy: no network, no scripts but the runtime, an opaque origin. It reports events and shows values; it never calls tools. Messages both ways carry the load's token, and a frame that navigates stops the app.
+- A rule's `{{name}}` is an element's value, then an environment variable; a whole `{{name}}` takes the field's type. What a route shows is a template over the answer (`text`, `structured`, `json`, `result`, `error`) and the screen. Element ids can't be those answer names.
+- DML (`dml.js`) is the portable form. Its reader and writer change together and stay DOM-free; old files must stay readable, and a change older readers can't read raises `DML_VERSION`. Apps live in IndexedDB `mcp_apps`, separate from `mcp_sandbox`.
+- Only edits may change an app: AppShell's `fillToolForm` fires `input` when it fills a form, which the call editor ignores.
 
 ## Status
 
@@ -87,9 +94,17 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] Resizable Workbench panes (rail, tool list, request and response), kept across reloads
 - [x] Test data for the required fields when a tool opens, Fill beside each field, and values from descriptions only when they're values
 
+### Done (app builder milestone 2, first step: build, run and download an app)
+- [x] Apps page rail: the built-in Chat app, your apps, New app and Import
+- [x] A screen from components, or HTML from a tool call (or pasted), run in a sandboxed frame with no network, storage or scripts of its own
+- [x] A flow of rules: when an element is clicked, gets Enter or changes, or the app opens; call a tool with `{{id}}` values from the screen; then, if it works or fails, put a template of the answer into an element
+- [x] Try it beside the builder, with What happened step by step, and each call a run from App
+- [x] Download as a zip (`app.dml`, `index.html`, `README.md`) or DML alone, with versions; Import back
+- [x] The mock's `make_screen` (an HTML screen), unit tests for DML, zips and the flow, and the smoke test building an app on both libraries
+
 ### Next
-- [ ] App builder milestone 2: workflow steps and the Chat app as a manifest (a shape, allowed tools, pinned arguments, instructions and output checks)
-- [ ] App builder milestone 3: export an app as a web component or static site; milestone 4: an in-browser model as a local MCP server
+- [ ] App builder milestone 2, next steps: rules that chain (waiting for another rule's answer), the Chat app's model, instructions and conversation as parts of a flow, allowed tools and output checks
+- [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server
 - [ ] Client ID metadata documents (the spec's preferred registration), step-up authorization, token revocation on sign-out
 - [ ] Durable state in IndexedDB (server config, era cache, conversations)
 - [ ] `input_required` / elicitation UI (multi round-trip requests)
