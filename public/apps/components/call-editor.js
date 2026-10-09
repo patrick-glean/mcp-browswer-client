@@ -104,7 +104,13 @@ export class CallEditor {
         } else {
             for (const [key, prop] of optionalFields) form.appendChild(this.shell.renderInputField(key, prop, false));
         }
-        this.shell.fillToolForm(form, schema, args);
+        // fillToolForm announces the values it fills with an input event, which isn't an edit.
+        this.filling = true;
+        try {
+            this.shell.fillToolForm(form, schema, args);
+        } finally {
+            this.filling = false;
+        }
     }
 
     renderChips() {
@@ -115,6 +121,7 @@ export class CallEditor {
     }
 
     readArgs() {
+        if (this.filling) return;
         const form = this.container.querySelector('[data-call-args]');
         const json = form.querySelector('[data-args-json]');
         let args;
@@ -125,6 +132,7 @@ export class CallEditor {
             json?.classList.add('app-invalid');
             return;
         }
+        if (JSON.stringify(args) === JSON.stringify(this.call.args || {})) return;
         this.setCall({ ...this.call, args }, { structural: false });
     }
 

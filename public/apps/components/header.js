@@ -8,10 +8,7 @@ import { AppElement } from './base.js';
 export class AppHeader extends AppElement {
     setup(signal) {
         this.apps.on('shown', () => this.render(), signal);
-        this.apps.on('app', ({ part, by }) => {
-            if (by !== this) this.renderVersion();
-            if (part === 'version') this.renderVersion();
-        }, signal);
+        this.apps.on('app', () => this.renderVersion(), signal);
         this.addEventListener('input', event => {
             if (event.target.id === 'appName') this.apps.change(app => { app.name = event.target.value; }, { part: 'name', by: this });
             if (event.target.id === 'appDescription') this.apps.change(app => { app.description = event.target.value; }, { part: 'name', by: this });

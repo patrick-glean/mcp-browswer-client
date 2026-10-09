@@ -203,6 +203,8 @@ export class AppRunner {
         const message = event.data;
         if (message.type === 'ready') {
             this.ready = true;
+            // The flow may have changed while the frame loaded.
+            this.flowChanged();
             if (this.starting) {
                 this.starting = false;
                 this.fire('', 'open', message.values || {});
