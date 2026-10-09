@@ -18,6 +18,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fromDml } from '../public/apps/dml.js';
+import { unzip } from '../public/apps/zip.js';
 import { DEFAULT_CLIENT, MCP_CLIENTS } from '../public/mcp-clients.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -363,6 +365,47 @@ async function signIn(page, until, ms = 20000) {
     return page.waitFor(until, ms);
 }
 
+// An app's screen runs in a sandboxed frame, which Chrome keeps in a process of its own, so it's a
+// DevTools target of its own. This evaluates in each such frame and returns the first answer that
+// isn't empty (null when there's none).
+async function frameRun(expression) {
+    const frames = (await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json())
+        .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl);
+    for (const frame of frames) {
+        const ws = new WebSocket(frame.webSocketDebuggerUrl);
+        try {
+            await new Promise((resolve, reject) => {
+                ws.addEventListener('open', resolve, { once: true });
+                ws.addEventListener('error', reject, { once: true });
+            });
+            const reply = await new Promise(resolve => {
+                ws.addEventListener('message', event => {
+                    const message = JSON.parse(event.data);
+                    if (message.id === 1) resolve(message);
+                });
+                ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
+            });
+            const value = reply.result?.result?.value;
+            if (value !== undefined && value !== null && value !== false && value !== '') return value;
+        } catch {
+            // The frame went away while it was asked.
+        } finally {
+            ws.close();
+        }
+    }
+    return null;
+}
+
+async function frameWaitFor(expression, ms = 15000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        const value = await frameRun(expression);
+        if (value) return value;
+        await sleep(150);
+    }
+    return null;
+}
+
 // What the worker keeps in IndexedDB for a server's sign-in.
 function storedTokens(url) {
     return `new Promise((resolve, reject) => {
@@ -488,11 +531,11 @@ async function main() {
         check('logs: the worker reports the client build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -557,7 +600,7 @@ async function main() {
         check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
         check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 5)', inspector.filtered);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 6)', inspector.filtered);
         check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
@@ -582,7 +625,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 5 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 6 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
@@ -701,6 +744,190 @@ async function main() {
         const chatted = await page.waitFor(`[...document.querySelectorAll('#chatMessages .chat-msg.tool')].some(m => m.textContent.includes('Echo: hello from the console'))`);
         const appsShown = await page.run(`!document.getElementById('appsPage').hidden && document.getElementById('workbench').hidden`);
         check('the Chat app sends a message through the chosen tool', !!chatted && appsShown);
+
+        {
+            // Building an app: New app starts a screen and a flow that work. The screen runs in a
+            // sandboxed frame, and the flow calls tools through the worker, as recorded runs.
+            const rail = await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].map(row => row.textContent.trim().replace(/\\s+/g, ' ')).join(' | ')`);
+            check('Apps: the rail lists the built-in Chat app, which shows first', rail === 'Chat agent loop', rail);
+            await page.run(`(() => {
+                ${showWorkbench};
+                ${serverRow(modernUrl)}.click();
+                document.querySelector('[data-mode="apps"]').click();
+                document.getElementById('newAppBtn').click();
+            })()`);
+            const starter = await page.waitFor(`(() => {
+                const sentence = document.querySelector('app-flow .app-rule-sentence')?.textContent;
+                return !document.getElementById('appBuilder').hidden && document.getElementById('chatApp').hidden && sentence ? sentence : null;
+            })()`, 5000);
+            check('Apps: New app starts with a rule that sends its text box to a tool and the answer to its output',
+                starter === 'When run is clicked, call echo on modern server with text = {{input}}; if it works, put {{text}} into output; if it fails, put {{error}} into output.', starter);
+            const screen = await frameWaitFor(`document.getElementById('run') && document.getElementById('output') ? document.body.innerText.replace(/\\s+/g, ' ').trim() : null`);
+            check('Apps: the screen runs in a frame of its own', /^New app Input Run Output/.test(screen || ''), screen);
+            const sandbox = await page.run(`document.querySelector('app-preview iframe').getAttribute('sandbox')`);
+            const confined = await frameRun(`Promise.all([
+                fetch(${JSON.stringify(modernUrl)}).then(() => 'fetched', () => 'no network'),
+                new Promise(resolve => { try { resolve(String(localStorage.length)); } catch { resolve('no storage'); } }),
+            ]).then(results => results.join(', '))`);
+            check('Apps: the screen\'s frame can\'t reach the network or the app\'s storage', sandbox === 'allow-scripts' && confined === 'no network, no storage', `${sandbox}: ${confined}`);
+            // Types into the screen and clicks, once the frame has loaded with both (and its runtime).
+            const typeAndClick = async (field, text, button) => {
+                const ids = [field, button].map(id => `!!document.getElementById(${JSON.stringify(id)})`).join(' && ');
+                await frameWaitFor(`document.readyState === 'complete' && ${ids}`);
+                return frameRun(`(() => {
+                    document.getElementById(${JSON.stringify(field)}).value = ${JSON.stringify(text)};
+                    document.getElementById(${JSON.stringify(button)}).click();
+                    return true;
+                })()`);
+            };
+            await typeAndClick('input', 'hello from an app', 'run');
+            const answered = await frameWaitFor(`document.getElementById('output').textContent === 'Echo: hello from an app' && !document.getElementById('output').dataset.state`);
+            const whatHappened = await page.waitFor(`(() => {
+                const lines = [...document.querySelectorAll('app-preview .app-trace-text')].map(line => line.textContent.trim());
+                return lines.some(line => line === 'Put “Echo: hello from an app” into output') ? lines.join(' | ') : null;
+            })()`, 5000);
+            check('Apps: clicking the button calls the tool, puts its answer in the output and says what happened',
+                !!answered && /^run was clicked \| Calling echo on modern server with \{"text":"hello from an app"\} \| echo answered in \d+ ms: Echo: hello from an app Open in the Workbench \| Put/.test(whatHappened || ''), whatHappened);
+            const appRun = await page.waitFor(`new Promise((resolve, reject) => {
+                const open = indexedDB.open('mcp_sandbox');
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const all = open.result.transaction('runs').objectStore('runs').getAll();
+                    all.onsuccess = () => {
+                        const [run] = all.result.filter(run => run.source === 'app').sort((a, b) => b.startedAt - a.startedAt);
+                        resolve(run ? JSON.stringify({ args: run.args, sentArgs: run.sentArgs, outcome: run.outcome }) : null);
+                    };
+                };
+            })`, 5000);
+            check('Apps: the call is a run from the app, with its arguments as written and as sent',
+                appRun === JSON.stringify({ args: { text: '{{input}}' }, sentArgs: { text: 'hello from an app' }, outcome: 'ok' }), appRun);
+            await page.run(`(() => {
+                const show = document.querySelector('app-flow [data-route="0"] [data-route-show]');
+                show.value = 'You said {{input}}, and it said {{text}}';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await typeAndClick('input', 'hi', 'run');
+            const templated = await frameWaitFor(`(() => { const text = document.getElementById('output').textContent; return text.startsWith('You said') ? text : null; })()`);
+            check('Apps: what a rule shows can mix the answer with values from the screen', templated === 'You said hi, and it said Echo: hi', templated);
+            await page.run(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                field.value = '{{nowhere}}';
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await frameRun(`(document.getElementById('run').click(), true)`);
+            const failed = await frameWaitFor(`(() => { const output = document.getElementById('output'); return output.dataset.state === 'error' ? output.textContent : null; })()`);
+            check('Apps: a rule that can\'t make its call says why, through its "if it fails" route',
+                failed === "Didn't call echo: {{nowhere}} isn't an element on the screen or a variable in Default.", failed);
+            await page.run(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                field.value = '{{input}}';
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                const id = document.querySelector('app-screen [data-component="input"] [data-component-id]');
+                id.value = 'question';
+                id.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const renamed = await page.waitFor(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                const show = document.querySelector('app-flow [data-route="0"] [data-route-show]');
+                return document.querySelector('app-screen [data-component="question"]') && field?.value === '{{question}}' ? show.value : null;
+            })()`, 5000);
+            check('Apps: renaming a component takes the flow with it', renamed === 'You said {{question}}, and it said {{text}}', renamed);
+
+            // A screen a tool made: the mock's make_screen returns a page (with a script that mustn't run).
+            await page.run(`document.querySelector('app-screen [data-screen-kind="html"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-screen [data-call-server]')`, 5000);
+            await page.run(`(() => {
+                const server = document.querySelector('app-screen [data-call-server]');
+                server.value = ${JSON.stringify(modernUrl)};
+                server.dispatchEvent(new Event('change', { bubbles: true }));
+                const tool = document.querySelector('app-screen [data-call-tool]');
+                tool.value = 'make_screen';
+                tool.dispatchEvent(new Event('change', { bubbles: true }));
+                document.querySelector('app-screen [data-get-html]').click();
+            })()`);
+            const found = await page.waitFor(`(() => {
+                const text = document.querySelector('app-screen [data-found]')?.textContent || '';
+                return /question/.test(text) && /answer/.test(text) ? text.replace(/\\s+/g, ' ') : null;
+            })()`, 10000);
+            check('Apps: a screen can be the HTML a tool returns, and the builder lists its elements', found === '3 elements with ids the flow can use: question field, ask button, answer output', found);
+            const problems = await page.waitFor(`document.querySelector('app-flow [data-problems]:not([hidden])')?.textContent || null`, 5000);
+            check('Apps: a rule says when the screen no longer has what it uses', problems === "run isn't on the screen.output isn't on the screen.", problems);
+            await page.run(`(() => {
+                const when = document.querySelector('app-flow [data-when-element]');
+                when.value = 'ask';
+                when.dispatchEvent(new Event('change', { bubbles: true }));
+                for (const into of document.querySelectorAll('app-flow [data-route-into]')) {
+                    into.value = 'answer';
+                    into.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            const quiet = await frameWaitFor(`document.getElementById('ask') && document.getElementById('answer') ? document.getElementById('answer').textContent || 'empty' : null`);
+            check('Apps: the HTML a tool returns runs without its own scripts', quiet === 'empty', quiet);
+            await typeAndClick('question', 'a tool made this', 'ask');
+            const toolScreen = await frameWaitFor(`(() => { const text = document.getElementById('answer')?.textContent; return text?.startsWith('You said') ? text : null; })()`);
+            check('Apps: the flow works the same on a screen a tool made', toolScreen === 'You said a tool made this, and it said Echo: a tool made this', toolScreen);
+
+            // Download is a zip of the flow as DML, the screen as HTML and a README; importing it
+            // brings the app back.
+            const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-app-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
+            await page.run(`document.getElementById('downloadAppBtn').click()`);
+            let zipName;
+            for (let i = 0; i < 50 && !zipName; i++) {
+                zipName = readdirSync(appDownloads).find(name => name.endsWith('.zip'));
+                if (!zipName) await sleep(100);
+            }
+            const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
+            const zippedText = name => (zipped.has(name) ? new TextDecoder().decode(zipped.get(name)) : '');
+            let fromZip;
+            try {
+                fromZip = fromDml(zippedText('app.dml'), { files: { 'index.html': zippedText('index.html') } }).app;
+            } catch (error) {
+                fromZip = { error: error.message };
+            }
+            check('Apps: Download saves a zip with the flow as DML, the screen as HTML and a README',
+                zipName === 'new-app-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, README.md'
+                    && fromZip.version === 1 && fromZip.screen?.kind === 'html' && fromZip.screen.from?.toolName === 'make_screen'
+                    && /<input id="question"/.test(zippedText('index.html')) && fromZip.flow?.[0]?.when?.element === 'ask'
+                    && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`'),
+                `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+            const firstVersion = await page.waitFor(`(() => {
+                const version = document.getElementById('appVersion')?.textContent || '';
+                return version.startsWith('Version 1, downloaded') ? version + ' | ' + document.getElementById('downloadAppBtn').textContent.trim() : null;
+            })()`, 5000);
+            check('Apps: a download is version 1', firstVersion === 'Version 1, downloaded just now | Download v1', firstVersion);
+            await page.run(`(() => {
+                document.querySelector('app-header details.menu').open = true;
+                const remove = document.getElementById('deleteAppBtn');
+                remove.click();
+                remove.click();
+            })()`);
+            const deleted = await page.waitFor(`!document.getElementById('chatApp').hidden && !document.querySelector('apps-rail #appList [data-show-app]')`, 5000);
+            const { root } = (await page.send('DOM.getDocument', { depth: -1 })).result;
+            const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importAppInput' })).result;
+            await page.send('DOM.setFileInputFiles', { nodeId, files: [join(appDownloads, zipName || 'missing.zip')] });
+            const imported = await page.waitFor(`(() => {
+                const shown = !document.getElementById('appBuilder').hidden && document.getElementById('appName')?.value === 'New app';
+                return shown ? document.querySelector('app-flow .app-rule-sentence')?.textContent : null;
+            })()`, 10000);
+            await sleep(500);
+            const importedVersion = await page.run(`document.getElementById('appVersion').textContent + ' | ' + document.getElementById('downloadAppBtn').textContent.trim()`);
+            check('Apps: Delete removes the app, and importing its zip brings it back as version 1, unchanged',
+                !!deleted && /^When ask is clicked, call echo on modern server with text = \{\{question\}\}/.test(imported || '')
+                    && importedVersion === 'Version 1, downloaded just now | Download v1', `${imported}; ${importedVersion}`);
+            await typeAndClick('question', 'after the import', 'ask');
+            const reimported = await frameWaitFor(`document.getElementById('answer')?.textContent === 'You said after the import, and it said Echo: after the import'`);
+            await page.run(`(() => {
+                const description = document.getElementById('appDescription');
+                description.value = 'Asks the mock';
+                description.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const next = await page.run(`document.getElementById('downloadAppBtn').textContent.trim() + ' | ' + document.querySelector('apps-rail [aria-current="true"]').textContent.trim().replace(/\\s+/g, ' ')`);
+            const lastSteps = await page.run(`[...document.querySelectorAll('app-preview .app-trace-text')].slice(-4).map(line => line.textContent.trim()).join(' | ')`);
+            check('Apps: the imported app runs as before, and a change makes the next download version 2',
+                !!reimported && next === 'Download v2 | New app v1', `${next}; ${reimported ? '' : `the screen shows "${await frameRun(`document.getElementById('answer')?.textContent || 'nothing'`)}" after ${lastSteps}`}`);
+            rmSync(appDownloads, { recursive: true, force: true });
+        }
         await page.run(showWorkbench);
 
         const trace = await page.run(`${entries}.some(e => e.source === ${JSON.stringify(CLIENT.logSource)} && e.level === 'debug' && e.message.startsWith('→ server/discover'))`);
