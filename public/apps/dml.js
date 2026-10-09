@@ -30,8 +30,16 @@ export class DmlError extends Error {}
 const escapeText = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '&#13;');
 const escapeAttribute = value => escapeText(value).replace(/"/g, '&quot;').replace(/\n/g, '&#10;').replace(/\t/g, '&#9;');
 
-// A node is [name, attributes, ...children], where a child is a node or text. Attributes that are
-// undefined or null are left out.
+// Markup inside markup reads best as it is, in CDATA; a CDATA section can't hold ]]> or keep a
+// carriage return, so those are split across sections or escaped.
+const cdataText = value => (String(value).includes('\r')
+    ? escapeText(value)
+    : `<![CDATA[${String(value).replaceAll(']]>', ']]]]><![CDATA[>')}]]>`);
+
+const isText = child => typeof child === 'string' || typeof child?.cdata === 'string';
+
+// A node is [name, attributes, ...children], where a child is a node, text, or { cdata } for text
+// written as CDATA. Attributes that are undefined or null are left out.
 function writeNode([name, attributes = {}, ...children], depth = 0) {
     const pad = '  '.repeat(depth);
     const attrs = Object.entries(attributes)
@@ -39,7 +47,9 @@ function writeNode([name, attributes = {}, ...children], depth = 0) {
         .map(([key, value]) => ` ${key}="${escapeAttribute(value)}"`)
         .join('');
     if (!children.length) return `${pad}<${name}${attrs}/>`;
-    if (children.every(child => typeof child === 'string')) return `${pad}<${name}${attrs}>${escapeText(children.join(''))}</${name}>`;
+    if (children.every(isText)) {
+        return `${pad}<${name}${attrs}>${children.map(child => (typeof child === 'string' ? escapeText(child) : cdataText(child.cdata))).join('')}</${name}>`;
+    }
     return `${pad}<${name}${attrs}>\n${children.map(child => writeNode(child, depth + 1)).join('\n')}\n${pad}</${name}>`;
 }
 
@@ -92,7 +102,7 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
     const screen = app.screen || {};
     const src = standalone ? undefined : 'index.html';
     const screenNode = screen.kind === 'html'
-        ? ['screen', { src }, ...(screen.from ? [callNode('from', screen.from)] : []), ...(standalone ? [['html', {}, screen.html || '']] : [])]
+        ? ['screen', { src }, ...(screen.from ? [callNode('from', screen.from)] : []), ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
         : ['screen', { src, 'built-from': 'components' }, ...(screen.components || []).map(componentNode)];
     const servers = serversOf(app);
     const flow = (app.flow || []).map(rule => [

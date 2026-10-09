@@ -92,8 +92,13 @@ test('an HTML screen travels as index.html in a zip, or inside the DML on its ow
 
     const alone = toDml(app, { standalone: true });
     assert.doesNotMatch(alone, /src=/);
-    assert.match(alone, /<html>&lt;!DOCTYPE html&gt;/);
+    assert.match(alone, /<html><!\[CDATA\[<!DOCTYPE html>\n<html><body><input id="q">/, 'the HTML reads as HTML');
     assert.deepEqual(withoutRuleIds(fromDml(alone).app), withoutRuleIds(app));
+
+    const awkward = { ...app, screen: { ...app.screen, html: '<p id="x">a ]]> b</p>', from: null } };
+    assert.deepEqual(fromDml(toDml(awkward, { standalone: true })).app.screen, awkward.screen);
+    const carriageReturns = { ...app, screen: { ...app.screen, html: '<p id="x">a\r\nb</p>', from: null } };
+    assert.deepEqual(fromDml(toDml(carriageReturns, { standalone: true })).app.screen, carriageReturns.screen);
 });
 
 test('DML written by hand: CDATA, comments, single quotes and character references', () => {
