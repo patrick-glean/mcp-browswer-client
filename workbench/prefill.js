@@ -1,21 +1,32 @@
 // Pre-fill's test data: a value for each of a tool's fields, from its input schema and the active
 // environment's variables, which is where test data is staged.
 //
-// A field gets the first of: its `const`; {{name}} when a variable is named like the field
-// (ignoring case, dashes and underscores); its `default`; its first example, from `examples` or
-// from its description ("e.g. 'react'"). Required fields with none of those, and every field with
-// `every`, get a generated value that fits the schema: its format, pattern, length, range,
-// multipleOf, enum, items and properties, with plausible text for common field names. Nothing is
-// random, so a schema gets the same values every time and their runs compare.
+// By default only the required fields are filled; `every` fills the optional ones too, and
+// fieldTestData fills one field. A field gets the first of: its `const`; {{name}} when a variable
+// is named like the field (ignoring case, dashes and underscores); its `default`; its first
+// example, from `examples` or from its description ("e.g. 'react'", 'one of "asc", "desc"'). The
+// rest get a generated value that fits the schema: its format, pattern, length, range, multipleOf,
+// enum, items and properties, with plausible text for common field names and for what a
+// description says a field holds (a date as YYYY-MM-DD, an email address). Optional pagination
+// cursors stay empty, since only an earlier response has one. Nothing is random, so a schema gets
+// the same values every time and their runs compare.
 
 import { schemaType } from './template.js';
 
 // Deeper than this is a recursive schema, which gets no generated values.
 const MAX_DEPTH = 8;
 const MAX_ITEMS = 50;
+const DAY_MS = 86_400_000;
 
 const normalized = name => String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
-const today = () => new Date().toISOString().slice(0, 10);
+
+// A range's start is a week before its end, which is today.
+const START_OF_RANGE = /^(start|since|from|after|begin)|(start|since|from|after|begin)(date|day|time)?$/;
+const isoDate = key => new Date(Date.now() - (START_OF_RANGE.test(normalized(key)) ? 7 * DAY_MS : 0)).toISOString().slice(0, 10);
+
+// A default or example that says "nothing" (null, '', [] or {}) suggests no value to try.
+const blank = value => value === null || value === ''
+    || (Array.isArray(value) ? !value.length : typeof value === 'object' && !Object.keys(value).length);
 
 // The variable a field takes: one with its exact name, else one named like it.
 export function matchingVariable(field, variables = {}) {
@@ -30,6 +41,18 @@ export function testData(schema, { variables = {}, every = false } = {}) {
     const context = { root: schema || {}, variables, every };
     const { value, sources } = objectValue(resolve(schema, context), context, 0, true);
     return { values: value, sources };
+}
+
+// One field's test data, as if every field were asked for: {value, source}, or null when it gets
+// none. `path` names the field the way the form does: `limit`, or `filter.owner` inside an object.
+export function fieldTestData(schema, path, { variables = {} } = {}) {
+    const context = { root: schema || {}, variables, every: true };
+    const keys = String(path).split('.');
+    let parent = resolve(schema, context);
+    for (const key of keys.slice(0, -1)) parent = resolve(parent.properties?.[key], context);
+    const key = keys.at(-1);
+    if (!parent.properties || !Object.hasOwn(parent.properties, key)) return null;
+    return fieldValue(key, parent.properties[key], (parent.required || []).includes(key), context, keys.length - 1);
 }
 
 // --- What a field gets ---
@@ -47,47 +70,109 @@ function objectValue(schema, context, depth, fillRequired) {
     return { value, sources };
 }
 
+// Cursors and page tokens come from an earlier response.
+const PAGINATION = /(cursor|pagetoken|nexttoken|continuationtoken)$/;
+
 function fieldValue(key, raw, required, context, depth) {
+    if (!required && !context.every) return null;
     const prop = resolve(raw, context);
     if (Object.hasOwn(prop, 'const')) return { value: prop.const, source: 'const' };
     const variable = matchingVariable(key, context.variables);
     if (variable) return { value: `{{${variable}}}`, source: 'variable' };
-    const hint = suggested(prop, context);
+    const hint = suggested(key, prop, context);
     if (hint) return hint;
     if (typeOf(prop) === 'object' && prop.properties) {
         // An object's fields each get their own hints, and the object counts as generated when
         // any of them was.
         if (depth >= MAX_DEPTH) return null;
-        const fill = required || context.every;
-        const { value, sources } = objectValue(prop, context, depth + 1, fill);
+        const { value, sources } = objectValue(prop, context, depth + 1, true);
         const kinds = Object.values(sources);
-        if (!kinds.length) return fill ? { value, source: 'generated' } : null;
+        if (!kinds.length) return { value, source: 'generated' };
         const source = ['generated', 'variable', 'description', 'example', 'default', 'const'].find(kind => kinds.includes(kind));
         return { value, source };
     }
-    if (!required && !context.every) return null;
+    if (!required && PAGINATION.test(normalized(key))) return null;
     const value = generated(key, prop, context, depth, 0);
     return value === undefined ? null : { value, source: 'generated' };
 }
 
-// What the schema suggests: its default, first example, or an example in its description.
-function suggested(prop, context) {
-    if (Object.hasOwn(prop, 'default')) return { value: prop.default, source: 'default' };
-    if (Array.isArray(prop.examples) && prop.examples.length) return { value: prop.examples[0], source: 'example' };
-    if (Object.hasOwn(prop, 'example')) return { value: prop.example, source: 'example' };
-    const described = exampleInDescription(prop, context);
+// What the schema suggests: its default, first example, or a value its description gives.
+function suggested(key, prop, context) {
+    if (Object.hasOwn(prop, 'default') && !blank(prop.default)) return { value: prop.default, source: 'default' };
+    const examples = [...(Array.isArray(prop.examples) ? prop.examples : []), ...(Object.hasOwn(prop, 'example') ? [prop.example] : [])];
+    const example = examples.find(candidate => !blank(candidate));
+    if (example !== undefined) return { value: example, source: 'example' };
+    const described = valueInDescription(key, prop, context);
     return described === undefined ? null : { value: described, source: 'description' };
 }
 
-// "e.g. 'react'", "(e.g. \"facebook/react\")", "for example `2024-01-01`", "e.g. 10". Only a
-// value that fits the field counts.
-const QUOTED_EXAMPLE = /\b(?:e\.g\.|for example|for instance|such as|example)[,:]?\s*["'`‘“]([^"'`’”]+)["'`’”]/i;
-const BARE_EXAMPLE = /\be\.g\.[,:]?\s+([^\s,;)]+)/i;
+// Where a description gives a value. An example comes right after its cue, in quotes or as one
+// bare token that ends its phrase: "e.g. 'react'", '(e.g., "facebook/react")', "for example
+// `eu-west-1`", "e.g. 25." A list of the values a field takes may have other words before its
+// first quoted value: 'one of ["today", "past_week"]', 'can be a person\'s name, "me" or "myteam"',
+// 'Use keywords: "today"'. Prose doesn't count: a bare word with more words after it ("e.g. last
+// week"), an apostrophe taken for a quote ("what's"), a phrase for a field that doesn't take free
+// text, a shortened example ("AAMkAD...") or a format (YYYY-MM-DD), and anything a clause says not
+// to use. Only a value that fits the field counts.
+const EXAMPLE_CUES = String.raw`e\.g\.|eg\.|for example|for instance|such as|examples?`;
+const LIST_CUES = String.raw`one of|values?|keywords?|options?|either|can be|like|defaults? to`;
+const CUES = new RegExp(String.raw`(?<![\w-])(?:(${EXAMPLE_CUES})|(${LIST_CUES}))(?![\w-])`, 'gi');
+// Quotes that pair up. An opening quote doesn't follow a letter and a closing one isn't followed
+// by one, so a quote inside a word ("what's", "Bob's") is an apostrophe.
+const QUOTED = /(?<!\w)"(?!\s)([^"\n]+?)(?<!\s)"(?!\w)|“([^”\n]+)”|(?<!\w)`(?!\s)([^`\n]+?)(?<!\s)`(?!\w)|(?<!\w)'(?!\s)((?:[^'\n]|'(?=\w))+?)(?<!\s)'(?!\w)|‘((?:[^’\n]|’(?=\w))+?)’(?!\w)/g;
+const QUOTED_HERE = new RegExp(QUOTED.source, 'y');
+const BARE_HERE = /([^\s"'`‘’“”,;()[\]{}<>]+?)([.!?]*)(?=$|[\s,;)\]])/y;
+// What may come between a cue and its value: punctuation, an opening bracket, a list's bullet.
+const LEAD = String.raw`(?:[\s,:[(]|[-*•](?=\s))*`;
+const LEADING = new RegExp(LEAD, 'y');
+const ONLY_LEADING = new RegExp(`^${LEAD}$`);
+const SENTENCE_END = /[.!?](?:\s|$)|\n/;
+const CLAUSE_START = /[\s\S]*(?:[.!?,;:—–]\s|\n|\()/;
+const NEGATION = /\b(?:not|never|avoid|instead|don't|doesn't|isn't|aren't)\b/i;
+const PLACEHOLDER = /\b(?:Y{2,4}|M{2}|D{2}|H{2})\b|<[^<>]+>|\.\.\.|…/;
+// Fields that take words people write, where a phrase or a whole sentence is a fine example.
+const FREE_TEXT = /(questions?|prompts?|messages?|texts?|contents?|bod(?:y|ies)|inputs?|comments?|notes?|descriptions?|summar(?:y|ies)|instructions?|quer(?:y|ies)|search(?:es)?|keywords?|terms?|topics?|titles?|subjects?|names?|labels?|captions?|goals?|reasons?|context)$/;
 
-function exampleInDescription(prop, context) {
-    if (typeof prop.description !== 'string') return undefined;
-    const match = prop.description.match(QUOTED_EXAMPLE) || prop.description.match(BARE_EXAMPLE);
-    return match ? fromText(match[1].replace(/[.:!?]+$/, ''), prop, context) : undefined;
+function valueInDescription(key, prop, context) {
+    const text = prop.description;
+    if (typeof text !== 'string') return undefined;
+    for (const cue of text.matchAll(CUES)) {
+        if (NEGATION.test(text.slice(0, cue.index).replace(CLAUSE_START, ''))) continue;
+        const end = cue.index + cue[0].length;
+        const found = (cue[1] ? exampleAt(text, end) : listedAfter(text, end))?.trim();
+        if (!found || PLACEHOLDER.test(found)) continue;
+        if (/\s/.test(found) && !Array.isArray(prop.enum) && !FREE_TEXT.test(normalized(key))) continue;
+        const value = fromText(found, prop, context);
+        if (value !== undefined) return value;
+    }
+    return undefined;
+}
+
+const unquoted = match => match.slice(1).find(group => group !== undefined);
+
+// The value right after an example's cue, which ends at `at`.
+function exampleAt(text, at) {
+    LEADING.lastIndex = at;
+    LEADING.exec(text);
+    const start = LEADING.lastIndex;
+    QUOTED_HERE.lastIndex = start;
+    const quoted = QUOTED_HERE.exec(text);
+    if (quoted) return unquoted(quoted);
+    BARE_HERE.lastIndex = start;
+    const bare = BARE_HERE.exec(text);
+    if (!bare || !/[\p{L}\p{N}]/u.test(bare[1])) return undefined;
+    const moreWords = /^[^\S\n]/.test(text.slice(BARE_HERE.lastIndex)) && !bare[2];
+    return moreWords ? undefined : bare[1];
+}
+
+// The first quoted value after a list's cue, in the same sentence.
+function listedAfter(text, at) {
+    QUOTED.lastIndex = at;
+    const quoted = QUOTED.exec(text);
+    if (!quoted) return undefined;
+    const gap = text.slice(at, quoted.index);
+    if (!ONLY_LEADING.test(gap) && (SENTENCE_END.test(gap) || NEGATION.test(gap))) return undefined;
+    return unquoted(quoted);
 }
 
 function fromText(text, prop, context, nested = false) {
@@ -143,8 +228,8 @@ const FORMATS = {
     'idn-hostname': () => 'example.com',
     ipv4: () => '192.0.2.1',
     ipv6: () => '2001:db8::1',
-    date: today,
-    'date-time': () => `${today()}T00:00:00Z`,
+    date: isoDate,
+    'date-time': key => `${isoDate(key)}T00:00:00Z`,
     time: () => '12:00:00Z',
     duration: () => 'PT1H',
     uuid: () => '00000000-0000-4000-8000-000000000000',
@@ -155,52 +240,76 @@ const FORMATS = {
 };
 
 // Plausible text for common field names, matched on the name in lower case without separators.
+// These names say what a field holds.
 const STRING_HINTS = [
-    [/email/, 'test@example.com'],
+    [/email|^(to|cc|bcc|replyto)$|^(recipient|sender|attendee|participant|invitee)s?$/, 'test@example.com'],
     [/(url|uri|link|href|endpoint|website|homepage)$/, 'https://example.com'],
     [/^(host|hostname|domain)$/, 'example.com'],
     [/^(q|query|search|searchquery|searchterm|searchterms|keyword|keywords|term|terms)$/, 'test'],
+    [/(?<!^up|vali|candi)date$|(?<!week)day$/, isoDate],
+    [/colou?r$/, '#3366ff'],
+    [/phone/, '+15555550100'],
+    [/question$/, 'What is MCP?'],
+    [/(prompt|message|text|content|body|input|comment|note|description|summary|subject)$/, 'Hello from MCP Browser Client'],
+];
+// What a description says a string holds, for names that don't: a date format or base64 it
+// gives, or an email address or URL it starts with.
+const DESCRIBED = [
+    [/Y{4}-M{2}-D{2}[T ]H{2}|ISO[ -]?8601 (?:date[- ]?time|timestamp)/i, key => `${isoDate(key)}T00:00:00Z`],
+    [/Y{4}-M{2}-D{2}|ISO[ -]?8601/i, isoDate],
+    [/\bbase64[- ]encoded\b|\b(?:in|as) base64\b/i, 'dGVzdA=='],
+    [/^\W*(?:\((?:optional|required)\)\s*)?(?:the |an? )?e-?mail address/i, 'test@example.com'],
+    [/^\W*(?:\((?:optional|required)\)\s*)?(?:the |an? )?(?:\w+ )?(?:URL|URI)\b/i, 'https://example.com'],
+];
+// Guesses from a field's name, which a description that says what the field holds comes before.
+const GUESSES = [
     [/(reponame|repofullname|nwo)$/, 'modelcontextprotocol/modelcontextprotocol'],
     [/^(owner|org|organization|organisation|namespace|repo|repository)$/, 'modelcontextprotocol'],
-    [/^(user|username|login|author|handle)$/, 'octocat'],
+    [/^(user|username|login|author|handle|assignee|reviewer)s?$/, 'octocat'],
+    [/^(branch|branchname|ref|basebranch|frombranch)$/, 'main'],
+    [/(file|filename|filepath)$/, 'README.md'],
+    [/(path|dir|directory|folder)$/, '/'],
+    [/version$/, '1.0.0'],
     [/(library|package|pkg|module)(name|id)?$/, 'react'],
-    [/^(lang|language|locale)$/, 'en'],
+    [/^(lang|language|locale)$/, (key, prop) => (/\b(programming|code|snippets?|syntax)\b/i.test(prop.description || '') ? 'python' : 'en')],
     [/^(country|countrycode)$/, 'US'],
     [/^(currency|currencycode)$/, 'USD'],
     [/^(tz|timezone)$/, 'UTC'],
-    [/(date|day)$/, today],
-    [/version$/, '1.0.0'],
-    [/colou?r$/, '#3366ff'],
-    [/phone/, '+15555550100'],
-    [/(path|dir|directory|folder)$/, '/'],
-    [/(file|filename)$/, 'README.md'],
-    [/(question|prompt|message|text|content|body|input|comment|note|description|summary)$/, 'Hello from MCP Browser Client'],
+    [/^(order|sortorder|direction|sortdirection)$/, 'asc'],
     [/(name|title|label)$/, 'Test'],
 ];
 // Matched on the name as written, so `paid` or `valid` aren't IDs.
 const ID_NAME = /(^id$|[_-]id$|[a-z]Id$|ID$)/;
 
 const NUMBER_HINTS = [
-    [/^(limit|max|maxresults|count|size|pagesize|perpage|top|topk|k|n|num|results|first|last)$/, () => 5],
-    [/^(page|pagenumber)$/, () => 1],
-    [/^(offset|skip|start)$/, () => 0],
+    [/^(max|count|size|top|topk|k|n|num|results|first|last)$|(limit|maxresults|numresults|pagesize|perpage)$/, 5],
+    [/^(page|pagenumber)$/, 1],
+    [/^(offset|skip|start)$/, 0],
     [/year$/, () => new Date().getUTCFullYear()],
-    [/port$/, () => 8080],
-    [/(timeout|seconds|secs)$/, () => 30],
+    [/port$/, 8080],
+    [/(timeout|seconds|secs)$/, 30],
 ];
 
-const hinted = (hints, key) => {
+const hinted = (hints, key, prop = {}) => {
     const found = hints.find(([pattern]) => pattern.test(normalized(key)));
-    return found ? (typeof found[1] === 'function' ? found[1]() : found[1]) : undefined;
+    return found ? (typeof found[1] === 'function' ? found[1](key, prop) : found[1]) : undefined;
 };
 
+function described(key, prop) {
+    if (typeof prop.description !== 'string') return undefined;
+    const found = DESCRIBED.find(([pattern]) => pattern.test(prop.description));
+    return found ? (typeof found[1] === 'function' ? found[1](key) : found[1]) : undefined;
+}
+
 function stringValue(key, prop, index) {
-    const formatted = FORMATS[prop.format]?.();
-    const named = ID_NAME.test(key) ? '1' : hinted(STRING_HINTS, key);
+    const formatted = Object.hasOwn(FORMATS, prop.format) ? FORMATS[prop.format](key) : undefined;
+    const named = ID_NAME.test(key) ? '1' : hinted(STRING_HINTS, key, prop);
+    const fromDescription = described(key, prop);
+    const guessed = hinted(GUESSES, key, prop);
     // An array that wants unique items gets "test", "test2", "test3"… Readable values come before
     // one made from the pattern, as long as they match it.
     const numbered = text => (index && text !== undefined ? `${text}${index + 1}` : text);
-    const candidates = [formatted, numbered(named), named, numbered('test'), 'test', patternValue(prop.pattern)];
+    const candidates = [formatted, ...[named, fromDescription, guessed, 'test'].flatMap(text => [numbered(text), text]), patternValue(prop.pattern)];
     for (const candidate of candidates) {
         if (candidate === undefined) continue;
         const value = fitLength(candidate, prop);
@@ -254,11 +363,11 @@ function arrayValue(key, prop, context, depth) {
 // An item takes its schema's suggestion when it's the first, and is generated otherwise, named
 // like one of the array's (`tags` → `tag`).
 function itemValue(key, schema, context, depth, index) {
+    const singular = key.replace(/ies$/, 'y').replace(/s$/, '');
     if (index === 0) {
-        const hint = suggested(schema, context);
+        const hint = suggested(singular, schema, context);
         if (hint) return hint.value;
     }
-    const singular = key.replace(/ies$/, 'y').replace(/s$/, '');
     return generated(singular, schema, context, depth, index);
 }
 
@@ -426,8 +535,18 @@ function typeOf(prop) {
     return undefined;
 }
 
-// The checks a primitive value can fail on its own: enum, const, length, pattern, range,
-// multipleOf and whole numbers.
+const FORMAT_CHECKS = {
+    email: /^[^\s@]+@[^\s@]+$/,
+    'idn-email': /^[^\s@]+@[^\s@]+$/,
+    uri: /^[a-z][a-z\d+.-]*:\S*$/i,
+    url: /^[a-z][a-z\d+.-]*:\S*$/i,
+    date: /^\d{4}-\d{2}-\d{2}$/,
+    'date-time': /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i,
+    uuid: /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i,
+};
+
+// The checks a primitive value can fail on its own: enum, const, length, pattern, the common
+// formats, range, multipleOf and whole numbers.
 function fits(value, prop) {
     if (Array.isArray(prop.enum) && !prop.enum.includes(value)) return false;
     if (Object.hasOwn(prop, 'const') && prop.const !== value) return false;
@@ -436,6 +555,7 @@ function fits(value, prop) {
         if (typeof prop.minLength === 'number' && length < prop.minLength) return false;
         if (typeof prop.maxLength === 'number' && length > prop.maxLength) return false;
         if (typeof prop.pattern === 'string' && !matches(value, prop.pattern)) return false;
+        if (Object.hasOwn(FORMAT_CHECKS, prop.format) && !FORMAT_CHECKS[prop.format].test(value)) return false;
     }
     if (typeof value === 'number') {
         if (typeof prop.minimum === 'number' && (prop.exclusiveMinimum === true ? value <= prop.minimum : value < prop.minimum)) return false;

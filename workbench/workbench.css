@@ -1117,6 +1117,43 @@ wb-response {
     gap: 14px;
 }
 
+/* Fill sits at the end of a field's first line; everything else in the field spans it. */
+.wb-form .tool-input-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 8px;
+}
+
+.wb-form .tool-input-card > * {
+    grid-column: 1 / -1;
+}
+
+.wb-form .tool-input-card > label {
+    grid-column: 1;
+}
+
+.wb-form .tool-input-card > .add-array-item {
+    justify-self: start;
+}
+
+.wb-form .tool-input-card > .wb-fill-field {
+    grid-row: 1;
+    grid-column: 2;
+}
+
+.wb-fill-field {
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    color: var(--theme-text-secondary);
+}
+
+.wb-fill-field:hover:not(:disabled),
+.wb-fill-field:focus-visible {
+    color: var(--theme-primary-highlight);
+}
+
 .wb-optional > summary {
     width: fit-content;
     color: var(--theme-text-secondary);
@@ -1124,10 +1161,10 @@ wb-response {
     cursor: pointer;
 }
 
-.wb-optional[open] {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+/* Margins rather than a flex gap: browsers lay out a <details> element's content in a box of its
+   own (::details-content), which the gap doesn't reach. */
+.wb-optional[open] > .tool-input-card {
+    margin-top: 14px;
 }
 
 .wb-resolved {

@@ -196,6 +196,45 @@ export function renameInPlace(element, current, save, done) {
     input.addEventListener('click', event => event.stopPropagation());
 }
 
+const shortJson = value => {
+    const text = JSON.stringify(value);
+    return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+};
+
+// Fill, beside each field's name in a form of AppShell's fields: fills that field alone with
+// Pre-fill's test data (see fillField). Drawing them again brings their tooltips up to date with
+// the variables. Fields with no test data, such as optional pagination cursors, get none.
+export function addFillButtons(form, schema, workbench) {
+    form.querySelectorAll('.wb-fill-field').forEach(button => button.remove());
+    for (const card of form.querySelectorAll('.tool-input-card[data-field]')) {
+        const data = workbench.testDataForField(schema, card.dataset.field);
+        if (!data) continue;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-sm btn-tertiary wb-fill-field';
+        button.dataset.fillField = card.dataset.field;
+        button.title = `Fill in ${shortJson(data.value)} (${data.how})`;
+        button.setAttribute('aria-label', `Fill ${card.dataset.field} with test data`);
+        button.innerHTML = '<span class="icon icon-zap" aria-hidden="true"></span>Fill';
+        card.querySelector(':scope > label').after(button);
+    }
+}
+
+// Fills one field (`limit`, or `filter.owner` inside an object) with its test data and focuses
+// it. Returns what it filled, to tell the person, or null.
+export function fillField(form, schema, path, { shell, workbench }) {
+    const data = workbench.testDataForField(schema, path);
+    const keys = path.split('.');
+    const key = keys.pop();
+    const prop = keys.reduce((parent, part) => parent?.properties?.[part], schema)?.properties?.[key];
+    if (!data || !prop) return null;
+    const prefix = keys.join('.');
+    shell.fillToolForm(form, { properties: { [key]: prop } }, { [key]: data.value }, prefix);
+    if (prefix) form.dispatchEvent(new Event('input', { bubbles: true }));
+    form.querySelector(`.tool-input-card[data-field="${CSS.escape(path)}"] [name]`)?.focus();
+    return `Filled ${path} with ${shortJson(data.value)} (${data.how}).`;
+}
+
 // Closes open <details class="menu"> dropdowns when a click lands outside them.
 export function closeMenusOutside(event) {
     document.querySelectorAll('details.menu[open]').forEach(menu => {
