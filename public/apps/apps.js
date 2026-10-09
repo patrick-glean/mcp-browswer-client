@@ -69,7 +69,10 @@ export function starterApp({ shell, workbench, name }) {
 // The README that travels in an app's zip: what's in it, the flow in words, and how to run it.
 export function readmeFor(app, { serverName = url => url } = {}) {
     const elements = new Map(elementsOf(app.screen).map(element => [element.id, element]));
-    const elementName = id => (elements.get(id) && elements.get(id).label !== id ? `${elements.get(id).label} (\`${id}\`)` : `\`${id}\``);
+    const elementName = id => {
+        const label = elements.get(id)?.label;
+        return label && label.toLowerCase() !== id.toLowerCase() ? `${label} (\`${id}\`)` : `\`${id}\``;
+    };
     const servers = serversOf(app);
     const rules = (app.flow || []).map((rule, index) => `${index + 1}. ${describeRule(rule, { elementName, serverName })}`);
     return `# ${app.name}

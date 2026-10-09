@@ -229,12 +229,15 @@ export function flowProblems(flow, { elements = [], servers = {} } = {}) {
     });
 }
 
+// Text in a sentence: a lone {{name}} as it is, anything else in quotes.
+const quoted = text => (/^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text) ? text : `“${text}”`);
+
 // A rule as a sentence, for people reading the app: the zip's README and the builder.
 export function describeRule(rule, { elementName = id => id, serverName = url => url } = {}) {
     const { element, event } = rule.when || {};
     const when = event === 'open' ? 'When the app opens' : `When ${elementName(element)} ${EVENTS[event] || event}`;
-    const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+    const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? quoted(value) : JSON.stringify(value)}`);
     const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}`;
-    const routes = (rule.then || []).map(route => `${route.if === 'error' ? 'if it fails' : 'if it works'}, put ${route.show === '' ? 'nothing (clearing it)' : route.show} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
+    const routes = (rule.then || []).map(route => `${route.if === 'error' ? 'if it fails' : 'if it works'}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }

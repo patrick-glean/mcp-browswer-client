@@ -260,7 +260,8 @@ test("the screen's runtime watches what rules wait for and reads what they use",
 test('rules say what they do in a sentence, and what keeps them from running', () => {
     const app = sampleApp();
     const sentence = describeRule(app.flow[1], { serverName: () => 'Mock server' });
-    assert.equal(sentence, 'When the app opens, call echo on Mock server with text = hello <world> & "you"; if it works, put <em>{{text}}</em> into note as HTML.');
+    assert.equal(sentence, 'When the app opens, call echo on Mock server with text = “hello <world> & "you"”; if it works, put “<em>{{text}}</em>” into note as HTML.');
+    assert.equal(describeRule(app.flow[0]), 'When ask is clicked, call search_notes on http://127.0.0.1:8081/ with query = {{question}}, limit = 5, include_archived = false, tags = ["a","b&c"], snippet = {"length":200}, nothing = null; if it works, put “Found: {{text}}” into answer; if it works, put nothing (clearing it) into question; if it fails, put {{error}} into answer after what it shows.');
     const elements = elementsOfComponents(app.screen.components);
     const servers = { [MOCK]: { tools: [{ name: 'echo' }] } };
     const problems = Object.fromEntries(flowProblems(app.flow, { elements, servers }));
