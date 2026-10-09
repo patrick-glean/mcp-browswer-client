@@ -280,7 +280,8 @@ test('a screen built from components is HTML with the ids the flow uses, its tex
     assert.match(html, /<input id="question" type="text" placeholder="e\.g\. &quot;service worker&quot;" autocomplete="off">/);
     assert.match(html, /<textarea id="details" rows="4">first\nsecond<\/textarea>/);
     assert.match(html, /<button id="ask" type="button">Ask<\/button>/);
-    assert.match(html, /<div id="answer" class="output" aria-live="polite" data-placeholder="It shows up here\."><\/div>/);
+    assert.match(html, /<h2 class="label">Answer<\/h2>\n {6}<div id="answer" class="output" aria-label="Answer" aria-live="polite" data-placeholder="It shows up here\."><\/div>/);
+    assert.deepEqual([...html.matchAll(/ id="([^"]+)"/g)].map(match => match[1]), ['title', 'note', 'question', 'details', 'ask', 'answer'], 'only components have ids');
     assert.doesNotMatch(html, /<script|https?:\/\//, 'a built screen needs no scripts and loads nothing');
 });
 

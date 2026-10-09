@@ -148,10 +148,12 @@ export class AppFlow extends AppElement {
                 <select data-route-if aria-label="When this happens"><option value="ok">If it works</option><option value="error">If it fails</option></select>
                 <span class="app-route-word">put</span>
                 <input type="text" class="mono" data-route-show aria-label="What to show" placeholder="nothing, which clears it" autocomplete="off" spellcheck="false">
-                <span class="app-route-word">into</span>
-                <select data-route-into aria-label="Where it goes"></select>
-                <select data-route-how aria-label="How">${Object.entries(ROUTE_HOW).map(([how, label]) => `<option value="${how}">${label}</option>`).join('')}</select>
-                <button type="button" class="btn-icon btn-sm btn-tertiary" data-remove-route aria-label="Remove this"><span class="icon icon-x" aria-hidden="true"></span></button>
+                <span class="app-route-where">
+                    <span class="app-route-word">into</span>
+                    <select data-route-into aria-label="Where it goes"></select>
+                    <select data-route-how aria-label="How">${Object.entries(ROUTE_HOW).map(([how, label]) => `<option value="${how}">${label}</option>`).join('')}</select>
+                    <button type="button" class="btn-icon btn-sm btn-tertiary" data-remove-route aria-label="Remove this"><span class="icon icon-x" aria-hidden="true"></span></button>
+                </span>
             </li>`;
     }
 
@@ -168,11 +170,11 @@ export class AppFlow extends AppElement {
         return `${app ? '<option value="">The app</option>' : ''}${none}${missing}${groups}`;
     }
 
-    // The ids {{id}} can bring in: fields first.
+    // The ids {{id}} usually brings in: fields, then outputs (any element's id works).
     valueIds() {
-        const order = { input: 0, output: 1, static: 2, button: 3 };
+        const order = { input: 0, output: 1 };
         return this.apps.elements()
-            .filter(element => ELEMENT_ID.test(element.id) && !ANSWER_NAMES.includes(element.id))
+            .filter(element => element.kind in order && ELEMENT_ID.test(element.id) && !ANSWER_NAMES.includes(element.id))
             .sort((a, b) => order[a.kind] - order[b.kind])
             .map(element => element.id);
     }

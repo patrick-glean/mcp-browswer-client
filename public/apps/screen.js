@@ -142,7 +142,7 @@ function componentHtml(component) {
         case 'button':
             return `<button id="${id}" type="button">${escapeHtml(component.label)}</button>`;
         case 'output':
-            return `<section class="field" aria-labelledby="${id}--label">\n      <h2 class="label" id="${id}--label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="output" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
+            return `<section class="field">\n      <h2 class="label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="output" aria-label="${escapeHtml(component.label)}" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
         default:
             return '';
     }

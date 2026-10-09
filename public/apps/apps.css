@@ -511,6 +511,13 @@ app-preview {
     font-size: 0.75rem;
 }
 
+/* "into", where and how wrap to the next line together. */
+.app-route-where {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .app-route-add {
     display: flex;
     gap: 4px;
