@@ -233,7 +233,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system
 .app > .w-two-thirds { grid-column: span 4; }
 .app > .w-half { grid-column: span 3; }
 .app > .w-third { grid-column: span 2; }
-@media (max-width: 520px) { .app > * { grid-column: 1 / -1; } }
+@media (max-width: 520px) { .app > *, .app > .w-two-thirds, .app > .w-half, .app > .w-third { grid-column: 1 / -1; } }
 h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
 .text { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .field { display: flex; flex-direction: column; gap: 6px; }
