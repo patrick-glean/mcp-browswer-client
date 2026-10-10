@@ -1,14 +1,16 @@
 // The app builder's pure parts (public/apps/): the flow's templates and arguments, the screen's
-// HTML, the DML an app is written down in, and the zip it downloads as.
+// HTML, the DML an app is written down in, the zip it downloads as, the examples it starts from,
+// and the agent loop a rule runs when its model may call tools.
 //
 //   node --test "tests/*.test.mjs"    (npm run test:unit)
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
-import { dashboardApp } from '../public/apps/apps.js';
-import { askPrompt, modelCall } from '../public/apps/ask.js';
-import { asksOf, formatRequest, isBox, promptFieldOf, renderBox } from '../public/apps/boxes.js';
+import { allowedCall, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
+import { chatApp, dashboardApp, foundModel } from '../public/apps/apps.js';
+import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
+import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
 import {
     answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, jsonIn, newRule, normalizeRule, renameInFlow,
@@ -434,18 +436,22 @@ test("a transform's label is the value it takes, or the start of its template", 
     assert.equal(routeSummary({ if: 'ok', show: '' }), 'nothing');
 });
 
-test("asking a model sends the Chat app's model what to make, with the rules a screen needs", () => {
+test('asking a model sends it what to make, with the rules a screen needs', () => {
     const prompt = askPrompt('a ticket dashboard', { part: true });
     assert.match(prompt, /^Write one part of an app's screen, as an HTML fragment \(not a whole page\): a ticket dashboard\n\n/);
     assert.match(prompt, /an id of letters, digits, - or _/);
     assert.match(prompt, /No scripts and nothing from the network/);
     assert.doesNotMatch(prompt, /Change this HTML/);
     assert.match(askPrompt('add a total', { current: '<p id="n">1</p>' }), /^Write the screen of an app, as one HTML page: add a total\n\nChange this HTML to do that, keeping its ids:\n\n```html\n<p id="n">1<\/p>\n```/);
-    const model = { serverUrl: MOCK, toolName: 'chat', args: { message: 'Please: {{message}}', style: 'brief' }, messageField: 'message', conversationField: 'history' };
-    assert.deepEqual(modelCall(model, 'make it'), { serverUrl: MOCK, toolName: 'chat', args: { message: 'Please: make it', style: 'brief', history: [] } });
-    assert.deepEqual(modelCall({ ...model, args: {} }, 'make it').args.message, 'make it');
-    assert.throws(() => modelCall(null, 'x'), /In Apps, open Chat, and under Model choose the tool that answers/);
-    assert.throws(() => modelCall({ ...model, messageField: null }, 'x'), /tick "Your message goes here"/);
+    const model = { serverUrl: MOCK, toolName: 'chat', messageField: 'message', conversationField: 'history' };
+    assert.deepEqual(modelCall(model, 'make it'), { serverUrl: MOCK, toolName: 'chat', args: { message: 'make it', history: [] } });
+    // Glean's chat wants the person's own words in _user_goal, a required text field.
+    const schema = { properties: { message: { type: 'string' }, _user_goal: { type: 'string' }, n: { type: 'integer' } }, required: ['message', '_user_goal', 'n'] };
+    assert.deepEqual(modelCall({ ...model, conversationField: null }, 'Write the screen…', { schema, goal: 'a ticket dashboard' }).args, { _user_goal: 'a ticket dashboard', message: 'Write the screen…' });
+    assert.deepEqual(modelArgs(model, { prompt: '{{message}}', conversation: '{{conversation}}', schema, base: { n: 1, message: 'test' } }),
+        { n: 1, _user_goal: '{{message}}', history: '{{conversation}}', message: '{{message}}' });
+    assert.throws(() => modelCall(null, 'x'), /There is no model to ask yet\. Add a server with a chat tool \(Glean, or the mock\), or choose one under Model\./);
+    assert.throws(() => modelCall({ ...model, messageField: null }, 'x'), /Choose the field of chat the request goes in, under Model\./);
 });
 
 // A dashboard's screen: boxes that say what they show, and one rule that asks for all of them.
@@ -522,12 +528,12 @@ test("a rule's boxes ask for one JSON object, a key for each, in the shapes they
     assert.equal(promptFieldOf({ properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array' } }, required: ['message', '_user_goal'] }), 'message');
     assert.equal(promptFieldOf({ properties: { topic: { type: 'string' }, n: { type: 'integer' } }, required: ['topic'] }), 'topic');
     assert.equal(promptFieldOf({ properties: { n: { type: 'integer' } } }), null);
-    assert.match(describeRule(app.flow[0]), /, asking in message for what its boxes show; if it works, put \{\{json\.summary\}\} into summary;/);
+    assert.match(describeRule(app.flow[0]), /, adding to message what its boxes show; if it works, put \{\{json\.summary\}\} into summary;/);
     const [problems] = flowProblems(app.flow, {
         elements,
         servers: { 'https://acme-be.glean.com/mcp/default': { tools: [{ name: 'chat', inputSchema: { type: 'object', properties: { question: { type: 'string' } } } }] } },
     });
-    assert.deepEqual(problems[1], ['chat has no field message to ask for the boxes in.']);
+    assert.deepEqual(problems[1], ['chat has no field message for its prompt.']);
 });
 
 test('each box draws its piece of the answer, and says when it doesn\'t fit', () => {
@@ -579,7 +585,7 @@ test('a dashboard comes back the same from its DML, and its boxes ask in the pro
     assert.match(html, /<div id="activity" class="output box box-bar"/);
     assert.match(html, /<div id="plain" class="output" /);
     const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
-    assert.throws(broken('show="bar"', 'show="pie"'), /show="pie" isn't one of text, number, list, table, bar, line, html\./);
+    assert.throws(broken('show="bar"', 'show="pie"'), /show="pie" isn't one of text, number, list, table, bar, line, html, conversation\./);
     assert.throws(broken('width="third"', 'width="quarter"'), /width="quarter" isn't one of full, two-thirds, half, third\./);
     assert.throws(broken('size="wide"', 'size="huge"'), /size="huge" is narrow or wide\./);
     assert.throws(broken('role="prompt"', 'role="question"'), /role="question" isn't one an <arg> has/);
@@ -589,7 +595,7 @@ test('a dashboard comes back the same from its DML, and its boxes ask in the pro
 test('wiring an answer to a box gives it its key, and renaming the box takes the key along', () => {
     const app = dashboard();
     const rule = { ...app.flow[0], then: [] };
-    const asked = ({ element, failing, rule: wired }) => (!failing && wired.prompt ? `{{json.${element.replace(/\./g, '_')}}}` : null);
+    const asked = ({ element, phase, rule: wired }) => (phase === 'ok' && wired.prompt ? `{{json.${element.replace(/\./g, '_')}}}` : null);
     const { flow } = connect([rule], 'ok:rule-pulse', 'el:docs', { defaultShow: asked });
     assert.deepEqual(flow[0].then, [{ if: 'ok', show: '{{json.docs}}', into: 'docs', how: 'replace' }]);
     assert.equal(connect([rule], 'err:rule-pulse', 'el:docs', { defaultShow: asked }).flow[0].then[0].show, '{{error}}');
@@ -599,11 +605,14 @@ test('wiring an answer to a box gives it its key, and renaming the box takes the
     assert.equal(renamed.then.find(route => route.into === 'summary').show, '{{json.summary}}');
 });
 
-test('the dashboard starter asks Glean when you have it, else the Chat app\'s model', () => {
-    const chat = { name: 'chat', inputSchema: { type: 'object', properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array' } }, required: ['message', '_user_goal'] } };
+test('the Project pulse example asks the model: Glean when you have it, else a chat tool, unless you chose one', () => {
+    const chat = { name: 'chat', inputSchema: { type: 'object', properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array', items: { type: 'string' } } }, required: ['message', '_user_goal'] } };
     const workbench = { testDataFor: () => ({ args: { _user_goal: 'test', message: 'test' } }) };
     const glean = 'https://acme-be.glean.com/mcp/default';
-    const fromGlean = dashboardApp({ shell: { servers: { [MOCK]: { url: MOCK, tools: [chat] }, [glean]: { url: glean, tools: [chat] } } }, workbench, chatModel: null, name: 'Project pulse' });
+    const servers = { [MOCK]: { url: MOCK, tools: [chat] }, [glean]: { url: glean, tools: [chat] } };
+    assert.deepEqual(foundModel(servers), { serverUrl: glean, toolName: 'chat', messageField: 'message', conversationField: 'context' });
+    assert.equal(foundModel({ [MOCK]: { url: MOCK, tools: [{ name: 'echo' }] } }), null);
+    const fromGlean = dashboardApp({ shell: { servers }, workbench, model: foundModel(servers), name: 'Project pulse' });
     const [rule] = fromGlean.flow;
     assert.equal(fromGlean.screen.size, 'wide');
     assert.deepEqual({ serverUrl: rule.call.serverUrl, toolName: rule.call.toolName, prompt: rule.prompt }, { serverUrl: glean, toolName: 'chat', prompt: 'message' });
@@ -612,10 +621,140 @@ test('the dashboard starter asks Glean when you have it, else the Chat app\'s mo
     const elements = elementsOfComponents(fromGlean.screen.components);
     assert.deepEqual(asksOf(rule, elements).map(ask => `${ask.key}:${ask.kind}`), ['summary:text', 'health:number', 'activity:bar', 'risks:list', 'docs:list']);
     assert.match(fromGlean.screen.components.find(component => component.id === 'intro').text, /from one question to Glean:/);
-    const model = { serverUrl: MOCK, toolName: 'chat', args: { message: '{{message}}' }, messageField: 'message', conversationField: '' };
-    const fromModel = dashboardApp({ shell: { servers: { [MOCK]: { url: MOCK, label: 'Mock', tools: [chat] } } }, workbench, chatModel: model, name: 'Project pulse' });
+    const chosen = { serverUrl: MOCK, toolName: 'chat', messageField: 'message', conversationField: 'context' };
+    const fromModel = dashboardApp({ shell: { servers: { [MOCK]: { url: MOCK, alias: 'Mock', tools: [chat] } } }, workbench, model: chosen, name: 'Project pulse' });
     assert.equal(fromModel.flow[0].call.serverUrl, MOCK);
-    assert.equal(fromModel.flow[0].call.args._user_goal, "What's the latest on {{project}}?");
-    const nothing = dashboardApp({ shell: { servers: {} }, workbench, chatModel: null, name: 'Project pulse' });
+    assert.deepEqual(fromModel.flow[0].call.args, rule.call.args, 'a dashboard sends no conversation');
+    assert.match(fromModel.screen.components.find(component => component.id === 'intro').text, /from one question to chat on Mock:/);
+    const nothing = dashboardApp({ shell: { servers: {} }, workbench, model: null, name: 'Project pulse' });
     assert.deepEqual([nothing.flow[0].call.toolName, nothing.flow[0].prompt], ['', undefined]);
+    assert.match(nothing.screen.components.find(component => component.id === 'intro').text, /from one question to a model:/);
+});
+
+// The Chat example's rule, as chatApp() makes it for the mock's chat.
+function chatExample() {
+    const chat = { name: 'chat', inputSchema: { type: 'object', properties: { message: { type: 'string' }, history: { type: 'array', items: { type: 'string' } } }, required: ['message'] } };
+    const servers = { [MOCK]: { url: MOCK, alias: 'Mock', status: 'connected', tools: [chat] } };
+    return { servers, app: chatApp({ shell: { servers }, workbench: { testDataFor: () => ({ args: { message: 'test' } }) }, model: foundModel(servers), name: 'Chat' }) };
+}
+
+test('the Chat example is an app like any other: a conversation, a message and Send, and one rule to the model', () => {
+    const { servers, app } = chatExample();
+    const [rule] = app.flow;
+    assert.deepEqual(rule.call, { serverUrl: MOCK, toolName: 'chat', args: { message: '{{message}}', history: '{{conversation}}' } });
+    assert.deepEqual([rule.prompt, rule.tools], ['message', true]);
+    assert.match(rule.instructions, /^You're the assistant in a chat app built with MCP Browser Client/);
+    assert.equal(describeRule(rule, { serverName: () => 'Mock' }),
+        "When send is clicked or message gets Enter, call chat on Mock with message = {{message}}, history = {{conversation}}, adding to message its instructions and your servers' tools; "
+        + "as it's sent, put {{message}} into conversation after what it shows; as it's sent, put nothing (clearing it) into message; "
+        + 'if it works, put {{text}} into conversation after what it shows; if it fails, put {{error}} into conversation after what it shows.');
+    const elements = elementsOfComponents(app.screen.components);
+    const ids = elements.map(element => element.id);
+    assert.deepEqual(ids, ['title', 'intro', 'conversation', 'message', 'send']);
+    assert.match(app.screen.components[1].text, /^A conversation with chat on Mock, which can call your servers' tools\./);
+    const conversation = elements.find(element => element.id === 'conversation');
+    assert.deepEqual([isConversation(conversation), isBox(conversation)], [true, false]);
+    assert.deepEqual(asksOf(rule, elements), [], 'a conversation asks for nothing in the prompt');
+    assert.deepEqual(frameConfig(app.flow, ids).read.sort(), ['conversation', 'message']);
+    assert.deepEqual(flowProblems(app.flow, { elements, servers }), [[rule.id, []]]);
+    assert.deepEqual(wiresOf(app.flow, ids).map(wire => `${wire.kind} ${wire.from.split(':')[0]} ${wire.to.replace(rule.id, 'rule')}`), [
+        'trigger el run:rule',
+        'trigger el run:rule',
+        'arg el arg:rule:message',
+        'arg el arg:rule:history',
+        'sent sent el:conversation',
+        'sent sent el:message',
+        'answer ok el:conversation',
+        'error err el:conversation',
+    ]);
+    assert.match(componentsHtml(app.screen.components), /<div id="conversation" class="output box box-conversation" aria-label="Conversation" aria-live="polite" data-placeholder="Say something to start\."><\/div>/);
+
+    const glean = 'https://acme-be.glean.com/mcp/default';
+    const gleanChat = { name: 'chat', inputSchema: { type: 'object', properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array', items: { type: 'string' } } }, required: ['message', '_user_goal'] } };
+    const gleanServers = { [glean]: { url: glean, tools: [gleanChat] } };
+    const withGlean = chatApp({ shell: { servers: gleanServers }, workbench: null, model: foundModel(gleanServers), name: 'Chat' });
+    assert.deepEqual(withGlean.flow[0].call.args, { _user_goal: '{{message}}', context: '{{conversation}}', message: '{{message}}' }, "Glean gets the person's own words as the goal, and the conversation as context");
+    assert.match(withGlean.screen.components[1].text, /^A conversation with Glean,/);
+});
+
+test('the Chat example comes back the same from its DML: its instructions, tools="yes" and routes as it\'s sent', () => {
+    const { app } = chatExample();
+    const dml = toDml(app);
+    assert.match(dml, /<output id="conversation" label="Conversation" placeholder="Say something to start\." show="conversation"\/>/);
+    assert.match(dml, /<when element="send" event="click" tools="yes">\n {6}<or element="message" event="enter"\/>\n {6}<instructions>You're the assistant in a chat app/);
+    assert.match(dml, /<arg name="message" role="prompt">\{\{message\}\}<\/arg>\n {8}<arg name="history">\{\{conversation\}\}<\/arg>/);
+    assert.match(dml, /<then if="sent" into="conversation" how="append">\{\{message\}\}<\/then>\n {6}<then if="sent" into="message"><\/then>/);
+    const back = fromDml(dml).app;
+    assert.deepEqual(withoutRuleIds(back).flow, withoutRuleIds(app).flow);
+    assert.equal(toDml(back), dml);
+    const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
+    assert.throws(broken('tools="yes"', 'tools="no"'), /tools="no" is yes, or left out\./);
+    assert.throws(broken('if="sent" into="message"', 'if="later" into="message"'), /if="later" has to be ok, error or sent\./);
+    const [[, problems]] = flowProblems([{ ...app.flow[0], prompt: undefined }], { elements: elementsOfComponents(app.screen.components) });
+    assert.ok(problems.includes('Choose the field its prompt goes in: its instructions and the tools go there.'), problems.join(' '));
+});
+
+test("a model that may call tools is told which there are, never a server's credentials, and its calls are read from its answer", () => {
+    const echo = { name: 'echo', description: 'Echoes back the input text.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } };
+    const servers = {
+        [MOCK]: { url: MOCK, alias: 'Mock', bearerToken: 'smoke-secret-token', status: 'connected', tools: [echo] },
+        'https://idle.example/mcp': { url: 'https://idle.example/mcp', name: 'Idle', status: 'unknown', tools: [echo] },
+        'https://empty.example/mcp': { url: 'https://empty.example/mcp', tools: [] },
+    };
+    assert.deepEqual(toolsForModel(servers), [
+        { server: 'Mock', url: MOCK, tools: [echo] },
+        { server: 'Idle', url: 'https://idle.example/mcp', tools: [echo] },
+    ]);
+    const prompt = composePrompt('  call echo with hi  ', { instructions: 'Be brief.', servers, request: 'Answer in JSON.' });
+    assert.ok(prompt.startsWith(`Be brief.\n\n${TOOLS_INSTRUCTIONS}\n\nThe tools, by server:\n\n\`\`\`json\n[{"server":"Mock","url":"${MOCK}","tools":[{"name":"echo"`), prompt.slice(0, 200));
+    assert.ok(prompt.endsWith('```\n\ncall echo with hi\n\nAnswer in JSON.'), prompt.slice(-80));
+    assert.doesNotMatch(prompt, /smoke-secret-token|bearerToken/);
+    assert.equal(composePrompt('hi'), 'hi');
+    assert.equal(composePrompt(undefined, { instructions: '  Only these.  ' }), 'Only these.');
+
+    const answer = 'Asking.\n\n```json\n{"jsonrpc": "2.0", "method": "echo", "params": {"text": "hi"}, "id": 1}\n```\n'
+        + 'And:\n```\n{\\"jsonrpc\\": \\"2.0\\", \\"method\\": \\"count\\", \\"id\\": 2}\n```\n```json\n{"not": "a call"}\n```';
+    assert.deepEqual(toolCallsIn(answer).map(call => [call.method, call.params]), [['echo', { text: 'hi' }], ['count', undefined]]);
+    assert.deepEqual(toolCallsIn('No code here.'), []);
+    assert.equal(serverWithTool(servers, 'echo').server.url, MOCK, 'a connected server first');
+    assert.equal(serverWithTool(servers, 'nothing'), null);
+
+    let times = [];
+    const allowed = [0, 1, 2, 3].map(n => {
+        const next = allowedCall(times, 1_000 + n);
+        times = next.times;
+        return next.allowed;
+    });
+    assert.deepEqual(allowed, [true, true, true, false], 'three calls in 10 seconds, then none');
+    assert.equal(allowedCall(times, 1_003 + REPLY_CALLS.withinMs).allowed, true, 'and after 10 seconds, again');
+
+    assert.equal(conversationFieldOf({ properties: { message: { type: 'string' }, context: { type: 'array', items: { type: 'string' } } } }), 'context');
+    assert.equal(conversationFieldOf({ properties: { history: { type: 'array' } } }), 'history');
+    assert.equal(conversationFieldOf({ properties: { tags: { type: 'array', items: { type: 'string' } }, history: { type: 'string' } } }), null);
+    assert.equal(conversationFieldOf(null), null);
+});
+
+test("a conversation's value is its entries, which a list field takes as they are and a text field a line each", () => {
+    const history = ['User: hi', 'Assistant: You said: hi', 'Tool: echo: Echo: hi'];
+    const schema = { type: 'object', properties: { history: { type: 'array', items: { type: 'string' } }, message: { type: 'string' }, note: { type: 'string' } } };
+    const { sentArgs } = callArguments({ args: { history: '{{conversation}}', message: 'Before: {{conversation}}', note: '{{conversation}}' } }, { screen: { conversation: history }, schema });
+    assert.deepEqual(sentArgs, { history, message: `Before: ${history.join('\n')}`, note: history.join('\n') });
+    assert.deepEqual(callArguments({ args: { history: '{{conversation}}' } }, { screen: { conversation: [] }, schema }).sentArgs, { history: [] });
+});
+
+test("a Sent wire is a route as it's sent: what the call sends goes to the screen before there's an answer", () => {
+    const { app } = chatExample();
+    const rule = { ...app.flow[0], then: [] };
+    const kindOf = id => ({ conversation: 'output', message: 'input' })[id];
+    let { flow, made } = connect([rule], `sent:${rule.id}`, 'el:conversation', { kindOf, defaultShow: ({ phase }) => (phase === 'sent' ? '{{message}}' : null) });
+    assert.equal(made.kind, 'route');
+    assert.deepEqual(flow[0].then, [{ if: 'sent', show: '{{message}}', into: 'conversation', how: 'replace' }]);
+    ({ flow } = connect(flow, 'el:message', `sent:${rule.id}`, { kindOf }));
+    assert.deepEqual(flow[0].then[1], { if: 'sent', show: '', into: 'message', how: 'replace' }, 'without a default, a Sent wire clears what it goes to');
+    assert.equal(connect(flow, `sent:${rule.id}`, 'el:message', { kindOf }).made.kind, 'already');
+    ({ flow } = connect(flow, `ok:${rule.id}`, 'el:conversation', { kindOf }));
+    assert.deepEqual(flow[0].then.map(route => route.if), ['sent', 'sent', 'ok'], 'an answer to the same place is a route of its own');
+    assert.throws(() => connect(flow, `sent:${rule.id}`, `run:${rule.id}`, { kindOf }), /A tool's Sent goes to the screen/);
+    assert.equal(routeSummary({ if: 'sent', show: '' }), 'nothing');
+    assert.deepEqual(disconnect(flow, wiresOf(flow, ['conversation', 'message']).find(wire => wire.kind === 'sent' && wire.element === 'message'))[0].then.map(route => `${route.if} ${route.into}`), ['sent conversation', 'ok conversation']);
 });
