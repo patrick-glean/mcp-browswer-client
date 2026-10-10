@@ -401,6 +401,8 @@ test('a part a tool made goes on the screen with its ids named after it, and its
         '<a href="#p.top" id="p.go" aria-describedby="p.hint p.tip">x</a><label for="p.q">Q</label><input id="p.q" list="p.names" title="a > b">');
     assert.equal(scopeCss('body { margin: 0 } html, :root { color: red } .body { x: y }', 'dash'),
         '@scope ([data-part="dash"]) {\n:scope { margin: 0 } :scope, :scope { color: red } .body { x: y }\n}');
+    assert.equal(scopeCss('#details, .card > #open { background: #f4f4f5 } #other { color: #fff }', 'dash', ['details', 'open']),
+        '@scope ([data-part="dash"]) {\n#dash\\.details, .card > #dash\\.open { background: #f4f4f5 } #other { color: #fff }\n}');
     const html = componentsHtml([part]);
     assert.match(html, /<section id="dash" class="part" data-part="dash" aria-label="Tickets">\n {6}<style>\n@scope \(\[data-part="dash"\]\) \{\n:scope \{ font: 14px sans-serif; \}\n\}\n {6}<\/style>\n<h2>Tickets<\/h2><label for="dash\.search">Find<\/label>/);
     assert.match(componentsHtml([{ ...part, html: '' }]), /<p class="part-empty">Tickets: nothing here yet\. Ask a model for it, or get it from a tool\.<\/p>/);

@@ -84,6 +84,7 @@ export function frameRuntime({ config, token }) {
         doc.querySelectorAll('script, style, meta, base, link, iframe, frame, frameset, object, embed, title, noscript, template').forEach(node => node.remove());
         doc.querySelectorAll('form').forEach(form => form.replaceWith(...form.childNodes));
         const part = target.closest('[data-part]')?.dataset.part;
+        const own = new Set([...doc.body.querySelectorAll('[id]')].map(element => element.id));
         for (const element of doc.body.querySelectorAll('*')) {
             for (const { name, value } of [...element.attributes]) {
                 if (/^on/i.test(name) || (/^(href|src|action|formaction)$/i.test(name) && /^\s*javascript:/i.test(value))) element.removeAttribute(name);
@@ -102,7 +103,8 @@ export function frameRuntime({ config, token }) {
         if (css.trim()) {
             const style = document.createElement('style');
             const root = part ? `[data-part="${part}"]` : `[id="${target.id.replace(/["\\]/g, '\\$&')}"]`;
-            style.textContent = `@scope (${root}) {\n${css.replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope')}\n}`;
+            const named = part ? css.replace(/#([A-Za-z_][\w-]*)/g, (match, id) => (own.has(id) ? `#${CSS.escape(`${part}.${id}`)}` : match)) : css;
+            style.textContent = `@scope (${root}) {\n${named.replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope')}\n}`;
             nodes.unshift(style);
         }
         return nodes;

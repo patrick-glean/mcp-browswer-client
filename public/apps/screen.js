@@ -151,9 +151,14 @@ export function prefixIds(html, prefix) {
     });
 }
 
-// A part's CSS, reaching only inside the part: its html, body and :root rules apply to the part.
-export function scopeCss(css, partId) {
-    const rules = String(css ?? '').replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope');
+// A part's CSS, reaching only inside the part: its html, body and :root rules apply to the part,
+// and #id follows its element to its name on the screen (#details is #dash\.details). Only the
+// part's own ids (`ids`) are renamed, which keeps colors such as #f4f4f5 as they are.
+export function scopeCss(css, partId, ids = []) {
+    const own = new Set(ids);
+    const rules = String(css ?? '')
+        .replace(/#([A-Za-z_][\w-]*)/g, (match, id) => (own.has(id) ? `#${partId}\\.${id}` : match))
+        .replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope');
     return `@scope ([data-part="${partId}"]) {\n${rules}\n}`;
 }
 
@@ -254,7 +259,8 @@ function componentHtml(component) {
             return `<section class="field">\n      <h2 class="label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="output" aria-label="${escapeHtml(component.label)}" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
         case 'part': {
             const { html, css } = splitStyles(component.html);
-            const style = css ? `\n      <style>\n${scopeCss(css, component.id)}\n      </style>` : '';
+            const ids = partElements(component).map(element => element.id.slice(component.id.length + 1));
+            const style = css ? `\n      <style>\n${scopeCss(css, component.id, ids)}\n      </style>` : '';
             const body = html ? prefixIds(html, component.id) : `<p class="part-empty">${escapeHtml(component.label || component.id)}: nothing here yet. Ask a model for it, or get it from a tool.</p>`;
             return `<section id="${id}" class="part" data-part="${id}" aria-label="${escapeHtml(component.label || component.id)}">${style}\n${body}\n    </section>`;
         }

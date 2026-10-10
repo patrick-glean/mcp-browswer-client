@@ -1094,10 +1094,11 @@ async function main() {
             const dashboard = await frameWaitFor(`(() => {
                 const refresh = document.getElementById('part.refresh');
                 if (!refresh) return null;
-                return [document.getElementById('part.details').textContent || 'empty', refresh.getAttribute('onclick') ?? 'no handler', document.querySelector('form') ? 'a form' : 'no form'].join(', ');
+                const details = document.getElementById('part.details');
+                return [details.textContent || 'empty', refresh.getAttribute('onclick') ?? 'no handler', document.querySelector('form') ? 'a form' : 'no form', getComputedStyle(details).backgroundColor].join(', ');
             })()`);
-            check('Apps: a part of the screen can be HTML a model makes, and its elements are the flow\'s to wire',
-                /^7 elements with ids the flow can use: part\.open .*part\.search field, part\.refresh button, .*part\.details output$/.test(made || '') && dashboard === 'empty, no handler, no form',
+            check('Apps: a part of the screen can be HTML a model makes, styled by its own CSS, and its elements are the flow\'s to wire',
+                /^7 elements with ids the flow can use: part\.open .*part\.search field, part\.refresh button, .*part\.details output$/.test(made || '') && dashboard === 'empty, no handler, no form, rgb(244, 244, 245)',
                 `${made}; ${dashboard}`);
             await fromLibrary(`[data-library-item="tool"][data-server="${modernUrl}"][data-tool="ticket"]`);
             const ticketRule = await page.waitFor(`(() => {
