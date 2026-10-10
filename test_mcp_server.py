@@ -152,10 +152,10 @@ TOOLS = [
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
     {
-        # A stand-in for a model, so the Chat app and the app builder's "Ask a model" work without one.
+        # A stand-in for a model, so the Chat example and the app builder's "Ask a model" work without one.
         "name": "chat",
         "title": "Chat (a stand-in model)",
-        "description": "A stand-in for a model: it answers what you say; asked for an app's boxes, it answers with one JSON object of made-up values in their shapes; and asked for HTML, it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
+        "description": "A stand-in for a model: it answers what you say; asked to call one of the tools an app lists (\"call echo with hello\"), it writes the JSON-RPC request; asked for an app's boxes, it answers with one JSON object of made-up values in their shapes; and asked for HTML, it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -301,14 +301,75 @@ def boxes_reply(message):
     return f"```json\n{json.dumps(answer, indent=2)}\n```\n\n---\nchatId: mock-{uuid.uuid4().hex[:12]}"
 
 
-def chat_reply(message):
-    """What the stand-in model says: an answer, the JSON an app's boxes ask for, or a page when
-    asked for HTML."""
+# What an app adds to a model's prompt around what the person said: the tools it may call, after
+# its instructions, and what the app's boxes need.
+TOOLS_LISTED = "The tools, by server:"
+BOXES_ASKED = "This answer fills the boxes on an app's screen."
+# Asked to call a tool: "call echo with hello".
+CALL_ASKED = re.compile(r"^call\s+([\w.-]+)(?:\s+with\s+(.+))?$", re.I | re.S)
+# The fields a tool's one value goes in, by name, before its first required text field.
+VALUE_FIELDS = ["text", "query", "message", "input", "q"]
+
+
+def said_in(message):
+    """What the person said: after the tools an app lists, or else its last paragraph (after the
+    app's instructions), and before what its boxes ask for."""
+    text = message.split(BOXES_ASKED, 1)[0]
+    if TOOLS_LISTED in text:
+        listed = text.split(TOOLS_LISTED, 1)[1]
+        # The block's fence closes at the start of a line; descriptions may have ``` in them.
+        close = listed.find("\n```", listed.find("```") + 3)
+        return listed[close + 4:].strip() if close >= 0 else ""
+    return text.strip().split("\n\n")[-1].strip()
+
+
+def tools_in(message):
+    """The tools an app says the model may call, from its JSON list of servers."""
+    if TOOLS_LISTED not in message:
+        return []
+    found = re.search(r"```json\n(.*?)\n```", message.split(TOOLS_LISTED, 1)[1], re.S)
+    try:
+        servers = json.loads(found.group(1)) if found else []
+    except ValueError:
+        return []
+    return [tool for server in servers for tool in server.get("tools", [])]
+
+
+def tool_call_reply(name, value, tools):
+    """Asks for a tool call, as a model the app lets use its tools does: a JSON-RPC request in a
+    ```json block, its one value in the tool's text field and the other required ones filled."""
+    tool = next((candidate for candidate in tools if candidate.get("name") == name), None)
+    if tool is None:
+        return f"I can't call {name}: it isn't one of the tools I was given."
+    schema = tool.get("inputSchema") or {}
+    props = schema.get("properties") or {}
+    texts = [key for key, prop in props.items() if prop.get("type") == "string"]
+    required = [key for key in schema.get("required", []) if key in texts]
+    params = {}
+    target = next((key for key in VALUE_FIELDS if key in texts), (required or texts or [None])[0])
+    for key in required:
+        prop = props[key]
+        params[key] = prop.get("default", (prop.get("examples") or [None])[0]) or key
+    if target and value:
+        params[target] = value.strip()
+    call = {"jsonrpc": "2.0", "method": name, "params": params, "id": 1}
+    return f"I'll ask {name}.\n\n```json\n{json.dumps(call)}\n```"
+
+
+def chat_reply(message, history=()):
+    """What the stand-in model says: an answer, a tool call when asked for one, the JSON an app's
+    boxes ask for, or a page when asked for HTML."""
     if "one JSON object" in message and BOX_LINE.search(message):
         return boxes_reply(message)
-    if "html" not in message.lower():
-        return f"You said: {message}"
-    request = message.split("\n", 1)[0].split(": ", 1)[-1].strip()
+    said = said_in(message)
+    asked_call = CALL_ASKED.match(said)
+    if asked_call:
+        return tool_call_reply(asked_call.group(1), asked_call.group(2) or "", tools_in(message))
+    if "html" not in said.lower():
+        earlier = f" ({len(history)} earlier message{'' if len(history) == 1 else 's'} came with it.)" if history else ""
+        return f"You said: {said}{earlier}"
+    first = next((line for line in message.splitlines() if line.startswith("Write ")), said.split("\n", 1)[0])
+    request = first.split(": ", 1)[-1].strip()
     if "dashboard" in request.lower():
         page = DASHBOARD_HTML.replace("{title}", html.escape(request[:1].upper() + request[1:60]))
     else:
@@ -676,7 +737,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(request_id, {**result, "content": [text_content("; ".join(problems))], "isError": True})
             text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
         elif name == "chat":
-            text = chat_reply(str(args.get("message", "")))
+            history = args.get("history") if isinstance(args.get("history"), list) else []
+            text = chat_reply(str(args.get("message", "")), history)
         elif name == "make_screen":
             page = SCREEN_HTML.replace("{title}", html.escape(str(args.get("title") or "Ask the mock")))
             return self.respond(request_id, {**result, "content": [
