@@ -1019,6 +1019,46 @@ async function main() {
             const toolResults = await frameRun(`${conversation}.filter(entry => entry.startsWith('tool: echo')).length`);
             check("Apps: an answer's tool calls run at most three in 10 seconds, and the conversation says when one was skipped",
                 limited === "error: Skipped echo: an answer's tool calls run at most 3 in 10 seconds." && toolResults === 3, `${limited}; ${toolResults} results`);
+
+            // Preview: the app as it is when it's launched, over the whole window and from the start,
+            // with nothing of the builder running; at a phone's width; and Escape ends it, pressed on
+            // the app's screen or off it, back in the view it came from (the Outline, here).
+            const editView = await page.run(`localStorage.getItem('appsView')`);
+            const builderFrame = `document.querySelector(${JSON.stringify(editView === 'outline' ? 'app-try iframe' : 'app-canvas iframe')})`;
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            const previewShown = await page.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const frame = preview?.querySelector('iframe');
+                if (!preview || preview.hidden || !frame) return null;
+                const box = frame.getBoundingClientRect();
+                const whole = Math.abs(box.width - document.documentElement.clientWidth) <= 1 && Math.abs(box.bottom - window.innerHeight) <= 1;
+                const builderFrames = document.querySelectorAll('app-canvas iframe, app-try iframe').length;
+                return [whole ? 'the whole window' : 'not the whole window', builderFrames + ' builder frames',
+                    document.activeElement?.matches('[data-exit-preview]') ? 'Exit focused' : 'focus elsewhere', 'view kept ' + localStorage.getItem('appsView')].join(', ');
+            })()`, 5000);
+            const launched = await frameWaitFor(`document.readyState === 'complete' && document.getElementById('conversation') ? String(document.querySelectorAll('#conversation .entry').length) : null`);
+            check('Apps: Preview shows the app over the whole window, started again, with nothing of the builder running',
+                previewShown === `the whole window, 0 builder frames, Exit focused, view kept ${editView}` && launched === '0', `${previewShown}; ${launched} entries`);
+            await say('hello from the preview');
+            const used = await entriesAfter(2);
+            const told = await page.waitFor(`(() => {
+                const text = document.querySelector('app-preview [data-preview-status]')?.textContent || '';
+                return /answered/.test(text) ? text : null;
+            })()`, 5000);
+            check('Apps: in Preview the app works as it does when launched, and the bar says what it did',
+                used?.join(' | ') === 'you: hello from the preview | reply: You said: hello from the preview' && /^chat answered in \d+ ms$/.test(told || ''),
+                `${used?.join(' | ')}; ${told}`);
+            await page.run(`document.querySelector('app-preview [data-device="phone"]').click()`);
+            const phone = await frameWaitFor(`window.innerWidth === 390 ? document.querySelectorAll('#conversation .entry').length + ' entries at ' + window.innerWidth + ' px' : null`);
+            check("Apps: Preview at a phone's width gives the app 390 pixels, and keeps what it shows", phone === '2 entries at 390 px', phone);
+            await frameRun(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+            const backFromScreen = await page.waitFor(`document.querySelector('app-preview').hidden && ${builderFrame} && document.activeElement?.id === 'previewAppBtn' ? 'back, Preview focused' : null`, 5000);
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            for (const type of ['keyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+            const backFromPage = await page.waitFor(`document.querySelector('app-preview').hidden && ${builderFrame} ? 'back' : null`, 5000);
+            check("Apps: Escape ends Preview, pressed on the app's screen or off it, and the builder runs the app again where Preview came from",
+                backFromScreen === 'back, Preview focused' && backFromPage === 'back', `${backFromScreen}; ${backFromPage}`);
         }
         {
             // The canvas: the app's screen running with a port beside each element, Start, a node for
