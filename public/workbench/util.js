@@ -67,7 +67,9 @@ export function serverState(server, authStatus) {
     return 'unknown';
 }
 
-// Where a run came from, as people see it. Runs saved before the rename say 'sandbox'.
+// Where a run came from, as people see it: a reply is a tool call in a model's answer to an app.
+// Runs saved before the rename say 'sandbox', and those from the Chat app the Chat example
+// replaced say 'chat'.
 export const SOURCE_LABELS = { workbench: 'Workbench', sandbox: 'Workbench', collection: 'Run all', app: 'App', chat: 'Chat', reply: 'From a reply' };
 
 // A run's verdict: same, changed, first (nothing to compare with) or failed.

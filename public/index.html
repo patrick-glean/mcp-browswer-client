@@ -106,51 +106,11 @@
                 <wb-contents id="contentsPane" class="wb-area-response wb-pane" role="region" aria-label="Contents" hidden></wb-contents>
             </div>
             <section id="appsPage" class="wb-apps" aria-label="Apps" hidden>
-                <!-- public/apps/: the rail of apps, and the builder for the ones you make. -->
+                <!-- public/apps/: the rail of examples and apps, and the builder for the ones you make;
+                     with no app to show, the examples to start from. -->
                 <apps-rail class="apps-rail" role="navigation" aria-label="Apps"></apps-rail>
                 <div class="apps-main">
-                    <section id="chatApp" class="apps-chat" aria-labelledby="appsTitle">
-                        <header class="wb-apps-head">
-                            <h2 id="appsTitle">Chat</h2>
-                            <p class="text-secondary">The built-in app, an agent loop: the model is an MCP tool. Tick the field your message goes to, and a list field for the conversation, which also tells the model which tools your servers have. Tool calls in its reply run, and their results join the conversation.</p>
-                        </header>
-                        <div class="chat-card">
-                            <section class="chat-card-left panel" aria-label="Conversation">
-                                <div id="chatMessages" class="chat-messages"></div>
-                                <div class="chat-input-row">
-                                    <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
-                                    <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
-                                </div>
-                                <div id="chatConversation" class="chat-conversation"></div>
-                            </section>
-                            <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
-                                <div class="chat-model-card">
-                                    <div class="panel-title">Model</div>
-                                    <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
-                                    <div class="chat-server-select-row">
-                                        <label for="chatServerSelect">Server</label>
-                                        <select id="chatServerSelect"></select>
-                                    </div>
-                                    <div class="chat-tool-select-row">
-                                        <label for="chatToolSelect">Tool</label>
-                                        <select id="chatToolSelect"></select>
-                                    </div>
-                                    <form id="chatToolConfigForm" class="chat-tool-config"></form>
-                                </div>
-                                <div class="chat-context">
-                                    <div class="panel-header">
-                                        <div class="panel-title">Instructions and context</div>
-                                        <button id="addContextBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
-                                            <span class="icon icon-plus" aria-hidden="true"></span>
-                                        </button>
-                                    </div>
-                                    <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
-                                    <div id="contextList" class="context-list"></div>
-                                    <div id="contextEditor" class="context-editor"></div>
-                                </div>
-                            </aside>
-                        </div>
-                    </section>
+                    <apps-start id="appsStart" role="region" aria-label="Start an app" hidden></apps-start>
                     <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
                         <app-header></app-header>
                         <!-- Canvas: the screen running, with its wires to tools; Outline: the same app as cards. -->
@@ -291,15 +251,15 @@
         </section>
 
         <section class="guide-section">
-            <h3>4. Chat through a tool</h3>
-            <p>Open Apps in the top bar, then Chat. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
-            <p>A model tool with a list field can run an agent loop: tick "The conversation goes here" on it, and the model also gets the instructions, your servers' tools and the conversation so far. Tool calls it writes in its reply run, and their results join the conversation.</p>
+            <h3>4. Chat with a model</h3>
+            <p>Open Apps in the top bar and choose Chat under Examples. It makes an app like any other: a conversation, a message field and Send, wired to a model, which is an MCP tool: Glean's chat if you've added Glean, else the mock's <code>chat</code>. Each message goes with the conversation so far, and as it's sent, it joins the conversation.</p>
+            <p>The rule's Prompt, in the Inspector, adds its instructions and your servers' tools to each message. A tool call the model writes in its answer runs, and the result joins the conversation, which the model gets with your next message. With the mock, say <code>call echo with hello</code>.</p>
         </section>
 
         <section class="guide-section">
             <h3>5. Build an app</h3>
             <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, wired to a tool. It opens on the canvas, the screen running beside its tools: drag from a ● to another to wire them, from a button to a tool's Run and from the tool's Answer back to the screen. The label on a wire says what of the answer shows; pick it to change it in the Inspector. Choose Run to use the app, and What happened shows each step.</p>
-            <p>The Library adds components, tools, boxes and HTML parts. A box (a chart, a list, a number) says what goes in it, and the tool wired to it is asked for that, in the shape the box draws, so the layout writes the format of the answer: Dashboard, in the rail, starts one that asks Glean. A part is HTML a model writes or a tool returns; its buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock, <code>chat</code> as the Chat app's model writes a ticket dashboard when you ask for one.</p>
+            <p>The Library adds components, tools, boxes and HTML parts. A box (a chart, a list, a number) says what goes in it, and the tool wired to it is asked for that, in the shape the box draws, so the layout writes the format of the answer: Project pulse, under Examples, starts one that asks Glean. A part is HTML a model writes or a tool returns; its buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock as the model, Ask a model writes a ticket dashboard when you ask for one.</p>
         </section>
 
         <section class="guide-section">
@@ -358,30 +318,10 @@
             showClient();
         });
 
-        // The Chat app's settings under the names they had before its code was renamed: moved
-        // once, before anything reads them. (The worker moves stored conversations itself.)
-        (function moveOldChatSettings() {
-            const move = (storage, from, to, convert = value => value) => {
-                const value = storage.getItem(from);
-                if (value === null) return;
-                try {
-                    if (storage.getItem(to) === null) storage.setItem(to, convert(value));
-                } catch {
-                    // Unreadable, so there's nothing to keep.
-                }
-                storage.removeItem(from);
-            };
-            move(localStorage, 'lastEngramId', 'lastChatConversation');
-            move(sessionStorage, 'consoleChatEngramId', 'chatConversation');
-            move(localStorage, 'cbusTapConfig', 'chatModel', value => {
-                const { connectedStringArg = null, connectedArrayArg = null, ...model } = JSON.parse(value);
-                const preset = connectedStringArg && model.args?.[connectedStringArg];
-                if (typeof preset === 'string') model.args[connectedStringArg] = preset.replaceAll('{{cbus_message}}', '{{message}}');
-                return JSON.stringify({ ...model, messageField: connectedStringArg, conversationField: connectedArrayArg });
-            });
-            move(localStorage, 'mcp_module_metadata', 'chatContext', value => JSON.stringify(JSON.parse(value).memory_events || []));
-            sessionStorage.removeItem('mcpEngramId');
-        })();
+        // The settings of the Chat app the Chat example replaced, under each name they had (its
+        // first version's too). The worker deletes its stored conversations.
+        for (const key of ['chatModel', 'chatContext', 'lastChatConversation', 'cbusTapConfig', 'mcp_module_metadata', 'lastEngramId']) localStorage.removeItem(key);
+        for (const key of ['chatConversation', 'consoleChatEngramId', 'mcpEngramId']) sessionStorage.removeItem(key);
 
         // The dock's Log: entries from this page, the service worker and the MCP client, kept in
         // a capped buffer and filtered by level and text.
@@ -1176,31 +1116,21 @@
                             this.saveServers();
                         }
                         this.emit('tools', { url: message.url });
-                        renderModelServerSelect();
-                        renderModelToolSelect();
                         break;
                     }
                     case 'tool_result': {
+                        // The answer to a call this page made (runTool), by its run id.
                         const pending = message.run?.id ? this.pendingRuns.get(message.run.id) : null;
                         if (pending) {
                             clearTimeout(pending.timer);
                             this.pendingRuns.delete(message.run.id);
                             if (pending.show && this.shownRunId === message.run.id) this.emit('run', { phase: 'done', runId: message.run.id, message });
                             pending.resolve(message);
-                        } else if (!message.run && (!message.conversationId || message.conversationId !== chatConversationId)) {
-                            // Calls the worker turned away before they ran, such as tool calls from
-                            // replies over the rate limit. Chat replies show in the chat instead.
-                            this.emit('run', { phase: 'done', message });
                         }
                         return;
                     }
                     case 'run_recorded':
                         this.emit('recorded', message.run);
-                        break;
-                    case 'chat_instructions':
-                    case 'chat_history':
-                    case 'chat_message':
-                        // The Chat app's own listener handles these.
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -1235,12 +1165,10 @@
                 return entry;
             }
 
-            // A worker that just started (first visit, restart after idling, or a new version) has
-            // none of the page's state: the server list with its tokens, and the chat's tool target.
+            // A worker that just started (first visit, restart after idling, or a new version) keeps
+            // nothing of the page's: each message brings what it needs, a server's token too. It
+            // tells the page again whether each server is signed in.
             syncWorker() {
-                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
-                sendChatModelToWorker();
-                sendChatContextToWorker();
                 for (const url of Object.keys(this.servers)) {
                     this.postToWorkerQuietly({ type: 'auth-status', url });
                 }
@@ -1558,8 +1486,6 @@
 
             saveServers() {
                 localStorage.setItem('servers', JSON.stringify(this.servers));
-                // The worker uses this list (including tokens) for tool calls it starts itself.
-                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
             }
 
             // Adds a server (or picks it if it's already listed), shows it in the Workbench and connects.
@@ -1618,7 +1544,8 @@
             // first, unless the caller sends `sentArgs` it filled in itself (apps fill in their
             // screen's values). Resolves with the worker's tool_result (or a stand-in when the call
             // never went out); with `show`, the response pane follows the call through 'run' events.
-            // `source` is where the run says it came from: 'workbench' or 'app'.
+            // `source` is where the run says it came from: 'workbench', 'app', or 'reply' for a tool
+            // call in a model's answer that an app ran.
             runTool({ url, tool, args, sentArgs = null, environmentName = null, requestId = null, collectionRunId = null, show = true, source = 'workbench' }) {
                 const notSent = error => {
                     if (show) this.emit('run', { phase: 'not-sent', error });
@@ -1755,7 +1682,6 @@
             }
         }
 
-        // Initialize the chat shell
         const appShell = new AppShell();
         // The logs pop-out reads the opener's entries from here.
         window.logPanel = appShell.logPanel;
@@ -1810,13 +1736,6 @@
             document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === document.body.dataset.mode)));
             localStorage.setItem('mode', document.body.dataset.mode);
             appShell.emit('mode', { mode: document.body.dataset.mode });
-            if (apps) {
-                // The chat's server list may have changed while it was hidden.
-                renderModelServerSelect();
-                renderChatMessages();
-                renderConversationId();
-                loadChatHistory();
-            }
         }
         document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => showMode(button.dataset.mode)));
         document.getElementById('popoutLogsBtn').onclick = function() {
@@ -1980,528 +1899,7 @@
             }
         });
 
-        // --- The Chat app ---
-        let chatSelectedTool = null;
-        let chatToolConfig = {};
-        // Which of the model tool's fields get the message and the conversation: field -> ticked.
-        let chatFieldChoices = {};
-        let chatMessages = [];
-        let chatSelectedServerUrl = null;
-
-        // The conversation this tab shows: the tab's own, or the last one used in this browser.
-        function currentConversationId() {
-            const id = sessionStorage.getItem('chatConversation') || localStorage.getItem('lastChatConversation') || crypto.randomUUID();
-            sessionStorage.setItem('chatConversation', id);
-            localStorage.setItem('lastChatConversation', id);
-            return id;
-        }
-        let chatConversationId = currentConversationId();
-        function renderConversationId() {
-            const conversationDiv = document.getElementById('chatConversation');
-            conversationDiv.innerHTML = `<span>Conversation</span> <span class="mono">${chatConversationId}</span> <button id="newConversationBtn" class="btn-sm btn-outline" title="Start a new conversation">New conversation</button>`;
-            document.getElementById('newConversationBtn').onclick = () => {
-                chatConversationId = crypto.randomUUID();
-                sessionStorage.setItem('chatConversation', chatConversationId);
-                localStorage.setItem('lastChatConversation', chatConversationId);
-                renderConversationId();
-                chatMessages = [];
-                renderChatMessages();
-            };
-        }
-        renderConversationId();
-        // Helper to render chat messages
-        function renderChatMessages() {
-            const chatDiv = document.getElementById('chatMessages');
-            chatDiv.innerHTML = chatMessages.map(msg =>
-                `<div class="chat-msg ${msg.role}"><span>${escapeHtml(msg.text)}</span></div>`
-            ).join('');
-            chatDiv.scrollTop = chatDiv.scrollHeight;
-        }
-        // The worker sends every conversation's messages to every tab; show this tab's.
-        navigator.serviceWorker.addEventListener('message', (event) => {
-            const update = event.data;
-            if (update.type === 'chat_message' && update.message.conversationId === chatConversationId) {
-                chatMessages.push(update.message);
-                renderChatMessages();
-            } else if (update.type === 'chat_history' && update.conversationId === chatConversationId) {
-                chatMessages = update.messages;
-                renderChatMessages();
-            }
-        });
-        // Always show send button, but disable/grey it out if input is empty/whitespace
-        function updateSendBtnState() {
-            if (chatUserInput.value.trim().length > 0) {
-                chatSendBtn.disabled = false;
-            } else {
-                chatSendBtn.disabled = true;
-            }
-        }
-        updateSendBtnState();
-        chatUserInput.addEventListener('input', updateSendBtnState);
-        chatSendBtn.addEventListener('click', async function() {
-            const userInput = document.getElementById('chatUserInput').value.trim();
-            if (!userInput) return;
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'chat_send',
-                    text: userInput,
-                    role: 'user',
-                    conversationId: chatConversationId
-                });
-            }
-            document.getElementById('chatUserInput').value = '';
-            updateSendBtnState();
-        });
-        document.getElementById('chatUserInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('chatSendBtn').click();
-            }
-        });
-        // Initial render; showMode('apps') draws these again.
-        renderModelServerSelect();
-        renderChatMessages();
-        renderConversationId();
-
-        // --- Instructions and context: what the model is told before each conversation ---
-        // The built-in instructions come from the worker, which sends them to the model itself;
-        // this page shows them read-only. The context you add is kept here and sent to the worker.
-        const INSTRUCTIONS_ID = 'instructions';
-        let chatInstructions = null;
-        let contextEntries = [];
-        let selectedContextId = null;
-        const allContext = () => (chatInstructions ? [chatInstructions, ...contextEntries] : contextEntries);
-
-        function newContextId() {
-            return 'context-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
-        }
-
-        function loadChatContext() {
-            try {
-                const saved = JSON.parse(localStorage.getItem('chatContext') || '[]');
-                contextEntries = Array.isArray(saved) ? saved : [];
-            } catch {
-                contextEntries = [];
-            }
-        }
-
-        function sendChatContextToWorker() {
-            navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_context', context: contextEntries });
-        }
-
-        function saveChatContext() {
-            localStorage.setItem('chatContext', JSON.stringify(contextEntries));
-            sendChatContextToWorker();
-        }
-
-        function renderContextList() {
-            const listDiv = document.getElementById('contextList');
-            listDiv.innerHTML = '';
-            const entries = allContext();
-            if (!entries.length) {
-                listDiv.innerHTML = '<div class="empty-state">No context yet.</div>';
-                return;
-            }
-            entries.forEach(entry => {
-                const item = document.createElement('div');
-                item.className = 'context-list-item' + (selectedContextId === entry.id ? ' selected' : '');
-                const name = entry.id === INSTRUCTIONS_ID ? 'Instructions (built in)' : entry.name || '(no name)';
-                item.innerHTML = `
-                    <span class="context-name">${escapeHtml(name)}</span>
-                    <span class="context-timestamp">${entry.id === INSTRUCTIONS_ID ? '' : new Date(entry.timestamp).toLocaleString()}</span>
-                `;
-                item.onclick = () => {
-                    selectedContextId = entry.id;
-                    renderContextList();
-                    renderContextEditor();
-                };
-                listDiv.appendChild(item);
-            });
-        }
-
-        function renderContextEditor() {
-            const editorDiv = document.getElementById('contextEditor');
-            editorDiv.innerHTML = '';
-            const entry = allContext().find(candidate => candidate.id === selectedContextId);
-            if (!entry) {
-                editorDiv.innerHTML = '<div class="text-secondary">Select an entry to see or edit it.</div>';
-                return;
-            }
-            if (entry.id === INSTRUCTIONS_ID) {
-                editorDiv.innerHTML = `
-                    <label>Text</label>
-                    <textarea rows="12" disabled>${escapeHtml(entry.text || '')}</textarea>
-                    <div class="field-help">These are the built-in instructions (public/chat-instructions.js), so they can't be edited here.</div>
-                `;
-                return;
-            }
-            const form = document.createElement('form');
-            form.innerHTML = `
-                <label>Name</label>
-                <input type="text" value="${escapeHtml(entry.name || '')}" required id="editContextName" />
-                <label>Text</label>
-                <textarea rows="8" id="editContextText">${escapeHtml(entry.text || '')}</textarea>
-                <label>Timestamp</label>
-                <input type="text" value="${new Date(entry.timestamp).toLocaleString()}" disabled />
-                <div class="editor-actions">
-                    <button type="submit" class="btn-primary">Save</button>
-                    <button type="button" id="deleteContextBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete</button>
-                </div>
-            `;
-            form.onsubmit = (e) => {
-                e.preventDefault();
-                const newName = form.querySelector('#editContextName').value.trim();
-                if (!newName) {
-                    alert('Give it a name.');
-                    return;
-                }
-                entry.name = newName;
-                entry.text = form.querySelector('#editContextText').value;
-                saveChatContext();
-                renderContextList();
-                renderContextEditor();
-            };
-            form.querySelector('#deleteContextBtn').onclick = () => {
-                if (confirm('Delete this context?')) {
-                    contextEntries = contextEntries.filter(other => other !== entry);
-                    selectedContextId = null;
-                    saveChatContext();
-                    renderContextList();
-                    renderContextEditor();
-                }
-            };
-            editorDiv.appendChild(form);
-        }
-
-        document.getElementById('addContextBtn').onclick = () => {
-            const entry = { id: newContextId(), name: 'Untitled context', text: '', timestamp: Date.now() };
-            contextEntries.push(entry);
-            saveChatContext();
-            selectedContextId = entry.id;
-            renderContextList();
-            renderContextEditor();
-        };
-
-        function loadChatInstructions() {
-            const listen = event => {
-                if (event.data?.type !== 'chat_instructions') return;
-                navigator.serviceWorker.removeEventListener('message', listen);
-                chatInstructions = { id: INSTRUCTIONS_ID, text: event.data.instructions };
-                renderContextList();
-            };
-            navigator.serviceWorker.addEventListener('message', listen);
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'get_chat_instructions' });
-            } else {
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_instructions' });
-                }, { once: true });
-            }
-        }
-
-        loadChatContext();
-        renderContextList();
-        renderContextEditor();
-        sendChatContextToWorker();
-        loadChatInstructions();
-
-        // --- The model: the tool the chat's messages go to, and which of its fields get what ---
-        // Saved as {serverUrl, toolName, args, messageField, conversationField}.
-        function loadChatModel() {
-            try {
-                return JSON.parse(localStorage.getItem('chatModel')) || null;
-            } catch {
-                return null;
-            }
-        }
-        function saveChatModel(model) {
-            localStorage.setItem('chatModel', JSON.stringify(model));
-            // The worker runs the chat with its own copy.
-            sendChatModelToWorker();
-        }
-        function saveChatModelFromForm() {
-            let args;
-            try {
-                args = appShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema);
-            } catch {
-                return; // A JSON field that's still being typed.
-            }
-            const ticked = type => Object.keys(chatFieldChoices).find(k => chatFieldChoices[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === type) || null;
-            saveChatModel({
-                serverUrl: chatSelectedServerUrl,
-                toolName: chatSelectedTool?.name,
-                args,
-                messageField: ticked('string'),
-                conversationField: ticked('array')
-            });
-        }
-        function renderModelServerSelect() {
-            const select = document.getElementById('chatServerSelect');
-            if (!select) return;
-            const model = loadChatModel() || {};
-            renderServerSelect(select, model.serverUrl || chatSelectedServerUrl, appShell.servers || {});
-            chatSelectedServerUrl = select.value;
-        }
-        function renderModelToolSelect() {
-            const select = document.getElementById('chatToolSelect');
-            if (!select) return;
-            const model = loadChatModel() || {};
-            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
-            select.innerHTML = '';
-            tools.forEach((tool, idx) => {
-                const opt = document.createElement('option');
-                opt.value = tool.name;
-                opt.textContent = tool.name;
-                select.appendChild(opt);
-            });
-            // Restore tool selection from config if possible
-            if (tools.length > 0) {
-                let toolToSelect = tools[0];
-                if (model.toolName) {
-                    const found = tools.find(t => t.name === model.toolName);
-                    if (found) toolToSelect = found;
-                }
-                select.value = toolToSelect.name;
-                chatSelectedTool = toolToSelect;
-                renderModelToolForm(toolToSelect);
-            } else {
-                chatSelectedTool = null;
-                renderModelToolForm(null);
-            }
-        }
-        function renderModelToolForm(tool) {
-            const form = document.getElementById('chatToolConfigForm');
-            form.innerHTML = '';
-            chatFieldChoices = {};
-            if (!tool) return;
-            const schema = tool.inputSchema || tool.input_schema;
-            const model = loadChatModel() || {};
-            if (schema && schema.properties) {
-                Object.entries(schema.properties).forEach(([key, prop]) => {
-                    const isRequired = (schema.required || []).includes(key);
-                    let inputCard;
-                    if (prop.type === 'string') {
-                        inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        const name = escapeHtml(key);
-                        let label = `<label><strong>${name}</strong> (string)`;
-                        if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
-                        label += '</label>';
-                        inputCard.innerHTML = `${label}
-                            <input type="text" name="${name}" />
-                            <label class="chat-field-label">
-                                <input type="checkbox" class="chat-message-field solid-checkbox" data-field="${name}" />
-                                <span class="chat-field-text">Your message goes here</span>
-                            </label>
-                            <div class="chat-field-warning" style="display:none;"></div>`;
-                        setTimeout(() => {
-                            const input = inputCard.querySelector(`input[type='text'][name='${CSS.escape(key)}']`);
-                            const cb = inputCard.querySelector(`.chat-message-field[data-field='${CSS.escape(key)}']`);
-                            const warn = inputCard.querySelector('.chat-field-warning');
-                            // Restore value from config if present
-                            let value = (model.args && model.args[key]) || '';
-                            input.value = value;
-                            // Restore checkbox from config
-                            if (model.messageField === key) {
-                                cb.checked = true;
-                                chatFieldChoices[key] = true;
-                            }
-                            // UX logic for enabling/disabling and warning
-                            function updateInputState() {
-                                if (cb.checked) {
-                                    if (!input.value) {
-                                        input.value = '{{message}}';
-                                    }
-                                    if (input.value.includes('{{message}}')) {
-                                        input.disabled = true;
-                                        warn.textContent = '';
-                                        warn.style.display = 'none';
-                                    } else {
-                                        input.disabled = false;
-                                        warn.textContent = 'Value must include {{message}}';
-                                        warn.style.display = '';
-                                    }
-                                } else {
-                                    input.disabled = false;
-                                    warn.textContent = '';
-                                    warn.style.display = 'none';
-                                }
-                            }
-                            cb.onchange = () => {
-                                // Only one string field can be connected
-                                Object.keys(chatFieldChoices).forEach(k => {
-                                    if (k !== key && schema.properties[k]?.type === 'string') chatFieldChoices[k] = false;
-                                });
-                                if (cb.checked) {
-                                    if (!input.value) {
-                                        input.value = '{{message}}';
-                                    }
-                                    if (!input.value.includes('{{message}}')) {
-                                        // Prevent checking, show warning, keep input enabled
-                                        cb.checked = false;
-                                        warn.textContent = 'Value must include {{message}}';
-                                        warn.style.display = '';
-                                        input.disabled = false;
-                                        chatFieldChoices[key] = false;
-                                        return;
-                                    }
-                                    // Uncheck all other checkboxes
-                                    document.querySelectorAll('.chat-message-field').forEach(otherCb => {
-                                        if (otherCb !== cb) otherCb.checked = false;
-                                    });
-                                    chatFieldChoices[key] = true;
-                                } else {
-                                    // If the value is exactly '{{message}}', clear it
-                                    if (input.value.trim() === '{{message}}') {
-                                        input.value = '';
-                                    }
-                                    chatFieldChoices[key] = false;
-                                }
-                                updateInputState();
-                                onChatFieldChanged(key, cb.checked);
-                                saveChatModelFromForm();
-                            };
-                            input.addEventListener('input', () => {
-                                updateInputState();
-                                saveChatModelFromForm();
-                            });
-                            updateInputState();
-                        }, 0);
-                    } else if (prop.type === 'array') {
-                        inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        const name = escapeHtml(key);
-                        let label = `<label><strong>${name}</strong> (array)`;
-                        if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
-                        label += '</label>';
-                        inputCard.innerHTML = `${label}
-                            <label class="chat-field-label">
-                                <input type="checkbox" class="chat-conversation-field solid-checkbox" data-field="${name}" />
-                                <span class="chat-field-text">The conversation goes here</span>
-                            </label>
-                            <div class="field-help">This field gets the conversation so far as a list of messages, without the newest one.</div>`;
-                        setTimeout(() => {
-                            const cb = inputCard.querySelector(`.chat-conversation-field[data-field='${CSS.escape(key)}']`);
-                            if (model.conversationField === key) {
-                                cb.checked = true;
-                                chatFieldChoices[key] = true;
-                            }
-                            if (cb) {
-                                cb.onchange = () => {
-                                    // Only one array field can be connected
-                                    Object.keys(chatFieldChoices).forEach(k => {
-                                        if (k !== key && schema.properties[k]?.type === 'array') chatFieldChoices[k] = false;
-                                    });
-                                    chatFieldChoices[key] = cb.checked;
-                                    if (cb.checked) {
-                                        document.querySelectorAll('.chat-conversation-field').forEach(otherCb => {
-                                            if (otherCb !== cb) otherCb.checked = false;
-                                        });
-                                    }
-                                    onChatFieldChanged(key, cb.checked);
-                                    saveChatModelFromForm();
-                                };
-                            }
-                        }, 0);
-                    } else {
-                        inputCard = appShell.renderInputField(key, prop, isRequired);
-                    }
-                    form.appendChild(inputCard);
-                });
-            }
-            form.oninput = () => {
-                try {
-                    chatToolConfig = appShell.serializeToolForm(form, schema);
-                    saveChatModelFromForm();
-                } catch {
-                    // A JSON field that's still being typed; the field is marked invalid.
-                }
-            };
-            try {
-                chatToolConfig = appShell.serializeToolForm(form, schema);
-            } catch {
-                chatToolConfig = {};
-            }
-        }
-        // --- The model card's server and tool pickers ---
-        const chatServerSelect = document.getElementById('chatServerSelect');
-        chatServerSelect.addEventListener('change', function() {
-            chatSelectedServerUrl = this.value;
-            renderModelToolSelect();
-            saveChatModelFromForm();
-        });
-        const chatToolSelect = document.getElementById('chatToolSelect');
-        chatToolSelect.addEventListener('change', function() {
-            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
-            const tool = tools.find(t => t.name === this.value);
-            chatSelectedTool = tool;
-            renderModelToolForm(tool);
-            saveChatModelFromForm();
-        });
-        renderModelServerSelect();
-        renderModelToolSelect();
-        renderModelToolForm(chatSelectedTool);
-        function onChatFieldChanged(field, checked) {
-            console.debug(`[page] ${field} ${checked ? 'now receives' : 'no longer receives'} chat messages`);
-        }
-
-        function renderServerSelect(selectElement, selectedServerUrl, servers) {
-            selectElement.innerHTML = '';
-            const serverUrls = Object.keys(servers);
-            serverUrls.forEach(url => {
-                const opt = document.createElement('option');
-                opt.value = url;
-                opt.textContent = servers[url].alias || servers[url].name || url;
-                selectElement.appendChild(opt);
-            });
-            // Default to first server or previous selection
-            if (serverUrls.length > 0) {
-                if (!selectedServerUrl || !servers[selectedServerUrl]) {
-                    selectElement.value = serverUrls[0];
-                } else {
-                    selectElement.value = selectedServerUrl;
-                }
-            }
-        }
-
-        // Asks the worker for this tab's conversation, now or once it controls the page.
-        function loadChatHistory() {
-            const ask = () => navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_history', conversationId: chatConversationId });
-            if (navigator.serviceWorker.controller) ask();
-            else navigator.serviceWorker.addEventListener('controllerchange', ask, { once: true });
-        }
-        // On page load; showMode('apps') asks again.
-        loadChatHistory();
-
-        function sendChatModelToWorker() {
-            const model = loadChatModel();
-            if (model) navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_model', model });
-        }
-
-        // Now if the worker already controls the page, and when it takes control (first activation).
-        sendChatModelToWorker();
-        navigator.serviceWorker.oncontrollerchange = () => {
-            sendChatModelToWorker();
-            sendChatContextToWorker();
-        };
-
-        function getServersFromLocalStorage() {
-            const raw = localStorage.getItem('servers');
-            return raw ? JSON.parse(raw) : {};
-        }
-
-        // After service worker registration and activation:
-        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({
-                type: 'init_mcp_servers_index',
-                servers: getServersFromLocalStorage()
-            });
-        }
-
-        // Back where you were: the Workbench, or the Apps page. Last, since the chat's state
-        // above has to exist first.
+        // Back where you were: the Workbench, or the Apps page.
         if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
     </script>
 

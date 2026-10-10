@@ -1,18 +1,20 @@
 // Starts the Apps page: loads the apps you've built, defines the builder's components (which draw
-// themselves where index.html places them) and switches between the Chat app and the builder.
+// themselves where index.html places them) and shows the builder, or with no app to show, the
+// examples to start from.
 
 import { app } from '../workbench/app.js';
-import { Apps, CHAT } from './apps.js';
+import { Apps } from './apps.js';
 import { AppCanvas } from './components/canvas.js';
 import { AppFlow } from './components/flow.js';
 import { AppHeader } from './components/header.js';
 import { AppInspector } from './components/inspector.js';
 import { AppPreview } from './components/preview.js';
-import { AppsRail } from './components/rail.js';
+import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
 
 const COMPONENTS = {
     'apps-rail': AppsRail,
+    'apps-start': AppsStart,
     'app-header': AppHeader,
     'app-canvas': AppCanvas,
     'app-inspector': AppInspector,
@@ -29,8 +31,8 @@ export async function installApps(shell, { showMode } = {}) {
     showView();
     apps.on('view', showView);
     apps.on('shown', ({ id }) => {
-        document.getElementById('chatApp').hidden = id !== CHAT;
-        document.getElementById('appBuilder').hidden = id === CHAT;
+        document.getElementById('appsStart').hidden = !!id;
+        document.getElementById('appBuilder').hidden = !id;
     });
     for (const [name, component] of Object.entries(COMPONENTS)) {
         if (!customElements.get(name)) customElements.define(name, component);

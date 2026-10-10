@@ -34,6 +34,7 @@ export class AppInspector extends AppElement {
             this.ruleEditor?.refresh();
             this.source?.refresh();
         }, signal);
+        this.apps.on('model', () => this.source?.modelChanged(), signal);
         this.addEventListener('click', event => this.clicked(event), { signal });
         this.addEventListener('input', event => {
             const field = event.target.closest('[data-inspect-prop]');

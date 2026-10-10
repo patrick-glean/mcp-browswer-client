@@ -1,10 +1,8 @@
 // Asking a model to make a screen, or a part of one: the request it gets and the call that sends
-// it. The model is the Chat app's, an MCP tool like any other, so "make me a ticket dashboard"
-// is a tool call whose answer the builder takes the HTML from.
+// it. The model is an MCP tool like any other (Apps.model()), so "make me a ticket dashboard" is a
+// tool call whose answer the builder takes the HTML from.
 
 import { FlowError } from './flow.js';
-
-const MESSAGE_PLACEHOLDER = /\{\{(?:message|cbus_message)\}\}/g;
 
 // What the model is asked. With `current`, it's asked to change that HTML instead of starting over.
 export function askPrompt(ask, { part = false, current = '' } = {}) {
@@ -19,21 +17,26 @@ export function askPrompt(ask, { part = false, current = '' } = {}) {
     ].filter(Boolean).join('\n\n');
 }
 
-// The call that asks the model: the Chat app's model ({ serverUrl, toolName, args, messageField,
-// conversationField }) with the request in its message field and an empty conversation. Throws a
-// FlowError saying what to set up when the Chat app has no model yet.
-export function modelCall(model, prompt) {
+// The arguments of a call to the model ({ serverUrl, toolName, messageField, conversationField }):
+// `prompt` in its message field, `goal` in the tool's other required text fields (Glean's chat
+// wants the person's own words in _user_goal), and `conversation`, when given, in its
+// conversation field. `schema` is the tool's input schema; `base` holds any other arguments.
+export function modelArgs(model, { prompt, goal = prompt, conversation, schema = null, base = {} } = {}) {
+    const args = { ...base };
+    for (const key of schema?.required || []) {
+        if (key !== model.messageField && schema.properties?.[key]?.type === 'string') args[key] = goal;
+    }
+    if (model.conversationField && conversation !== undefined) args[model.conversationField] = conversation;
+    args[model.messageField] = prompt;
+    return args;
+}
+
+// The call that asks the model for something, with an empty conversation. Throws a FlowError
+// saying what to set up when there's no model yet.
+export function modelCall(model, prompt, { schema = null, goal = prompt } = {}) {
     if (!model?.serverUrl || !model.toolName) {
-        throw new FlowError('There is no model to ask yet. In Apps, open Chat, and under Model choose the tool that answers.');
+        throw new FlowError('There is no model to ask yet. Add a server with a chat tool (Glean, or the mock), or choose one under Model.');
     }
-    if (!model.messageField) {
-        throw new FlowError(`The Chat app's model, ${model.toolName}, has no field for the message. In Chat, tick "Your message goes here" on one.`);
-    }
-    const args = { ...(model.args || {}) };
-    const preset = args[model.messageField];
-    args[model.messageField] = typeof preset === 'string' && preset.match(MESSAGE_PLACEHOLDER)
-        ? preset.replace(MESSAGE_PLACEHOLDER, () => prompt)
-        : prompt;
-    if (model.conversationField) args[model.conversationField] = [];
-    return { serverUrl: model.serverUrl, toolName: model.toolName, args };
+    if (!model.messageField) throw new FlowError(`Choose the field of ${model.toolName} the request goes in, under Model.`);
+    return { serverUrl: model.serverUrl, toolName: model.toolName, args: modelArgs(model, { prompt, goal, conversation: [], schema }) };
 }

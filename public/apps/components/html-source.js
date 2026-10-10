@@ -5,14 +5,16 @@
 import { escapeHtml, plural } from '../../workbench/util.js';
 import { ELEMENT_KINDS, partElements, sanitizePart } from '../screen.js';
 import { CallEditor } from './call-editor.js';
+import { ModelPicker } from './model-picker.js';
 
 export class HtmlSourceEditor {
     // `get()` is what holds the HTML ({ html, from, ask }); `change(mutate)` edits it. With `part`,
-    // the HTML is kept as a part keeps it, and its elements are named after the part.
+    // the HTML is kept as a part keeps it, and its elements are named after the part. Its owner
+    // calls refresh() when the tool lists change, and modelChanged() on the Apps state's 'model'.
     constructor({ shell, workbench, apps, container, get, change, part = false, signal }) {
         Object.assign(this, { shell, workbench, apps, container, get, change, part, signal });
         const target = get();
-        this.source = target?.ask || (!target?.from?.toolName && apps.chatModel()?.toolName) ? 'model' : 'tool';
+        this.source = target?.ask || (!target?.from?.toolName && apps.model()) ? 'model' : 'tool';
         container.addEventListener('click', event => this.clicked(event), { signal });
         container.addEventListener('input', event => {
             if (event.target.matches('[data-ask]')) this.change(found => { found.ask = event.target.value; });
@@ -31,13 +33,6 @@ export class HtmlSourceEditor {
         }, { signal });
     }
 
-    modelNote() {
-        const model = this.apps.chatModel();
-        if (!model?.toolName) return 'There is no model to ask yet: in Apps, open Chat, and under Model choose the tool that answers.';
-        if (!model.messageField) return `The Chat app's model, ${model.toolName}, has no field for the message yet: in Chat, tick "Your message goes here" on one.`;
-        return `Asks the Chat app's model, ${model.toolName} on ${this.apps.serverName(model.serverUrl)}, for HTML whose buttons and fields have ids. Choose another model in Chat.`;
-    }
-
     render() {
         const target = this.get();
         if (!target) {
@@ -54,7 +49,7 @@ export class HtmlSourceEditor {
                 </div>
                 ${model ? `
                     <label class="app-field"><span>What to make, or what to change</span><textarea rows="2" data-ask placeholder="${this.part ? 'A ticket dashboard with a search field, a Refresh button and a list' : 'A form to ask a question, with an answer area below it'}"></textarea></label>
-                    <p class="app-call-help text-secondary">${escapeHtml(this.modelNote())}</p>
+                    <div data-model-picker></div>
                     <div class="app-html-actions">
                         <button type="button" class="btn-sm" data-make><span class="icon icon-zap" aria-hidden="true"></span>Make it</button>
                         <button type="button" class="btn-sm btn-tertiary" data-change-html ${html.trim() ? '' : 'disabled'} title="Sends the HTML there is now, with what to change">Change it</button>
@@ -71,8 +66,12 @@ export class HtmlSourceEditor {
                 </details>
                 <p class="app-found text-secondary" data-found></p>
             </div>`;
+        this.callEditor = null;
+        this.picker = null;
         if (model) {
             this.container.querySelector('[data-ask]').value = target.ask || '';
+            this.picker = new ModelPicker({ shell: this.shell, apps: this.apps, container: this.container.querySelector('[data-model-picker]'), signal: this.signal });
+            this.picker.render();
         } else {
             this.callEditor = new CallEditor({
                 shell: this.shell,
@@ -88,9 +87,14 @@ export class HtmlSourceEditor {
         this.renderFound();
     }
 
-    // The tool list changed: the call's menus follow it, unless someone is using them.
+    // The tool list changed: the call's menus and the model's follow it, unless someone is using them.
     refresh() {
         if (this.callEditor && !this.container.contains(document.activeElement)) this.callEditor.render();
+        this.picker?.refresh();
+    }
+
+    modelChanged() {
+        this.picker?.render();
     }
 
     elements() {

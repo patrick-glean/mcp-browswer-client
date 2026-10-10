@@ -19,6 +19,7 @@ export class AppScreen extends AppElement {
             if (part === 'screen' && by !== this) this.render();
         }, signal);
         this.shell.on('tools', () => this.sources.forEach(source => source.refresh()), signal);
+        this.apps.on('model', () => this.sources.forEach(source => source.modelChanged()), signal);
         this.addEventListener('click', event => this.clicked(event), { signal });
         this.addEventListener('input', event => this.edited(event), { signal });
         this.addEventListener('change', event => {

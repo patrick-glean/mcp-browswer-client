@@ -133,7 +133,7 @@ export class WbDock extends WbElement {
         const onlySelected = this.$('#runsThisServer').checked;
         const runs = await store.listRuns({ limit: 200, serverUrl: onlySelected ? this.shell.selectedServerUrl : null });
         if (!runs.length) {
-            box.innerHTML = '<p class="wb-list-note">No calls yet. Every tool call shows up here: from the Workbench, Run all, the apps you build, the Chat app, and tool calls found in replies.</p>';
+            box.innerHTML = '<p class="wb-list-note">No calls yet. Every tool call shows up here: from the Workbench, Run all, the apps you build, and the tool calls a model writes in its answers to them.</p>';
             return;
         }
         box.innerHTML = `

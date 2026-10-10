@@ -1,10 +1,12 @@
-// The apps you build, and the state the Apps page's components share: which app is shown (or the
-// Chat app), edits to it (saved as you go), downloads and imports. Components reach each other only
-// through here, AppShell and the Workbench state, as the Workbench's do.
+// The apps you build, and the state the Apps page's components share: which app is shown, edits to
+// it (saved as you go), the model the builder asks, the examples to start from, downloads and
+// imports. Components reach each other only through here, AppShell and the Workbench state, as the
+// Workbench's do.
 //
 // Events, with what their detail holds:
 //   list       apps were added, renamed or deleted
-//   shown      the page shows another app, or the Chat app      { id }
+//   shown      the page shows another app, or none (id null)    { id }
+//   model      the model the builder asks changed
 //   app        the shown app changed
 //              { part: 'screen' | 'flow' | 'layout' | 'name' | 'version', by }
 //   view       the builder switched between Canvas and Outline  { view }
@@ -14,7 +16,8 @@
 //   highlight  point these elements out on the screen           { elements }
 
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
-import { askPrompt, modelCall } from './ask.js';
+import { conversationFieldOf } from './agent.js';
+import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
 import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
@@ -23,9 +26,9 @@ import { componentsHtml, elementsOf, htmlFromResult, newComponent, sanitizePart,
 import * as store from './store.js';
 import { unzip, zip } from './zip.js';
 
-export const CHAT = 'chat';
 const SHOWN_KEY = 'appsShown';
 const VIEW_KEY = 'appsView';
+const MODEL_KEY = 'appsModel';
 export const VIEWS = { canvas: 'Canvas', outline: 'Outline' };
 
 // An app as the builder keeps it, whatever shape it was saved in.
@@ -41,6 +44,11 @@ function textField(tool) {
     const required = new Set(schema.required || []);
     return (fields.find(([key]) => required.has(key)) || fields[0] || [])[0] || null;
 }
+
+const newApp = ({ name, screen, flow }) => {
+    const now = Date.now();
+    return { id: crypto.randomUUID(), name, description: '', version: 0, createdAt: now, updatedAt: now, downloadedAt: null, screen, flow };
+};
 
 // What New app starts from: a title, a text box, a button and an output, with one rule that sends
 // the text box to the first tool that takes text, on the selected server if it has one.
@@ -63,24 +71,10 @@ export function starterApp({ shell, workbench, name }) {
         newComponent('button', [], { id: 'run', label: 'Run' }),
         newComponent('output', [], { id: 'output', label: 'Output' }),
     ];
-    const now = Date.now();
-    return {
-        id: crypto.randomUUID(),
-        name,
-        description: '',
-        version: 0,
-        createdAt: now,
-        updatedAt: now,
-        downloadedAt: null,
-        screen: { kind: 'components', components },
-        flow: [newRule({ element: 'run', event: 'click', ...call, into: 'output' })],
-    };
+    return newApp({ name, screen: { kind: 'components', components }, flow: [newRule({ element: 'run', event: 'click', ...call, into: 'output' })] });
 }
 
-const PULSE_QUESTION = "What's the latest on {{project}}? Use what you find in our documents, messages and tickets.";
-const PULSE_GOAL = "What's the latest on {{project}}?";
-
-const isGlean = server => {
+export const isGlean = server => {
     try {
         return /(^|\.)glean\.com$/i.test(new URL(server.url).hostname);
     } catch {
@@ -88,33 +82,81 @@ const isGlean = server => {
     }
 };
 
-// The call that fills the dashboard, and the field its question (the prompt) goes in: Glean's
-// chat if one of your servers is Glean, else the Chat app's model, else any server's chat tool.
-// The tool's other required text fields (such as Glean's _user_goal) get the question too.
-function pulseCall({ shell, workbench, chatModel }) {
-    const servers = Object.values(shell.servers);
-    const chatOf = server => (server.tools || []).find(tool => tool.name === 'chat');
-    const glean = servers.find(server => isGlean(server) && chatOf(server));
-    const model = !glean && chatModel?.toolName && chatModel.messageField && shell.servers[chatModel.serverUrl] ? chatModel : null;
-    const server = glean || (model ? shell.servers[model.serverUrl] : servers.find(chatOf));
-    const tool = model ? (server.tools || []).find(candidate => candidate.name === model.toolName) : server && chatOf(server);
-    if (!tool) return { call: { serverUrl: servers[0]?.url || '', toolName: '', args: {} }, prompt: null, source: null };
+// A tool as the model the builder asks: { serverUrl, toolName, messageField, conversationField },
+// where the message field gets the prompt and the conversation field, if it has one, the
+// conversation so far.
+export function modelOf(server, tool) {
     const schema = schemaOf(tool);
-    const prompt = model?.messageField || promptFieldOf(schema) || 'message';
-    const args = { ...(workbench?.testDataFor(schema).args || {}) };
-    for (const key of schema?.required || []) if (schema.properties?.[key]?.type === 'string') args[key] = PULSE_GOAL;
-    Object.assign(args, model ? modelCall(model, PULSE_QUESTION).args : {}, { [prompt]: PULSE_QUESTION });
-    return { call: { serverUrl: server.url, toolName: tool.name, args }, prompt, source: glean ? 'Glean' : `${tool.name} on ${serverLabel(server)}` };
+    return { serverUrl: server.url, toolName: tool.name, messageField: promptFieldOf(schema), conversationField: conversationFieldOf(schema) };
 }
 
-// A dashboard to start from: what's happening with a project, from one question whose boxes each
-// ask for their piece of the answer. It fills when it opens, on Refresh and on Enter.
-export function dashboardApp({ shell, workbench, chatModel, name }) {
-    const { call, prompt, source } = pulseCall({ shell, workbench, chatModel });
+// The model, unless you choose another: Glean's chat if you've added Glean, else a server's chat
+// tool. Null when no server has one.
+export function foundModel(servers) {
+    const list = Object.values(servers || {});
+    const chatOf = server => (server.tools || []).find(tool => tool.name === 'chat');
+    const server = list.find(candidate => isGlean(candidate) && chatOf(candidate)) || list.find(chatOf);
+    return server ? modelOf(server, chatOf(server)) : null;
+}
+
+// What an example's rule calls: the model, with `prompt` in its message field (see modelArgs).
+// Without a model, the rule is left for you to choose a tool.
+function modelRuleCall({ shell, workbench, model, ...asked }) {
+    const tool = model && (shell.servers[model.serverUrl]?.tools || []).find(candidate => candidate.name === model.toolName);
+    if (!tool || !model.messageField) return { call: { serverUrl: model?.serverUrl || Object.values(shell.servers)[0]?.url || '', toolName: model?.toolName || '', args: {} }, prompt: null };
+    const schema = schemaOf(tool);
+    const args = modelArgs(model, { ...asked, schema, base: workbench?.testDataFor(schema).args || {} });
+    return { call: { serverUrl: model.serverUrl, toolName: model.toolName, args }, prompt: model.messageField };
+}
+
+// How an example names its model: Glean, or the tool and its server.
+export function modelName(model, servers = {}) {
+    const server = servers[model?.serverUrl];
+    if (!model?.toolName || !server) return 'a model';
+    return isGlean(server) && model.toolName === 'chat' ? 'Glean' : `${model.toolName} on ${serverLabel(server)}`;
+}
+
+const CHAT_INSTRUCTIONS = "You're the assistant in a chat app built with MCP Browser Client: answer briefly and plainly. Earlier messages come with this one, each starting with who it's from: User, Assistant, or Tool for a tool's result.";
+
+// The Chat example: a conversation with the model, which can call your servers' tools. Its one
+// rule sends the message with the conversation so far. As it's sent, the message joins the
+// conversation and its field is cleared; the answer, or why there's none, joins it after, and so
+// do the results of the tool calls in the answer.
+export function chatApp({ shell, workbench, model, name }) {
+    const { call, prompt } = modelRuleCall({ shell, workbench, model, prompt: '{{message}}', conversation: '{{conversation}}' });
+    const components = [
+        newComponent('title', [], { id: 'title', text: name }),
+        newComponent('text', [], { id: 'intro', text: `A conversation with ${modelName(model, shell.servers)}, which can call your servers' tools. Each message goes with the conversation so far.` }),
+        newComponent('output', [], { id: 'conversation', label: 'Conversation', show: 'conversation', placeholder: 'Say something to start.' }),
+        newComponent('textbox', [], { id: 'message', label: 'Message', placeholder: 'Ask something, or ask it to use one of your tools', width: 'two-thirds' }),
+        newComponent('button', [], { id: 'send', label: 'Send', width: 'third' }),
+    ];
+    const rule = {
+        ...newRule({ element: 'send', event: 'click', ...call, into: null, prompt }),
+        when: [trigger('send', 'click'), trigger('message', 'enter')],
+        then: [
+            { if: 'sent', show: '{{message}}', into: 'conversation', how: 'append' },
+            { if: 'sent', show: '', into: 'message', how: 'replace' },
+            { if: 'ok', show: '{{text}}', into: 'conversation', how: 'append' },
+            { if: 'error', show: '{{error}}', into: 'conversation', how: 'append' },
+        ],
+        instructions: CHAT_INSTRUCTIONS,
+        tools: true,
+    };
+    return newApp({ name, screen: { kind: 'components', components }, flow: [rule] });
+}
+
+const PULSE_QUESTION = "What's the latest on {{project}}? Use what you find in our documents, messages and tickets.";
+const PULSE_GOAL = "What's the latest on {{project}}?";
+
+// The Project pulse example: what's happening with a project, from one question to the model whose
+// boxes each ask for their piece of the answer. It fills when it opens, on Refresh and on Enter.
+export function dashboardApp({ shell, workbench, model, name }) {
+    const { call, prompt } = modelRuleCall({ shell, workbench, model, prompt: PULSE_QUESTION, goal: PULSE_GOAL });
     const box = (id, label, show, about, width) => newComponent('output', [], { id, label, show, about, width, placeholder: 'Filled in when the app opens.' });
     const components = [
         newComponent('title', [], { id: 'title', text: name }),
-        newComponent('text', [], { id: 'intro', text: `What's happening with a project, from one question to ${source || 'a tool'}: each box below asks for its piece of the answer. Change the project and choose Refresh.` }),
+        newComponent('text', [], { id: 'intro', text: `What's happening with a project, from one question to ${modelName(model, shell.servers)}: each box below asks for its piece of the answer. Change the project and choose Refresh.` }),
         newComponent('textbox', [], { id: 'project', label: 'Project', value: 'MCP Browser Client', placeholder: 'A project, a team or a launch', width: 'two-thirds' }),
         newComponent('button', [], { id: 'refresh', label: 'Refresh', width: 'third' }),
         box('summary', 'Where it stands', 'text', 'Where the project stands, in at most 3 sentences', 'full'),
@@ -132,19 +174,16 @@ export function dashboardApp({ shell, workbench, chatModel, name }) {
             { if: 'error', show: '{{error}}', into: 'summary', how: 'replace' },
         ],
     };
-    const now = Date.now();
-    return {
-        id: crypto.randomUUID(),
-        name,
-        description: '',
-        version: 0,
-        createdAt: now,
-        updatedAt: now,
-        downloadedAt: null,
-        screen: { kind: 'components', size: 'wide', components },
-        flow: [rule],
-    };
+    return newApp({ name, screen: { kind: 'components', size: 'wide', components }, flow: [rule] });
 }
+
+// What create() starts from: the examples, and a blank app. Each with the name its app gets, and
+// what it is in a few words (`kind`) and in a sentence (`about`).
+export const EXAMPLES = {
+    chat: { name: 'Chat', make: chatApp, kind: 'agent loop', about: "A conversation with a model, which can call your servers' tools" },
+    dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
+    blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
+};
 
 // The README that travels in an app's zip: what's in it, the flow in words, and how to run it.
 export function readmeFor(app, { serverName = url => url } = {}) {
@@ -194,7 +233,7 @@ export class Apps {
         this.showMode = showMode;
         this.events = new EventTarget();
         this.list = [];
-        this.shownId = CHAT;
+        this.shownId = null;
         this.app = null;
         this.saveTimer = null;
         this.elementsCache = null;
@@ -219,20 +258,22 @@ export class Apps {
     async load() {
         this.list = (await store.listApps()).map(normalizeApp).sort((a, b) => a.createdAt - b.createdAt);
         const shown = localStorage.getItem(SHOWN_KEY);
-        this.show(this.list.some(app => app.id === shown) ? shown : CHAT);
+        this.show(this.list.some(app => app.id === shown) ? shown : this.list[0]?.id ?? null);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') this.flush();
         });
     }
 
+    // Shows an app, or with null none: the page then offers the examples.
     show(id) {
         this.flush();
-        this.app = id === CHAT ? null : this.list.find(app => app.id === id) || null;
-        this.shownId = this.app ? this.app.id : CHAT;
+        this.app = this.list.find(app => app.id === id) || null;
+        this.shownId = this.app?.id ?? null;
         this.elementsCache = null;
         this.selection = null;
         this.answers.clear();
-        localStorage.setItem(SHOWN_KEY, this.shownId);
+        if (this.shownId) localStorage.setItem(SHOWN_KEY, this.shownId);
+        else localStorage.removeItem(SHOWN_KEY);
         this.emit('shown', { id: this.shownId });
     }
 
@@ -287,15 +328,37 @@ export class Apps {
         return element && element.label !== id ? `${element.label} (${id})` : id;
     }
 
-    // --- HTML from a tool, or from a model: for an HTML screen, and for parts ---
+    // --- The model, and HTML from a tool or from a model: for an HTML screen, and for parts ---
 
-    // The Chat app's model, as the Chat app keeps it.
-    chatModel() {
+    // The model the builder asks for HTML, and the examples call: the one chosen under Model, while
+    // its server is one of yours, else the one found (foundModel). With `chosen` saying which, or
+    // null when there's none.
+    model() {
+        let chosen = null;
         try {
-            return JSON.parse(localStorage.getItem('chatModel')) || null;
+            chosen = JSON.parse(localStorage.getItem(MODEL_KEY));
         } catch {
-            return null;
+            // Unreadable, so not chosen.
         }
+        if (chosen?.serverUrl && chosen.toolName && this.shell.servers[chosen.serverUrl]) return { ...chosen, chosen: true };
+        const found = foundModel(this.shell.servers);
+        return found && { ...found, chosen: false };
+    }
+
+    // Chooses the model ({ serverUrl, toolName, messageField, conversationField }), or with null
+    // goes back to the one found.
+    setModel(model) {
+        if (model) {
+            const { serverUrl, toolName, messageField = null, conversationField = null } = model;
+            localStorage.setItem(MODEL_KEY, JSON.stringify({ serverUrl, toolName, messageField, conversationField }));
+        } else {
+            localStorage.removeItem(MODEL_KEY);
+        }
+        this.emit('model');
+    }
+
+    modelTool(model = this.model()) {
+        return (this.shell.servers[model?.serverUrl]?.tools || []).find(tool => tool.name === model?.toolName) || null;
     }
 
     // Calls a tool for HTML: { html, call } with the HTML its answer holds (kept as a part keeps it,
@@ -318,12 +381,13 @@ export class Apps {
         return { html: part ? sanitizePart(html) : html, call };
     }
 
-    // Asks the Chat app's model to make it, or with `current` to change that: { html, call } or { error }.
+    // Asks the model to make it, or with `current` to change that: { html, call } or { error }.
     async htmlFromModel(ask, { part = false, current = '' } = {}) {
         if (!String(ask ?? '').trim()) return { error: 'Say what to make first.' };
         let call;
         try {
-            call = modelCall(this.chatModel(), askPrompt(ask, { part, current }));
+            const model = this.model();
+            call = modelCall(model, askPrompt(ask, { part, current }), { schema: schemaOf(this.modelTool(model)), goal: String(ask).trim() });
         } catch (error) {
             return { error: error.message };
         }
@@ -372,15 +436,14 @@ export class Apps {
 
     // --- The list ---
 
-    // A new app from a starter: `blank` (a text box, a button and an output) or `dashboard`.
-    async create(starter = 'blank') {
-        const base = starter === 'dashboard' ? 'Project pulse' : 'New app';
+    // A new app from an example (EXAMPLES): `chat`, `dashboard`, or `blank` (a text box, a button
+    // and an output). The examples call the model.
+    async create(example = 'blank') {
+        const { name: base, make } = EXAMPLES[example] || EXAMPLES.blank;
         const taken = new Set(this.list.map(app => app.name));
         let name = base;
         for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
-        const app = starter === 'dashboard'
-            ? dashboardApp({ shell: this.shell, workbench: this.workbench, chatModel: this.chatModel(), name })
-            : starterApp({ shell: this.shell, workbench: this.workbench, name });
+        const app = make({ shell: this.shell, workbench: this.workbench, model: this.model(), name });
         await store.saveApp(app);
         this.list.push(app);
         this.emit('list');
@@ -409,7 +472,7 @@ export class Apps {
         await store.deleteApp(id);
         this.list = this.list.filter(app => app.id !== id);
         this.emit('list');
-        this.show(CHAT);
+        this.show(this.list[0]?.id ?? null);
         this.status(`Deleted ${name}.`);
     }
 
