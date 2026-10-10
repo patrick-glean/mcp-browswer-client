@@ -423,6 +423,19 @@ function storedTokens(url) {
     })`;
 }
 
+// The newest run of a tool from a source (app, reply, workbench…), as the worker recorded it.
+function latestRun(toolName, source) {
+    return `new Promise((resolve, reject) => {
+        const open = indexedDB.open('mcp_sandbox');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const all = open.result.transaction('runs').objectStore('runs').getAll();
+            all.onsuccess = () => resolve(all.result.filter(run => run.toolName === ${JSON.stringify(toolName)} && run.source === ${JSON.stringify(source)})
+                .sort((a, b) => b.startedAt - a.startedAt)[0] || null);
+        };
+    })`;
+}
+
 async function main() {
     if (!CHROME) throw new Error('Google Chrome not found; set CHROME_PATH');
     const referencePython = join(ROOT, 'venv', 'bin', 'python');
@@ -467,26 +480,26 @@ async function main() {
     try {
         page = await openPage();
         console.log(`Testing the app on the ${CLIENT.label}`);
-        // Chat data as the app saved it before its agent loop's names changed (engramId, the
-        // CBus tap, imprints), on the app's origin before the app first loads.
+        // What the Chat app kept, before the Chat example replaced it, under its names old and
+        // new, on the app's origin before the app first loads.
         await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/seed-old-chat-data` });
         await page.waitFor(`location.pathname === '/seed-old-chat-data' && document.readyState === 'complete'`);
         await page.run(`new Promise((resolve, reject) => {
-            localStorage.setItem('lastEngramId', 'smoke-old-conversation');
-            localStorage.setItem('cbusTapConfig', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', args: { text: '{{cbus_message}}' }, connectedStringArg: 'text', connectedArrayArg: null }));
-            localStorage.setItem('mcp_module_metadata', JSON.stringify({ version: '1.0.0', memory_events: [{ id: 'imprint-1', name: 'Old context', text: 'Answer briefly.', timestamp: 1 }], last_health_check: 1 }));
-            const open = indexedDB.open('chat_contexts', 1);
+            localStorage.setItem('chatModel', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', args: { text: '{{message}}' }, messageField: 'text', conversationField: null }));
+            localStorage.setItem('chatContext', JSON.stringify([{ id: 'context-1', name: 'Old context', text: 'Answer briefly.', timestamp: 1 }]));
+            localStorage.setItem('lastChatConversation', 'smoke-old-conversation');
+            localStorage.setItem('cbusTapConfig', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', connectedStringArg: 'text' }));
+            sessionStorage.setItem('chatConversation', 'smoke-old-conversation');
+            const open = indexedDB.open('chat_contexts', 2);
             open.onupgradeneeded = () => {
-                open.result.createObjectStore('conversations', { keyPath: 'engramId' });
-                open.result.createObjectStore('messages', { keyPath: 'id' }).createIndex('engramId', 'engramId');
+                open.result.createObjectStore('conversations', { keyPath: 'conversationId' });
+                open.result.createObjectStore('messages', { keyPath: 'id' }).createIndex('conversationId', 'conversationId');
             };
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
                 const db = open.result;
-                const tx = db.transaction(['conversations', 'messages'], 'readwrite');
-                tx.objectStore('conversations').put({ engramId: 'smoke-old-conversation', meta: { created: 1, engramId: 'smoke-old-conversation' } });
-                tx.objectStore('messages').put({ id: '00000000-0001', text: 'A question from before the rename', role: 'user', timestamp: 1, engramId: 'smoke-old-conversation' });
-                tx.objectStore('messages').put({ id: '00000000-0002', text: 'An answer from before the rename', role: 'tool', timestamp: 2, engramId: 'smoke-old-conversation' });
+                const tx = db.transaction('messages', 'readwrite');
+                tx.objectStore('messages').put({ id: '00000000-0001', text: 'A question from the Chat app', role: 'user', timestamp: 1, conversationId: 'smoke-old-conversation' });
                 tx.oncomplete = () => { db.close(); resolve(true); };
                 tx.onerror = () => reject(tx.error);
             };
@@ -499,17 +512,13 @@ async function main() {
             !!document.getElementById('client-status')?.classList.contains('healthy') &&
             typeof appShell !== 'undefined' && !!appShell.serviceWorker && !!appShell.workbench`);
         check('app loads with the service worker, the MCP client and the Workbench running', !!healthy);
-        const carriedOver = await page.waitFor(`(() => {
-            const shown = [...document.querySelectorAll('#chatMessages .chat-msg')].map(m => m.textContent);
-            const model = JSON.parse(localStorage.getItem('chatModel') || 'null');
-            const context = JSON.parse(localStorage.getItem('chatContext') || 'null');
-            const leftOver = ['lastEngramId', 'cbusTapConfig', 'mcp_module_metadata'].filter(key => localStorage.getItem(key) !== null);
-            return shown.includes('A question from before the rename') && shown.includes('An answer from before the rename')
-                && localStorage.getItem('lastChatConversation') === 'smoke-old-conversation'
-                && model?.messageField === 'text' && model.args?.text === '{{message}}' && !('connectedStringArg' in model)
-                && context?.[0]?.name === 'Old context' && leftOver.length === 0 ? shown.length : null;
+        const cleanedUp = await page.waitFor(`(async () => {
+            const kept = ['chatModel', 'chatContext', 'lastChatConversation', 'cbusTapConfig'].filter(key => localStorage.getItem(key) !== null);
+            if (sessionStorage.getItem('chatConversation') !== null) kept.push('chatConversation');
+            const databases = (await indexedDB.databases()).map(database => database.name);
+            return kept.length === 0 && !databases.includes('chat_contexts') && !localStorage.getItem('appsModel') ? databases.join(', ') || 'no databases' : null;
         })()`, 10000);
-        check('Chat app: conversations and settings saved before the rename carry over', !!carriedOver, carriedOver ? `${carriedOver} messages shown` : 'not carried over');
+        check("the Chat app's settings and stored conversations are gone, and its model isn't the builder's", !!cleanedUp, cleanedUp || 'still there');
         const frame = await page.run(`(() => {
             const areas = ['wb-rail', 'wb-server-bar', 'wb-tools', 'wb-request', 'wb-response', 'wb-dock']
                 .filter(name => customElements.get(name) && document.querySelector(name)?.getBoundingClientRect().width > 0);
@@ -722,38 +731,42 @@ async function main() {
         check('splitters: dragging an edge resizes the pane beside it and keeps the size, and a double-click resets it',
             dragged === before + 60 && kept === dragged && reset === before, `${before} → ${dragged} (kept ${kept}) → ${reset}`);
 
-        const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
-        check('the Chat app\'s tool picker is populated', !!picker, picker);
-
-        // The README's chat walkthrough: open Apps, pick a server and tool, tick the field your
-        // message goes to, send a message.
+        // Apps, with no app yet: the examples to start from, and the model they call, a chat tool
+        // found among your servers (the mock's stand-in here) until you choose another.
         await page.run(`(() => {
+            ${showWorkbench};
+            ${serverRow(modernUrl)}.click();
             document.querySelector('[data-mode="apps"]').click();
-            const server = document.getElementById('chatServerSelect');
-            server.value = ${JSON.stringify(modernUrl)};
-            server.dispatchEvent(new Event('change'));
-            const tool = document.getElementById('chatToolSelect');
-            tool.value = 'echo';
-            tool.dispatchEvent(new Event('change'));
         })()`);
-        await page.waitFor(`!!document.querySelector('#chatToolConfigForm .chat-message-field[data-field="text"]')`, 5000);
+        const start = await page.waitFor(`(() => {
+            const start = document.getElementById('appsStart');
+            const examples = [...start.querySelectorAll('[data-example] .apps-start-name')].map(name => name.textContent).join(', ');
+            const rail = [...document.querySelectorAll('apps-rail [data-example]')].map(row => row.textContent.trim().replace(/\\s+/g, ' ')).join(' | ');
+            const model = start.querySelector('.app-model-name')?.textContent;
+            const shown = !start.hidden && document.getElementById('appBuilder').hidden && !document.getElementById('appsPage').hidden;
+            return shown && model ? [examples, rail, model].join(' / ') : null;
+        })()`, 10000);
+        check('Apps: with no app yet, the page offers the examples and a blank app, the rail lists the examples, and the model is a chat tool it found',
+            start === 'Chat, Project pulse, New app / Chat agent loop | Project pulse dashboard / chat on modern server, asked in message', start);
         await page.run(`(() => {
-            const box = document.querySelector('#chatToolConfigForm .chat-message-field[data-field="text"]');
-            box.checked = true;
-            box.dispatchEvent(new Event('change'));
-            document.getElementById('chatUserInput').value = 'hello from the console';
-            document.getElementById('chatSendBtn').disabled = false;
-            document.getElementById('chatSendBtn').click();
+            const tool = document.querySelector('#appsStart [data-model-tool]');
+            tool.value = 'echo';
+            tool.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        const chatted = await page.waitFor(`[...document.querySelectorAll('#chatMessages .chat-msg.tool')].some(m => m.textContent.includes('Echo: hello from the console'))`);
-        const appsShown = await page.run(`!document.getElementById('appsPage').hidden && document.getElementById('workbench').hidden`);
-        check('the Chat app sends a message through the chosen tool', !!chatted && appsShown);
+        const chosenModel = await page.waitFor(`(() => {
+            const name = document.querySelector('#appsStart .app-model-name')?.textContent;
+            const saved = JSON.parse(localStorage.getItem('appsModel') || 'null');
+            return name?.startsWith('echo') ? [name, saved?.messageField, document.querySelector('#appsStart [data-model-details] .app-note').textContent.trim()].join(' | ') : null;
+        })()`, 5000);
+        await page.run(`document.querySelector('#appsStart [data-model-found]').click()`);
+        const foundAgain = await page.waitFor(`localStorage.getItem('appsModel') === null ? document.querySelector('#appsStart .app-model-name')?.textContent : null`, 5000);
+        check('Apps: the Model menus choose another model, and Use the one found goes back to it',
+            chosenModel === 'echo on modern server, asked in text | text | You chose it. Use the one found instead' && foundAgain === 'chat on modern server, asked in message',
+            `${chosenModel}; ${foundAgain}`);
 
         {
             // Building an app: New app starts a screen and a flow that work. The screen runs in a
             // sandboxed frame, and the flow calls tools through the worker, as recorded runs.
-            const rail = await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].map(row => row.textContent.trim().replace(/\\s+/g, ' ')).join(' | ')`);
-            check('Apps: the rail lists the built-in Chat app, which shows first', rail === 'Chat agent loop', rail);
             await page.run(`(() => {
                 ${showWorkbench};
                 ${serverRow(modernUrl)}.click();
@@ -771,7 +784,7 @@ async function main() {
             await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
             const starter = await page.waitFor(`(() => {
                 const sentence = document.querySelector('app-flow .app-rule-sentence')?.textContent;
-                return !document.getElementById('appBuilder').hidden && document.getElementById('chatApp').hidden && sentence ? sentence : null;
+                return !document.getElementById('appBuilder').hidden && document.getElementById('appsStart').hidden && sentence ? sentence : null;
             })()`, 5000);
             check('Apps: New app starts with a rule that sends its text box to a tool and the answer to its output',
                 starter === 'When run is clicked, call echo on modern server with text = {{input}}; if it works, put {{text}} into output; if it fails, put {{error}} into output.', starter);
@@ -917,7 +930,7 @@ async function main() {
                 remove.click();
                 remove.click();
             })()`);
-            const deleted = await page.waitFor(`!document.getElementById('chatApp').hidden && !document.querySelector('apps-rail #appList [data-show-app]')`, 5000);
+            const deleted = await page.waitFor(`!document.getElementById('appsStart').hidden && !document.querySelector('apps-rail #appList [data-show-app]')`, 5000);
             const { root } = (await page.send('DOM.getDocument', { depth: -1 })).result;
             const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importAppInput' })).result;
             await page.send('DOM.setFileInputFiles', { nodeId, files: [join(appDownloads, zipName || 'missing.zip')] });
@@ -944,29 +957,76 @@ async function main() {
             rmSync(appDownloads, { recursive: true, force: true });
         }
         {
+            // The Chat example: an app like any other, whose one rule sends the message and the
+            // conversation so far to the model. The mock's chat says what it was sent and how many
+            // earlier messages came with it, and writes a tool call when asked to call a tool.
+            await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
+            const chatShown = await page.waitFor(`(() => {
+                const current = document.querySelector('apps-rail [aria-current="true"] .wb-row-label')?.textContent;
+                return document.getElementById('appName')?.value === 'Chat' && !document.getElementById('appBuilder').hidden ? current : null;
+            })()`, 10000);
+            const chatScreen = await frameWaitFor(`document.getElementById('send') && document.getElementById('conversation')?.classList.contains('box-conversation') ? document.body.innerText.replace(/\\s+/g, ' ').trim() : null`);
+            check('Apps: Chat, under Examples, makes an app under Your apps: a conversation, a message field and Send',
+                chatShown === 'Chat' && chatScreen === "Chat A conversation with chat on modern server, which can call your servers' tools. Each message goes with the conversation so far. Conversation Message Send",
+                `${chatShown}; ${chatScreen}`);
+            const conversation = `[...document.querySelectorAll('#conversation .entry')].map(entry => entry.dataset.role + ': ' + entry.textContent)`;
+            const say = async text => {
+                await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('message') && !document.getElementById('send').disabled`);
+                await frameRun(`(() => {
+                    document.getElementById('message').value = ${JSON.stringify(text)};
+                    document.getElementById('send').click();
+                    return true;
+                })()`);
+            };
+            const entriesAfter = count => frameWaitFor(`(() => {
+                const shown = ${conversation};
+                return shown.length >= ${count} && !document.getElementById('send').disabled ? shown : null;
+            })()`);
+            await say('hello from the chat example');
+            const first = await entriesAfter(2);
+            const cleared = await frameRun(`document.getElementById('message').value === '' ? 'cleared' : 'not cleared'`);
+            await say('and again');
+            const second = await entriesAfter(4);
+            check("Apps: Chat puts the message in the conversation as it's sent and clears the field, then the answer; the next one goes with the conversation so far",
+                first?.join(' | ') === 'you: hello from the chat example | reply: You said: hello from the chat example' && cleared === 'cleared'
+                    && second?.slice(2).join(' | ') === 'you: and again | reply: You said: and again (2 earlier messages came with it.)',
+                `${first?.join(' | ')}; ${cleared}; ${second?.slice(2).join(' | ')}`);
+            const sent = await page.run(`${latestRun('chat', 'app')}.then(run => run && JSON.stringify({ args: run.args, sentArgs: run.sentArgs }))`);
+            const { args: chatArgs, sentArgs: chatSent } = JSON.parse(sent || '{}');
+            check("Apps: the model gets the conversation so far as a list, and the message after its instructions and your servers' tools",
+                JSON.stringify(chatArgs) === JSON.stringify({ message: '{{message}}', history: '{{conversation}}' })
+                    && JSON.stringify(chatSent?.history) === JSON.stringify(['User: hello from the chat example', 'Assistant: You said: hello from the chat example'])
+                    && /^You're the assistant in a chat app built with MCP Browser Client: answer briefly and plainly\./.test(chatSent?.message || '')
+                    && (chatSent?.message || '').includes('\n\nYou can call the tools listed below.')
+                    && (chatSent?.message || '').includes(`"url":${JSON.stringify(modernUrl)}`)
+                    && (chatSent?.message || '').endsWith('```\n\nand again'),
+                `${JSON.stringify(chatArgs)}; ${JSON.stringify(chatSent?.history)}; ${(chatSent?.message || '').slice(0, 80)}…${(chatSent?.message || '').slice(-30)}`);
+
+            // A tool call in the model's answer runs, from the page, as a run from a reply, and its
+            // result joins the conversation. Three run in 10 seconds; the fourth is skipped.
+            await say('call echo with hello from the model');
+            const called = await entriesAfter(7);
+            const replyRun = await page.waitFor(`${latestRun('echo', 'reply')}.then(run => run && JSON.stringify({ sentArgs: run.sentArgs, outcome: run.outcome }))`, 5000);
+            check("Apps: a tool call in the model's answer runs as a run from a reply, and its result joins the conversation",
+                called?.[4] === 'you: call echo with hello from the model' && /^reply: I'll ask echo\.\n\n```json\n\{"jsonrpc": "2\.0", "method": "echo"/.test(called?.[5] || '')
+                    && called?.[6] === 'tool: echo: Echo: hello from the model' && replyRun === JSON.stringify({ sentArgs: { text: 'hello from the model' }, outcome: 'ok' }),
+                `${called?.slice(4).join(' | ')}; ${replyRun}`);
+            for (const n of [2, 3, 4]) {
+                await say(`call echo with call ${n}`);
+                await entriesAfter(7 + n * 3 - 3);
+            }
+            const limited = await frameRun(`${conversation}.slice(-1)[0]`);
+            const toolResults = await frameRun(`${conversation}.filter(entry => entry.startsWith('tool: echo')).length`);
+            check("Apps: an answer's tool calls run at most three in 10 seconds, and the conversation says when one was skipped",
+                limited === "error: Skipped echo: an answer's tool calls run at most 3 in 10 seconds." && toolResults === 3, `${limited}; ${toolResults} results`);
+        }
+        {
             // The canvas: the app's screen running with a port beside each element, Start, a node for
             // each rule's tool, and wires between them, each one part of a rule. These checks build
             // onto a new app with real mouse drags, at a size where all of it shows.
             await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-            // Ask a model asks the Chat app's model, chosen in Chat: here the mock's stand-in, chat.
-            await page.run(`(() => {
-                document.querySelector('apps-rail [data-show-app="chat"]').click();
-                const server = document.getElementById('chatServerSelect');
-                server.value = ${JSON.stringify(modernUrl)};
-                server.dispatchEvent(new Event('change'));
-                const tool = document.getElementById('chatToolSelect');
-                tool.value = 'chat';
-                tool.dispatchEvent(new Event('change'));
-            })()`);
-            await page.waitFor(`!!document.querySelector('#chatToolConfigForm .chat-message-field[data-field="message"]')`, 5000);
-            await page.run(`(() => {
-                const box = document.querySelector('#chatToolConfigForm .chat-message-field[data-field="message"]');
-                if (!box.checked) {
-                    box.checked = true;
-                    box.dispatchEvent(new Event('change'));
-                }
-                document.getElementById('newAppBtn').click();
-            })()`);
+            // Ask a model asks the model found among your servers: here the mock's stand-in, chat.
+            await page.run(`document.getElementById('newAppBtn').click()`);
             await page.waitFor(`document.getElementById('appName')?.value === 'New app 2' && !!document.querySelector('app-header [data-app-view-choice="canvas"]')`, 5000);
             await page.run(`document.querySelector('app-header [data-app-view-choice="canvas"]').click()`);
             await page.waitFor(`document.querySelectorAll('app-canvas [data-wire]').length === 4`, 10000);
@@ -1081,8 +1141,8 @@ async function main() {
             check('Apps: Start wired to a tool\'s Run calls it when the app opens, and Restart opens it again',
                 started === 'Start → count' && opened === 'empty | Counted 3 steps', `${started}; ${opened}`);
 
-            // A part of the screen a model makes: the Chat app's model writes a ticket dashboard, which
-            // runs without its script, handlers or form, its ids named after the part.
+            // A part of the screen a model makes: the model writes a ticket dashboard, which runs
+            // without its script, handlers or form, its ids named after the part.
             await fromLibrary('[data-library-item="component"][data-type="part"]');
             await page.waitFor(`!!document.querySelector('app-inspector [data-part-source] [data-ask]')`, 5000);
             await page.run(`(() => {
@@ -1158,17 +1218,10 @@ async function main() {
             rmSync(appDownloads, { recursive: true, force: true });
 
             // A dashboard: boxes that say what they show and what goes in them ask one tool for
-            // their pieces of its answer, in its prompt. The Chat app's model is the mock's chat,
-            // which answers the boxes with made-up JSON in their shapes.
-            const latestPrompt = `new Promise((resolve, reject) => {
-                const open = indexedDB.open('mcp_sandbox');
-                open.onerror = () => reject(open.error);
-                open.onsuccess = () => {
-                    const all = open.result.transaction('runs').objectStore('runs').getAll();
-                    all.onsuccess = () => resolve(all.result.filter(run => run.source === 'app' && run.toolName === 'chat').sort((a, b) => b.startedAt - a.startedAt)[0]?.sentArgs?.message || '');
-                };
-            })`;
-            await page.run(`document.getElementById('newDashboardBtn').click()`);
+            // their pieces of its answer, in its prompt. Project pulse, under Examples, calls the
+            // model, the mock's chat, which answers the boxes with made-up JSON in their shapes.
+            const latestPrompt = `${latestRun('chat', 'app')}.then(run => run?.sentArgs?.message || '')`;
+            await page.run(`document.querySelector('apps-rail [data-example="dashboard"]').click()`);
             const pulse = await frameWaitFor(`(() => {
                 const box = id => document.getElementById(id);
                 if (!box('docs')?.querySelector('a.item-title')) return null;
@@ -1555,8 +1608,8 @@ async function main() {
             const rows = ${runRows};
             return rows.length ? [...new Set(rows.map(row => row.dataset.source))].sort().join(', ') : null;
         })()`, 5000);
-        check('history: every call is in the dock\'s Runs, the chat\'s and Run all\'s included',
-            ['chat', 'collection', 'workbench'].every(source => (historySources || '').includes(source)), historySources);
+        check("history: every call is in the dock's Runs, the apps', their models' tool calls and Run all's included",
+            ['app', 'collection', 'reply', 'workbench'].every(source => (historySources || '').includes(source)), historySources);
         const recent = await page.run(`document.querySelectorAll('#recentRuns [data-open-run]').length`);
         check('history: the rail lists the most recent runs', recent === 6, `${recent} runs`);
         await page.run(`${runRows}[0].click()`);
@@ -1657,32 +1710,24 @@ async function main() {
         const leaked = await page.run(`JSON.stringify(${entries}).includes(${JSON.stringify(TOKEN)})`);
         check('logs: the bearer token never appears', !leaked);
 
-        // A conversation field gets the instructions, the server list and the conversation so far:
-        // the model is told about every server and its tools, but never their tokens.
-        const modelRunId = await page.run(`new Promise(resolve => {
-            const conversation = 'smoke-tool-choice';
-            const listen = event => {
-                if (event.data?.type !== 'tool_result' || event.data.conversationId !== conversation) return;
-                navigator.serviceWorker.removeEventListener('message', listen);
-                resolve(event.data.run?.id ?? null);
-            };
-            navigator.serviceWorker.addEventListener('message', listen);
-            const worker = navigator.serviceWorker.controller;
-            worker.postMessage({ type: 'set_chat_model', model: { serverUrl: ${JSON.stringify(tokenUrl)}, toolName: 'echo', messageField: 'text', conversationField: 'history', args: {} } });
-            worker.postMessage({ type: 'chat_send', text: 'Which tools can you use?', conversationId: conversation });
-        })`);
-        const toldModel = modelRunId && await page.run(`new Promise((resolve, reject) => {
-            const open = indexedDB.open('mcp_sandbox');
-            open.onerror = () => reject(open.error);
-            open.onsuccess = () => {
-                const get = open.result.transaction('runs').objectStore('runs').get(${JSON.stringify(modelRunId)});
-                get.onsuccess = () => resolve(JSON.stringify(get.result?.sentArgs ?? null));
-            };
-        })`);
-        check('Chat app: the model is told about the servers and their tools, never their tokens',
+        // The Chat example's model is told about every server and its tools, the token server's
+        // too, but never a token.
+        await page.run(`(() => {
+            document.querySelector('[data-mode="apps"]').click();
+            [...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'Chat').click();
+        })()`);
+        await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('message') && !document.getElementById('send').disabled`);
+        const askedBefore = await page.run(`${latestRun('chat', 'app')}.then(run => run?.id || 'none')`);
+        await frameRun(`(() => {
+            document.getElementById('message').value = 'Which tools can you use?';
+            document.getElementById('send').click();
+            return true;
+        })()`);
+        const toldModel = await page.waitFor(`${latestRun('chat', 'app')}.then(run => run && run.id !== ${JSON.stringify(askedBefore)} ? JSON.stringify(run.sentArgs) : null)`, 10000);
+        check("Apps: the Chat example's model is told about your servers and their tools, never their tokens",
             !!toldModel && toldModel.includes(tokenUrl) && toldModel.includes('echo_region') && !toldModel.includes(TOKEN),
-            modelRunId ? `${toldModel?.length} characters sent` : 'no answer');
-        await page.run('sendChatModelToWorker()');
+            toldModel ? `${toldModel.length} characters sent` : 'no call');
+        await page.run(showWorkbench);
 
         // Sign-in (OAuth), as with Glean: the 401's challenge is unreadable, so the client finds
         // the protected resource metadata at its well-known address.
