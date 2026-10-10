@@ -375,17 +375,21 @@ async function frameRun(expression) {
         const ws = new WebSocket(frame.webSocketDebuggerUrl);
         try {
             await new Promise((resolve, reject) => {
+                setTimeout(() => reject(new Error('The frame never answered.')), 3000);
                 ws.addEventListener('open', resolve, { once: true });
                 ws.addEventListener('error', reject, { once: true });
             });
+            // A frame that goes away while it's asked (the app reloaded it) never answers.
             const reply = await new Promise(resolve => {
+                setTimeout(() => resolve(null), 5000);
+                ws.addEventListener('close', () => resolve(null), { once: true });
                 ws.addEventListener('message', event => {
                     const message = JSON.parse(event.data);
                     if (message.id === 1) resolve(message);
                 });
                 ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
             });
-            const value = reply.result?.result?.value;
+            const value = reply?.result?.result?.value;
             if (value !== undefined && value !== null && value !== false && value !== '') return value;
         } catch {
             // The frame went away while it was asked.
@@ -1152,6 +1156,90 @@ async function main() {
                     && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
                 `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
             rmSync(appDownloads, { recursive: true, force: true });
+
+            // A dashboard: boxes that say what they show and what goes in them ask one tool for
+            // their pieces of its answer, in its prompt. The Chat app's model is the mock's chat,
+            // which answers the boxes with made-up JSON in their shapes.
+            const latestPrompt = `new Promise((resolve, reject) => {
+                const open = indexedDB.open('mcp_sandbox');
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const all = open.result.transaction('runs').objectStore('runs').getAll();
+                    all.onsuccess = () => resolve(all.result.filter(run => run.source === 'app' && run.toolName === 'chat').sort((a, b) => b.startedAt - a.startedAt)[0]?.sentArgs?.message || '');
+                };
+            })`;
+            await page.run(`document.getElementById('newDashboardBtn').click()`);
+            const pulse = await frameWaitFor(`(() => {
+                const box = id => document.getElementById(id);
+                if (!box('docs')?.querySelector('a.item-title')) return null;
+                return [box('summary').textContent.trim().slice(0, 9), box('health').querySelector('.kpi-value')?.textContent,
+                    box('activity').querySelectorAll('.chart-fill').length, box('risks').querySelectorAll('li').length,
+                    [...box('docs').querySelectorAll('a.item-title')].map(link => link.getAttribute('href')).join(' ')].join(' | ');
+            })()`);
+            check('Apps: a dashboard opens and fills each box from one answer, drawn as the box says: text, a number, a bar chart and lists',
+                pulse === 'On track: | On track | 6 | 3 | https://example.com/docs/design https://example.com/docs/launch https://example.com/docs/weekly', pulse);
+            const asked = await page.waitFor(`${latestPrompt}.then(prompt => prompt.includes('"docs" (list)') ? prompt : null)`, 5000);
+            check('Apps: the boxes add to the prompt what each needs, from what it says goes in it, as one JSON object',
+                /^What's the latest on MCP Browser Client\? Use what you find in our documents, messages and tickets\.\n\nThis answer fills the boxes on an app's screen\. Answer with one JSON object in a ```json block/.test(asked || '')
+                    && (asked || '').includes('\n- "activity" (bar chart): Updates about the project per week, the last 6 weeks, oldest first, each labeled by the day its week starts. As {"labels": [string], "values": [number]}.\n')
+                    && /\nUse null for a key you have nothing for\.$/.test(asked || ''),
+                (asked || 'nothing sent').slice(0, 160));
+
+            // Saying a box shows something else changes what the prompt asks for, and how it's drawn.
+            const restart = async () => {
+                await frameRun(`(document.body.dataset.before = 'restart', true)`);
+                await page.run(`document.querySelector('app-canvas [data-restart]').click()`);
+            };
+            await page.waitFor(`!!document.querySelector('app-canvas [data-element-box="activity"]')`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-element-box="activity"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-inspect-prop="show"]')`, 5000);
+            await page.run(`(() => {
+                const show = document.querySelector('app-inspector [data-inspect-prop="show"]');
+                show.value = 'line';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const lineNote = await page.run(`document.querySelector('app-inspector [data-box-note]')?.textContent || ''`);
+            await frameWaitFor(`!!document.querySelector('#activity.box-line')`);
+            await restart();
+            const line = await frameWaitFor(`!document.body.dataset.before && document.querySelector('#activity polyline') ? document.querySelector('#activity polyline').getAttribute('points').split(' ').length : null`);
+            const lineAsked = await page.waitFor(`${latestPrompt}.then(prompt => prompt.includes('"activity" (line chart)') ? 'line chart' : null)`, 5000);
+            check('Apps: a box that shows a line chart instead asks for one, and draws its six points as a line',
+                line === 6 && lineAsked === 'line chart' && lineNote.includes('as a line chart'), `${line} points; ${lineAsked}; ${lineNote}`);
+
+            // An HTML box from the Library, wired to the tool's Answer, asks for HTML to fit it.
+            await fromLibrary('[data-library-item="box"][data-show="html"]');
+            await page.waitFor(`!!${port('el:panel')}`, 10000);
+            const pulseRule = await page.run(`document.querySelector('app-canvas [data-node]').dataset.node`);
+            await drag(`ok:${pulseRule}`, 'el:panel');
+            const panelWire = await page.waitFor(`document.querySelector('app-canvas [data-pill="r:${pulseRule}:6"]')?.textContent === 'panel' ? document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            await frameWaitFor(`!!document.querySelector('#panel.box-html')`);
+            await restart();
+            const banner = await frameWaitFor(`!document.body.dataset.before && document.querySelector('#panel .banner') ? document.querySelector('#panel .banner').textContent : null`);
+            const htmlAsked = await page.waitFor(`${latestPrompt}.then(prompt => (prompt.match(/^- "panel" \\(HTML\\): .*$/m) || [])[0] || null)`, 5000);
+            check('Apps: an HTML box wired to the Answer asks for HTML to fit its width, and shows it',
+                panelWire === 'Connected: chat is asked in message for the HTML panel shows.' && banner === 'On track. The beta starts once the API review is done.'
+                    && htmlAsked === '- "panel" (HTML): HTML. As a string of HTML for a box about 1030 px wide: no scripts, nothing from the network, inline styles only.',
+                `${panelWire}; ${banner}; ${htmlAsked}`);
+
+            // A link in a box opens in a tab of its own, through the page: the screen can't open one.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameRun(`(document.querySelector('#docs a.item-title').click(), true)`);
+            const linked = await page.waitFor(`[...document.querySelectorAll('app-canvas .app-trace-text')].map(line => line.textContent.trim()).find(line => line.startsWith('Opened')) || null`, 5000);
+            check('Apps: a link in a box opens in a new tab', linked === 'Opened https://example.com/docs/design', linked);
+
+            // Asking nowhere sends the question alone, and boxes say the answer had nothing for them.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            await page.run(`document.querySelector('app-canvas [data-node="${pulseRule}"] [data-node-status]').click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-prompt-row]:not([hidden]) [data-prompt-field]')`, 5000);
+            await page.run(`(() => {
+                const field = document.querySelector('app-inspector [data-prompt-field]');
+                field.value = '';
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await restart();
+            const notJson = await frameWaitFor(`!document.body.dataset.before && document.getElementById('summary')?.dataset.state === 'error' ? document.getElementById('summary').textContent : null`);
+            check('Apps: without the boxes\' request, the answer isn\'t JSON, and the boxes say so',
+                notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
             await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);
