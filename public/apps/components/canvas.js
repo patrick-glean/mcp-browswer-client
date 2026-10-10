@@ -7,15 +7,17 @@
 // as rules run. The Library adds components, tools and transforms.
 
 import { debounce, escapeHtml, schemaOf, serverLabel } from '../../workbench/util.js';
+import { answerKey, BOX_KINDS, BOX_WIDTHS, isBox, promptFieldOf } from '../boxes.js';
 import { EVENTS, FlowError, flowProblems, isDefaultShow, newRule, routeSummary, triggersOf } from '../flow.js';
 import { canConnect, connect, parsePort, placeRules, wiresOf } from '../graph.js';
 import { AppRunner } from '../runner.js';
-import { COMPONENT_TYPES, newComponent } from '../screen.js';
+import { COMPONENT_TYPES, freeId, newComponent } from '../screen.js';
 import { AppElement } from './base.js';
 import { TraceList } from './trace.js';
 
-// The canvas's geometry, which the styles read as custom properties.
-const SCREEN = { x: 24, y: 76, width: 300, bar: 30, gutter: 112 };
+// The canvas's geometry, which the styles read as custom properties. A wide screen (a
+// dashboard's) runs at `wide` instead of `width`.
+const SCREEN = { x: 24, y: 76, width: 300, wide: 600, bar: 30, gutter: 112 };
 // Room between the screen's ports and the tools for a transform's label on a wire.
 const TOOLS_GAP = 120;
 const TOOL_WIDTH = 220;
@@ -28,6 +30,8 @@ const TRANSFORMS = [
     ['html', 'HTML', 'The HTML in its answer, shown as HTML', { show: '{{html}}', how: 'html' }],
 ];
 const WIRE_KINDS = ['trigger', 'arg', 'answer', 'error'];
+// How near an edge of the canvas a wire being dragged starts it scrolling.
+const EDGE = 40;
 
 const elementPort = id => `el:${id}`;
 
@@ -57,6 +61,7 @@ export class AppCanvas extends AppElement {
         };
         this.apps.on('shown', () => {
             this.trace.entries = [];
+            this.mode = 'design';
             this.render({ start: true });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
@@ -161,7 +166,7 @@ export class AppCanvas extends AppElement {
             </section>`;
         this.dataset.mode = this.mode;
         this.markMode();
-        for (const [name, value] of Object.entries({ '--screen-x': SCREEN.x, '--screen-y': SCREEN.y, '--screen-w': SCREEN.width, '--screen-bar': SCREEN.bar, '--gutter-w': SCREEN.gutter, '--tool-w': TOOL_WIDTH })) {
+        for (const [name, value] of Object.entries({ '--screen-x': SCREEN.x, '--screen-y': SCREEN.y, '--screen-bar': SCREEN.bar, '--gutter-w': SCREEN.gutter, '--tool-w': TOOL_WIDTH })) {
             this.style.setProperty(name, `${value}px`);
         }
         this.surface = this.$('[data-surface]');
@@ -251,7 +256,17 @@ export class AppCanvas extends AppElement {
         return 40 + (1 + this.shownArgs(rule).length) * ROW + 10 + 2 * ROW + 22;
     }
 
-    // Where each rule's tool is: where it was put, or beside what it's wired to.
+    screenWidth() {
+        return this.app?.screen?.size === 'wide' ? SCREEN.wide : SCREEN.width;
+    }
+
+    // Where the tools' column starts, right of the screen and its ports.
+    toolsX() {
+        return SCREEN.x + this.screenWidth() + SCREEN.gutter + TOOLS_GAP;
+    }
+
+    // Where each rule's tool is: where it was put (never over the screen, which may have grown
+    // wider since), or beside what it's wired to.
     positions() {
         const flow = this.app?.flow || [];
         const slots = this.portSlots();
@@ -261,18 +276,19 @@ export class AppCanvas extends AppElement {
             return ys.length ? top + Math.min(...ys) - 48 : null;
         };
         const placed = placeRules(flow, {
-            x: SCREEN.x + SCREEN.width + SCREEN.gutter + TOOLS_GAP,
+            x: this.toolsX(),
             top: 24,
             width: TOOL_WIDTH,
             anchor,
             height: rule => this.nodeHeight(rule),
         });
-        return new Map(flow.map(rule => [rule.id, rule.position || placed.get(rule.id)]));
+        return new Map(flow.map(rule => [rule.id, rule.position ? { x: Math.max(rule.position.x, this.toolsX()), y: rule.position.y } : placed.get(rule.id)]));
     }
 
     renderGraph() {
         if (!this.surface?.isConnected || !this.app) return;
         const app = this.app;
+        this.style.setProperty('--screen-w', `${this.screenWidth()}px`);
         this.$('[data-screen-name]').textContent = app.name || 'App';
         this.style.setProperty('--frame-h', `${Math.max(220, Math.ceil(this.layout.height || 0))}px`);
         this.renderGutter();
@@ -349,7 +365,7 @@ export class AppCanvas extends AppElement {
                     <div class="app-node-status" data-node-status>${escapeHtml(status || (issues.length ? issues[0] : ''))}</div>
                 </div>`;
         }).join('') || '';
-        const right = Math.max(SCREEN.x + SCREEN.width + SCREEN.gutter + TOOLS_GAP + TOOL_WIDTH, ...[...positions.values()].map(at => at.x + TOOL_WIDTH)) + 60;
+        const right = Math.max(this.toolsX() + TOOL_WIDTH, ...[...positions.values()].map(at => at.x + TOOL_WIDTH)) + 60;
         const bottom = Math.max(SCREEN.y + SCREEN.bar + Math.max(220, this.layout.height || 0), ...app.flow.map(rule => positions.get(rule.id).y + this.nodeHeight(rule))) + 60;
         this.style.setProperty('--surface-w', `${right}px`);
         this.style.setProperty('--surface-h', `${bottom}px`);
@@ -467,25 +483,45 @@ export class AppCanvas extends AppElement {
         this.renderGraph();
     }
 
+    element(id) {
+        return this.elements().find(element => element.id === id) || null;
+    }
+
     kindOf(id) {
-        return this.elements().find(element => element.id === id)?.kind || 'static';
+        return this.element(id)?.kind || 'static';
     }
 
     wire(a, b) {
         try {
             let made;
             this.changeFlow(flow => {
-                const result = connect(flow, a, b, { kindOf: id => this.kindOf(id) });
+                const result = connect(flow, a, b, {
+                    kindOf: id => this.kindOf(id),
+                    // A rule that asks for its boxes gives each its own key of the answer.
+                    defaultShow: ({ element, failing, rule }) => (!failing && (rule.prompt || isBox(this.element(element))) ? `{{json.${answerKey(element)}}}` : null),
+                });
                 made = result.made;
-                return result.flow;
+                if (made.kind !== 'route') return result.flow;
+                // A box wired to a tool asks it, in the tool's prompt field, for what the box shows.
+                return result.flow.map(rule => {
+                    const route = rule.id === made.ruleId ? rule.then[made.index] : null;
+                    if (!route || rule.prompt || route.if === 'error' || !isBox(this.element(route.into))) return rule;
+                    const prompt = promptFieldOf(schemaOf(this.toolOf(rule)));
+                    return prompt ? { ...rule, prompt } : rule;
+                });
             });
             if (made.kind === 'already') return this.hint('Those are connected already.');
             const id = made.kind === 'trigger' ? `t:${made.ruleId}:${made.index}`
                 : made.kind === 'arg' ? `a:${made.ruleId}:${made.arg}:${[a, b].map(parsePort).find(port => port.kind === 'el').element}`
                 : `r:${made.ruleId}:${made.index}`;
             this.apps.select({ kind: 'wire', id, ruleId: made.ruleId });
+            const rule = this.app.flow.find(candidate => candidate.id === made.ruleId);
+            const route = made.kind === 'route' ? rule?.then[made.index] : null;
+            const box = route?.if !== 'error' && rule?.prompt ? this.element(route?.into) : null;
             this.hint(made.kind === 'trigger' ? 'Connected: that starts the tool. Choose what it waits for in the Inspector.'
-                : made.kind === 'arg' ? 'Connected: that fills the field.' : 'Connected: the answer goes there. Its transform says what of it shows.');
+                : made.kind === 'arg' ? 'Connected: that fills the field.'
+                : isBox(box) ? `Connected: ${rule.call.toolName} is asked in ${rule.prompt} for the ${BOX_KINDS[box.show].noun} ${box.id} shows.`
+                : 'Connected: the answer goes there. Its transform says what of it shows.');
         } catch (error) {
             if (!(error instanceof FlowError)) throw error;
             this.hint(error.message, { error: true });
@@ -507,16 +543,25 @@ export class AppCanvas extends AppElement {
         return rule;
     }
 
-    addComponent(type, index = null) {
+    // A box from the Library: an output that shows `kind`, named and sized for it.
+    addBox(kind, index = null) {
+        const { label, base } = BOX_KINDS[kind];
+        const ids = (this.app.screen.components || []).map(component => component.id);
+        return this.addComponent('output', index, { id: freeId(base, ids), label, show: kind, width: BOX_WIDTHS[kind], placeholder: 'Filled in when the app runs.' });
+    }
+
+    addComponent(type, index = null, props = {}) {
         const app = this.app;
         if (app.screen.kind === 'html') return this.hint('This screen is HTML, so it has no components: switch it to Components in the Inspector first.', { error: true });
-        const added = newComponent(type, app.screen.components.map(component => component.id));
+        const added = newComponent(type, app.screen.components.map(component => component.id), props);
         this.apps.change(found => {
             const at = index === null ? found.screen.components.length : index;
             found.screen.components.splice(at, 0, added);
         }, { part: 'screen' });
         this.apps.select({ kind: 'element', id: added.id });
-        this.hint(type === 'part' ? `Added ${added.id}. Ask a model for it, or get it from a tool, in the Inspector.` : `Added ${COMPONENT_TYPES[type].label.toLowerCase()} ${added.id}.`);
+        this.hint(type === 'part' ? `Added ${added.id}. Ask a model for it, or get it from a tool, in the Inspector.`
+            : props.show ? `Added ${added.id}. Say what goes in it in the Inspector, then wire a tool's Answer to it: the tool is asked for it.`
+            : `Added ${COMPONENT_TYPES[type].label.toLowerCase()} ${added.id}.`);
     }
 
     applyTransform(transformId, wireId) {
@@ -577,8 +622,10 @@ export class AppCanvas extends AppElement {
             return items.length ? `<p class="app-library-group">${escapeHtml(serverLabel(server))}</p>${items.map(tool => item({ 'library-item': 'tool', server: server.url, tool: tool.name }, tool.name, tool.title || tool.description || '')).join('')}` : '';
         }).join('');
         const transforms = TRANSFORMS.filter(([id, label, help]) => matches(id, label, help)).map(([id, label, help]) => item({ 'library-item': 'transform', transform: id }, label, help));
+        const boxes = Object.entries(BOX_KINDS).filter(([kind, { label, help }]) => matches(kind, label, help, 'box')).map(([kind, { label, help }]) => item({ 'library-item': 'box', show: kind }, label, help, html ? 'disabled' : ''));
         library.querySelector('[data-library-items]').innerHTML = `
             <section><h4>Components${html ? ' <span class="text-secondary">(the screen is HTML)</span>' : ''}</h4>${components.join('') || '<p class="wb-list-note">None match.</p>'}</section>
+            <section><h4>Boxes <span class="text-secondary">for what a tool answers, as on a dashboard</span></h4>${boxes.join('') || '<p class="wb-list-note">None match.</p>'}</section>
             <section><h4>Tools</h4>${tools || `<p class="wb-list-note">${servers.length ? 'None match.' : 'Connect to a server in the Workbench to use its tools.'}</p>`}</section>
             <section><h4>Transforms</h4>${transforms.join('') || '<p class="wb-list-note">None match.</p>'}</section>`;
     }
@@ -586,6 +633,7 @@ export class AppCanvas extends AppElement {
     // A Library item, from its button's data: { libraryItem: 'component' | 'tool' | 'transform', type, server, tool, transform }.
     useLibraryItem(item, { at = null, target = null } = {}) {
         if (item.libraryItem === 'component') return this.addComponent(item.type, at?.index ?? null);
+        if (item.libraryItem === 'box') return this.addBox(item.show, at?.index ?? null);
         if (item.libraryItem === 'tool') return this.addTool(item.server, item.tool, at?.point || null);
         if (item.libraryItem === 'transform') {
             const selection = this.apps.selection;
@@ -610,7 +658,7 @@ export class AppCanvas extends AppElement {
         event.preventDefault();
         const surface = this.surface.getBoundingClientRect();
         const point = { x: event.clientX - surface.left, y: event.clientY - surface.top };
-        if (data.libraryItem === 'component') {
+        if (data.libraryItem === 'component' || data.libraryItem === 'box') {
             // Before the first component whose middle is below where it was dropped.
             const top = SCREEN.y + SCREEN.bar;
             const components = this.app.screen.components || [];
@@ -643,16 +691,37 @@ export class AppCanvas extends AppElement {
         if (!start) return;
         this.querySelectorAll('[data-port]').forEach(port => port.classList.toggle('app-port-can', canConnect(from, port.dataset.port)));
         this.classList.add('app-wiring');
-        const surface = () => this.surface.getBoundingClientRect();
-        const move = moved => {
-            const box = surface();
-            const to = { x: moved.clientX - box.left, y: moved.clientY - box.top, out: -start.out };
+        const scroller = this.$('[data-canvas-scroll]');
+        let pointer = null;
+        let frame = 0;
+        const follow = () => {
+            const box = this.surface.getBoundingClientRect();
             draft.hidden = false;
-            draft.setAttribute('d', this.curve(start, to));
+            draft.setAttribute('d', this.curve(start, { x: pointer.clientX - box.left, y: pointer.clientY - box.top, out: -start.out }));
+        };
+        // Near an edge of the canvas, it scrolls, so a wire can reach what's out of view.
+        const scroll = () => {
+            frame = 0;
+            if (!pointer) return;
+            const box = scroller.getBoundingClientRect();
+            const speed = (at, low, high) => (at < low + EDGE ? -Math.ceil((low + EDGE - at) / 3) : at > high - EDGE ? Math.ceil((at - high + EDGE) / 3) : 0);
+            const dx = speed(pointer.clientX, box.left, box.right);
+            const dy = speed(pointer.clientY, box.top, box.bottom);
+            if (!dx && !dy) return;
+            scroller.scrollBy(dx, dy);
+            follow();
+            frame = requestAnimationFrame(scroll);
+        };
+        const move = moved => {
+            pointer = moved;
+            follow();
+            if (!frame) frame = requestAnimationFrame(scroll);
         };
         const end = ended => {
             document.removeEventListener('pointermove', move);
             document.removeEventListener('pointerup', end);
+            pointer = null;
+            cancelAnimationFrame(frame);
             draft.hidden = true;
             this.classList.remove('app-wiring');
             this.querySelectorAll('.app-port-can').forEach(port => port.classList.remove('app-port-can'));
@@ -741,8 +810,11 @@ export class AppCanvas extends AppElement {
     }
 
     clicked(event) {
-        if (performance.now() - (this.draggedAt ?? -Infinity) < 100) return;
         const target = event.target;
+        if (this.draggedAt && performance.now() - this.draggedAt < 100 && target.closest('[data-surface]')) {
+            this.draggedAt = 0;
+            return;
+        }
         const button = target.closest('button');
         if (button?.dataset.toggleLibrary !== undefined) return this.toggleLibrary();
         if (button?.dataset.libraryItem) {

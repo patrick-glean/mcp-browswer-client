@@ -7,6 +7,7 @@ import { elementIdProblem } from '../flow.js';
 import { COMPONENT_PROPS, COMPONENT_TYPES, newComponent } from '../screen.js';
 import { AppElement } from './base.js';
 import { HtmlSourceEditor } from './html-source.js';
+import { propField, propValue } from './props.js';
 
 export class AppScreen extends AppElement {
     setup(signal) {
@@ -61,6 +62,10 @@ export class AppScreen extends AppElement {
                         <button type="button" class="wb-chip" data-screen-kind="components" aria-pressed="${!html}">Components</button>
                         <button type="button" class="wb-chip" data-screen-kind="html" aria-pressed="${html}" title="HTML a model or a tool makes, or that you paste in">HTML</button>
                     </div>
+                    <div class="wb-chips" role="group" aria-label="How wide the screen is">
+                        <button type="button" class="wb-chip" data-screen-size="narrow" aria-pressed="${screen.size !== 'wide'}" title="One column, as a form or a phone shows it">Narrow</button>
+                        <button type="button" class="wb-chip" data-screen-size="wide" aria-pressed="${screen.size === 'wide'}" title="Room for boxes side by side, as a dashboard has">Wide</button>
+                    </div>
                 </header>
                 ${html ? this.htmlEditor() : this.componentsEditor()}
             </section>`;
@@ -71,7 +76,7 @@ export class AppScreen extends AppElement {
         for (const component of screen.components) {
             const row = this.$(`[data-component="${CSS.escape(component.id)}"]`);
             row.querySelector('[data-component-id]').value = component.id;
-            for (const field of row.querySelectorAll('[data-prop]')) field.value = component[field.dataset.prop] ?? '';
+            for (const field of row.querySelectorAll('[data-prop]')) field.value = propValue(component, field, field.dataset.prop);
             if (component.type === 'part') {
                 const id = component.id;
                 this.addSource(row.querySelector('[data-part-source]'),
@@ -103,10 +108,8 @@ export class AppScreen extends AppElement {
                     <button type="button" class="btn-icon btn-sm btn-tertiary" data-remove-component aria-label="Remove ${escapeHtml(component.id)}"><span class="icon icon-x" aria-hidden="true"></span></button>
                 </div>
                 <p class="app-field-error text-error" data-id-error hidden></p>
-                <div class="app-component-props">${(COMPONENT_PROPS[component.type] || []).map(([prop, label, kind]) => `
-                    <label class="app-field ${kind === 'number' ? 'app-field-narrow' : ''}"><span>${label}</span>${kind === 'lines'
-                        ? `<textarea rows="2" data-prop="${prop}"></textarea>`
-                        : `<input type="text" data-prop="${prop}" ${kind === 'number' ? 'inputmode="numeric"' : ''} autocomplete="off">`}</label>`).join('')}
+                <div class="app-component-props">${(COMPONENT_PROPS[component.type] || []).map(([prop, label, kind, options]) => `
+                    <label class="app-field ${kind === 'number' ? 'app-field-narrow' : ''}"><span>${label}</span>${propField(prop, kind, options, 'data-prop', { rows: 2 })}</label>`).join('')}
                 </div>
                 ${component.type === 'part' ? '<div class="app-part-source" data-part-source></div>' : ''}
             </li>`).join('');
@@ -159,6 +162,7 @@ export class AppScreen extends AppElement {
         const { dataset } = button;
         const row = button.closest('[data-component]');
         if (dataset.screenKind) return this.apps.setScreenKind(dataset.screenKind);
+        if (dataset.screenSize) return this.apps.setScreenSize(dataset.screenSize);
         if (dataset.addComponent) {
             const added = newComponent(dataset.addComponent, this.screen.components.map(component => component.id));
             this.change(screen => { screen.components.push(added); }, { render: true });

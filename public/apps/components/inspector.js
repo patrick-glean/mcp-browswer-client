@@ -3,11 +3,13 @@
 // tool, as its rule; a wire, as the part of its rule it is; or Start.
 
 import { escapeHtml } from '../../workbench/util.js';
+import { BOX_KINDS } from '../boxes.js';
 import { elementIdProblem, EVENTS, routeSummary } from '../flow.js';
 import { wiresOf } from '../graph.js';
 import { COMPONENT_PROPS, COMPONENT_TYPES, ELEMENT_KINDS } from '../screen.js';
 import { AppElement } from './base.js';
 import { HtmlSourceEditor } from './html-source.js';
+import { propField, propValue } from './props.js';
 import { RuleEditor } from './rule-editor.js';
 
 export class AppInspector extends AppElement {
@@ -43,6 +45,7 @@ export class AppInspector extends AppElement {
                 const component = app.screen.components.find(candidate => candidate.id === id);
                 if (component) component[prop] = value;
             }, { part: 'screen', by: this });
+            if (prop === 'show') this.markBox(value);
         }, { signal });
         this.addEventListener('change', event => {
             if (event.target.matches('[data-inspect-id]')) this.rename(event.target);
@@ -100,11 +103,16 @@ export class AppInspector extends AppElement {
                 <button type="button" class="wb-chip" data-screen-kind="components" aria-pressed="${!html}">Components</button>
                 <button type="button" class="wb-chip" data-screen-kind="html" aria-pressed="${html}" title="HTML a model or a tool makes, or that you paste in">HTML</button>
             </div>
-            ${html ? '<div data-screen-source></div>' : `<p class="text-secondary">${screen.components.length} components. Add more from the Library, among them a part a model or a tool makes, such as a dashboard.</p>`}
+            <div class="wb-chips" role="group" aria-label="How wide the screen is">
+                <button type="button" class="wb-chip" data-screen-size="narrow" aria-pressed="${screen.size !== 'wide'}" title="One column, as a form or a phone shows it">Narrow</button>
+                <button type="button" class="wb-chip" data-screen-size="wide" aria-pressed="${screen.size === 'wide'}" title="Room for boxes side by side, as a dashboard has">Wide</button>
+            </div>
+            ${html ? '<div data-screen-source></div>' : `<p class="text-secondary">${screen.components.length} components. Add more from the Library: boxes for what a tool answers (a chart, a list, a number), or a part a model or a tool makes.</p>`}
             <h4 class="app-inspector-section">How it works</h4>
             <ul class="app-inspector-tips">
                 <li>Drag from an element's ● to a tool's <b>Run</b> to start the tool, or to one of its fields to fill that field with what the element holds.</li>
                 <li>Drag from a tool's <b>Answer</b> or <b>Error</b> to an element to show it there. The label on the wire is its transform: what of the answer shows.</li>
+                <li>A <b>box</b> says what it shows and what goes in it. Wired to a tool's Answer, it adds to the tool's prompt what it needs, so the layout writes the format of the answer.</li>
                 <li><b>Start</b> begins the app. Wire it to a tool's Run to call the tool when the app opens, such as to fill a dashboard.</li>
                 <li><b>Run</b> lets you use the screen; the wires light up as their rules run, and What happened says each step.</li>
             </ul>`;
@@ -151,9 +159,8 @@ export class AppInspector extends AppElement {
             ${this.head(COMPONENT_TYPES[component.type]?.label || component.type, component.id)}
             <label class="app-field"><span>id: how the flow names it, as {{${escapeHtml(component.id)}}}</span><input type="text" class="mono" data-inspect-id autocomplete="off" spellcheck="false"></label>
             <p class="app-field-error text-error" data-id-error hidden></p>
-            ${props.map(([prop, label, kind]) => `<label class="app-field"><span>${label}</span>${kind === 'lines'
-                ? `<textarea rows="3" data-inspect-prop="${prop}"></textarea>`
-                : `<input type="text" data-inspect-prop="${prop}" ${kind === 'number' ? 'inputmode="numeric"' : ''} autocomplete="off">`}</label>`).join('')}
+            ${props.map(([prop, label, kind, options]) => `<label class="app-field"><span>${label}</span>${propField(prop, kind, options, 'data-inspect-prop')}</label>`).join('')}
+            ${component.type === 'output' ? '<p class="app-note text-secondary" data-box-note></p>' : ''}
             ${component.type === 'part' ? '<h4 class="app-inspector-section">Where it comes from</h4><div data-part-source></div>' : ''}
             <div class="button-row app-inspector-actions">
                 <button type="button" class="btn-sm" data-move-component="-1" ${index === 0 ? 'disabled' : ''}>Move up</button>
@@ -163,7 +170,8 @@ export class AppInspector extends AppElement {
             <h4 class="app-inspector-section">Connections</h4>
             ${this.connections(id)}`;
         this.$('[data-inspect-id]').value = component.id;
-        for (const field of this.querySelectorAll('[data-inspect-prop]')) field.value = component[field.dataset.inspectProp] ?? '';
+        for (const field of this.querySelectorAll('[data-inspect-prop]')) field.value = propValue(component, field, field.dataset.inspectProp);
+        if (component.type === 'output') this.markBox(component.show);
         if (component.type === 'part') {
             this.source = new HtmlSourceEditor({
                 shell: this.shell, workbench: this.workbench, apps: this.apps, container: this.$('[data-part-source]'), part: true, signal: this.signal,
@@ -172,6 +180,16 @@ export class AppInspector extends AppElement {
             });
             this.source.render();
         }
+    }
+
+    // An output's settings follow what it shows: an example of what goes in it, and what that's for.
+    markBox(kind) {
+        const box = BOX_KINDS[kind] || BOX_KINDS.text;
+        const about = this.$('[data-inspect-prop="about"]');
+        if (about) about.placeholder = `For example: ${box.example}`;
+        const note = this.$('[data-box-note]');
+        const as = kind === 'html' ? 'HTML' : box === BOX_KINDS.text ? 'text' : `a ${box.noun}`;
+        if (note) note.textContent = `Say what goes here, and a tool whose Answer is wired to it is asked for it as ${as}, which the box draws.`;
     }
 
     mountRuleEditor(ruleId, focus = null) {
@@ -249,6 +267,7 @@ export class AppInspector extends AppElement {
         if (!button || button.disabled || button.closest('[data-rule-editor], [data-part-source], [data-screen-source]')) return;
         const { dataset } = button;
         if (dataset.screenKind) return this.apps.setScreenKind(dataset.screenKind);
+        if (dataset.screenSize) return this.apps.setScreenSize(dataset.screenSize);
         if (dataset.selectWire) return this.apps.select({ kind: 'wire', id: dataset.selectWire, ruleId: dataset.rule });
         if (dataset.removeWire) return this.apps.removeWire(dataset.removeWire);
         const id = this.apps.selection?.id;

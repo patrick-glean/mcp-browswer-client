@@ -360,6 +360,39 @@ app-preview {
     -webkit-line-clamp: 2;
 }
 
+.app-note {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+/* ---------- Asks: where a rule's call asks for what its boxes show ---------- */
+
+.app-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.app-prompt-preview summary {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-prompt-preview pre {
+    max-height: 240px;
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    overflow: auto;
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .app-args {
     gap: 10px;
 }

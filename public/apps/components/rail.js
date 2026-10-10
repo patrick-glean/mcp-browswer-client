@@ -16,6 +16,7 @@ export class AppsRail extends AppElement {
             if (!button) return;
             if (button.dataset.showApp) this.apps.show(button.dataset.showApp);
             if (button.id === 'newAppBtn') this.apps.create();
+            if (button.id === 'newDashboardBtn') this.apps.create('dashboard');
             if (button.id === 'importAppBtn') this.$('#importAppInput').click();
         }, { signal });
         this.addEventListener('change', event => {
@@ -48,6 +49,7 @@ export class AppsRail extends AppElement {
                 </ul>
                 <div class="apps-rail-actions">
                     <button type="button" id="newAppBtn" class="btn-sm"><span class="icon icon-plus" aria-hidden="true"></span>New app</button>
+                    <button type="button" id="newDashboardBtn" class="btn-sm" title="A dashboard whose boxes each ask one tool for their piece of its answer: Glean's chat if you've added Glean, else the Chat app's model"><span class="icon icon-plus" aria-hidden="true"></span>Dashboard</button>
                     <button type="button" id="importAppBtn" class="btn-sm btn-tertiary" title="A zip from Download, or an app.dml file">Import…</button>
                     <input type="file" id="importAppInput" accept=".zip,.dml,.xml,application/zip,application/xml,text/xml" hidden>
                 </div>

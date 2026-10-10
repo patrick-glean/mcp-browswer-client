@@ -2,9 +2,10 @@
 // calls with what, and then where its answer goes, if it works and if it fails. The Outline's Flow
 // shows one for each rule, and the Inspector one for the rule picked on the canvas.
 
-import { escapeHtml } from '../../workbench/util.js';
+import { escapeHtml, schemaOf } from '../../workbench/util.js';
+import { answerKey, asksOf, BOX_KINDS, formatRequest, isBox } from '../boxes.js';
 import {
-    ANSWER_NAMES, DEFAULT_SHOW, describeRule, displayValue, ELEMENT_ID, EVENTS, EVENTS_BY_KIND, flowProblems, ROUTE_HOW, trigger, triggersOf,
+    ANSWER_NAMES, DEFAULT_SHOW, describeRule, displayValue, ELEMENT_ID, EVENTS, EVENTS_BY_KIND, flowProblems, listed, ROUTE_HOW, trigger, triggersOf,
 } from '../flow.js';
 import { CallEditor } from './call-editor.js';
 
@@ -124,6 +125,14 @@ export class RuleEditor {
                     <span class="app-rule-label">Call</span>
                     <div class="app-call" data-rule-call></div>
                 </div>
+                <div class="app-rule-row" data-prompt-row hidden>
+                    <span class="app-rule-label">Asks</span>
+                    <div class="app-prompt">
+                        <label class="app-field"><span>What its boxes need goes in</span><select data-prompt-field aria-label="The field the call asks for its boxes in"></select></label>
+                        <p class="app-note text-secondary" data-prompt-note></p>
+                        <details class="app-prompt-preview" data-prompt-details><summary>What it adds to the prompt</summary><pre class="mono" data-prompt-preview></pre></details>
+                    </div>
+                </div>
                 <div class="app-rule-row">
                     <span class="app-rule-label">Then</span>
                     <div class="app-routes">
@@ -219,11 +228,41 @@ export class RuleEditor {
         }).join('')}` : '';
     }
 
+    // Where the call asks for what the rule's boxes show, and what it adds there. Shown once the
+    // rule fills a box (or asks in a field).
+    fillPrompt() {
+        const rule = this.rule;
+        const row = this.container.querySelector('[data-prompt-row]');
+        if (!rule || !row) return;
+        const elements = this.apps.elements();
+        const asks = asksOf(rule, elements);
+        const fillsBoxes = (rule.then || []).some(route => route.if !== 'error' && isBox(elements.find(element => element.id === route.into)));
+        row.hidden = !rule.prompt && !fillsBoxes && !asks.length;
+        if (row.hidden) return;
+        const fields = Object.entries(schemaOf(this.callEditor?.tool)?.properties || {}).filter(([, prop]) => prop?.type === 'string').map(([key]) => key);
+        if (rule.prompt && !fields.includes(rule.prompt)) fields.unshift(rule.prompt);
+        const select = row.querySelector('[data-prompt-field]');
+        if (document.activeElement !== select) {
+            select.innerHTML = `<option value="">Nowhere: don't ask for them</option>${fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(field)}</option>`).join('')}`;
+            select.value = rule.prompt || '';
+        }
+        const tool = rule.call?.toolName || 'The tool';
+        row.querySelector('[data-prompt-note]').textContent = !rule.prompt
+            ? 'Its boxes each take a piece of a JSON answer. Choose the field its question goes in, and the call asks there for what each box shows.'
+            : asks.length
+                ? `Each call adds to ${rule.prompt} a request for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}, as one JSON object, from what each box says goes in it.`
+                : `Wire ${tool}'s Answer to a box, and the call asks in ${rule.prompt} for what the box shows.`;
+        const details = row.querySelector('[data-prompt-details]');
+        details.hidden = !rule.prompt || !asks.length;
+        row.querySelector('[data-prompt-preview]').textContent = asks.length ? formatRequest(asks, { size: this.apps.app?.screen?.size }) : '';
+    }
+
     // The sentence and what keeps the rule from running, after any change to it.
     update() {
         const rule = this.rule;
         const card = this.container.querySelector('.app-rule');
         if (!rule || !card) return;
+        this.fillPrompt();
         card.querySelector('[data-sentence]').textContent = describeRule(rule, {
             elementName: element => element || '…',
             serverName: url => (url ? this.apps.serverName(url) : '…'),
@@ -277,9 +316,21 @@ export class RuleEditor {
             });
             this.fill();
         } else if (target.matches('[data-route-into]')) {
-            this.editRoute(target, route => { route.into = target.value; });
+            // An answer sent to a box takes the box's key of it, unless it was made to show more.
+            const box = isBox(this.apps.elements().find(element => element.id === target.value));
+            this.editRoute(target, route => {
+                const plain = route.show === DEFAULT_SHOW.ok || route.show === `{{json.${answerKey(route.into)}}}`;
+                if (route.if !== 'error' && plain && (box || this.rule.prompt)) route.show = `{{json.${answerKey(target.value)}}}`;
+                route.into = target.value;
+            });
+            this.fill();
         } else if (target.matches('[data-route-how]')) {
             this.editRoute(target, route => { route.how = target.value; });
+        } else if (target.matches('[data-prompt-field]')) {
+            this.change(rule => {
+                if (target.value) rule.prompt = target.value;
+                else delete rule.prompt;
+            });
         }
     }
 
