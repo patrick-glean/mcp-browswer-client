@@ -1,32 +1,30 @@
-// The app builder's Try it: the app running, as people will use it, and what happened as they
-// used it, step by step: what they did, each call with what it sent, the answer, and where it went.
+// The Outline's Try it: the app running, as people will use it, and what happened as they used it.
+// It runs only while the Outline shows; the canvas runs the app in its own frame.
 
 import { debounce, escapeHtml } from '../../workbench/util.js';
 import { AppRunner } from '../runner.js';
 import { AppElement } from './base.js';
-
-const MAX_TRACE = 200;
-const MARKS = { event: '●', call: '→', ok: '✓', error: '!', route: '↳', note: '·' };
-
-const clock = time => new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+import { TraceList } from './trace.js';
 
 export class AppPreview extends AppElement {
     setup(signal) {
-        this.entries = [];
+        this.trace = new TraceList();
         this.waiting = null;
         this.runner = new AppRunner({
             shell: this.shell,
             workbench: this.workbench,
             getApp: () => this.apps.app,
-            onTrace: entry => this.addTrace(entry),
-            onSize: height => this.style.setProperty('--app-frame-height', `${Math.ceil(height)}px`),
+            onTrace: entry => this.trace.add(entry),
+            onLayout: ({ height }) => this.style.setProperty('--app-frame-height', `${Math.ceil(height)}px`),
+            onAnswer: (ruleId, answer) => this.apps.setAnswer(ruleId, answer),
             signal,
         });
         this.reloadSoon = debounce(() => this.load({ start: false }), 300);
         this.apps.on('shown', () => {
-            this.entries = [];
-            this.render();
+            this.trace.entries = [];
+            this.render({ start: true });
         }, signal);
+        this.apps.on('view', () => this.render({ start: false }), signal);
         this.apps.on('app', ({ part }) => {
             if (part === 'screen') this.reloadSoon();
             if (part === 'flow') this.runner.flowChanged();
@@ -40,17 +38,15 @@ export class AppPreview extends AppElement {
             const button = event.target.closest('button');
             if (!button) return;
             if (button.dataset.restart !== undefined) this.restart();
-            if (button.dataset.clearTrace !== undefined) {
-                this.entries = [];
-                this.renderTrace();
-            }
+            if (button.dataset.clearTrace !== undefined) this.trace.clear();
             if (button.dataset.openRun) this.apps.openRun(button.dataset.openRun);
         }, { signal });
     }
 
-    render() {
+    render({ start = true } = {}) {
         const app = this.apps.app;
-        if (!app) {
+        if (!app || this.apps.view !== 'outline') {
+            this.runner.stop();
             this.innerHTML = '';
             this.frame = null;
             return;
@@ -72,13 +68,13 @@ export class AppPreview extends AppElement {
                 <ol class="app-trace" data-trace aria-live="polite"></ol>
             </section>`;
         this.frame = this.$('iframe');
-        this.renderTrace();
-        this.load({ start: true });
+        this.trace.attach(this.$('[data-trace]'));
+        this.load({ start });
     }
 
     // Only a screen someone can see runs, so an app's "when it opens" calls wait until then.
     load({ start }) {
-        if (!this.frame || !this.apps.app) return;
+        if (!this.frame || !this.apps.app || this.apps.view !== 'outline') return;
         if (document.body.dataset.mode !== 'apps') {
             this.waiting = { start: start || !!this.waiting?.start };
             return;
@@ -88,35 +84,8 @@ export class AppPreview extends AppElement {
     }
 
     restart() {
-        this.addTrace({ time: Date.now(), kind: 'note', text: 'Restarted the app.' });
+        if (this.apps.view !== 'outline') return;
+        this.trace.add({ time: Date.now(), kind: 'note', text: 'Restarted the app.' });
         this.load({ start: true });
-    }
-
-    addTrace(entry) {
-        this.entries.push(entry);
-        if (this.entries.length > MAX_TRACE) this.entries.shift();
-        const list = this.$('[data-trace]');
-        if (!list) return;
-        if (this.entries.length === 1 || list.childElementCount > MAX_TRACE) return this.renderTrace();
-        list.insertAdjacentHTML('beforeend', this.traceRow(entry));
-        list.scrollTop = list.scrollHeight;
-    }
-
-    traceRow(entry) {
-        return `
-            <li class="app-trace-entry app-trace-${escapeHtml(entry.kind)}">
-                <time class="app-trace-time">${clock(entry.time)}</time>
-                <span class="app-trace-mark" aria-hidden="true">${MARKS[entry.kind] || '·'}</span>
-                <span class="app-trace-text">${escapeHtml(entry.text)}${entry.runId ? ` <button type="button" class="link-button" data-open-run="${escapeHtml(entry.runId)}">Open in the Workbench</button>` : ''}</span>
-            </li>`;
-    }
-
-    renderTrace() {
-        const list = this.$('[data-trace]');
-        if (!list) return;
-        list.innerHTML = this.entries.length
-            ? this.entries.map(entry => this.traceRow(entry)).join('')
-            : '<li class="app-trace-empty text-secondary">Use the app: each click, call and answer shows up here, in order.</li>';
-        list.scrollTop = list.scrollHeight;
     }
 }

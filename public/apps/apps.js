@@ -5,20 +5,30 @@
 // Events, with what their detail holds:
 //   list       apps were added, renamed or deleted
 //   shown      the page shows another app, or the Chat app      { id }
-//   app        the shown app changed       { part: 'screen' | 'flow' | 'name' | 'version', by }
+//   app        the shown app changed
+//              { part: 'screen' | 'flow' | 'layout' | 'name' | 'version', by }
+//   view       the builder switched between Canvas and Outline  { view }
+//   select     what's selected on the canvas changed            { selection }
+//   answer     a rule got an answer, for picking values from it { ruleId }
 //   restart    run the shown app again from the start
 //   highlight  point these elements out on the screen           { elements }
-//   trace      something the running app did                    { entry }
 
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
-import { fromDml, serversOf, toDml } from './dml.js';
-import { describeRule, newRule, renameInFlow } from './flow.js';
-import { elementsOf, newComponent, screenHtml } from './screen.js';
+import { askPrompt, modelCall } from './ask.js';
+import { fromDml, partFile, serversOf, toDml } from './dml.js';
+import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult } from './flow.js';
+import { disconnect, wiresOf } from './graph.js';
+import { componentsHtml, elementsOf, htmlFromResult, newComponent, sanitizePart, screenHtml } from './screen.js';
 import * as store from './store.js';
 import { unzip, zip } from './zip.js';
 
 export const CHAT = 'chat';
 const SHOWN_KEY = 'appsShown';
+const VIEW_KEY = 'appsView';
+export const VIEWS = { canvas: 'Canvas', outline: 'Outline' };
+
+// An app as the builder keeps it, whatever shape it was saved in.
+export const normalizeApp = app => ({ ...app, flow: (app.flow || []).map(normalizeRule) });
 const APP_URL = 'https://patrick-glean.github.io/mcp-browswer-client/';
 
 export const slug = name => String(name || 'app').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60) || 'app';
@@ -75,6 +85,8 @@ export function readmeFor(app, { serverName = url => url } = {}) {
     };
     const servers = serversOf(app);
     const rules = (app.flow || []).map((rule, index) => `${index + 1}. ${describeRule(rule, { elementName, serverName })}`);
+    const parts = (app.screen?.components || []).filter(component => component.type === 'part');
+    const made = part => (part.ask ? `made by a model asked for "${part.ask}"` : part.from ? `made by a call to \`${part.from.toolName}\` on ${serverName(part.from.serverUrl)}` : 'written as HTML');
     return `# ${app.name}
 
 An app built in MCP Browser Client${app.version ? `, version ${app.version}` : ''}.${app.description ? `\n\n${app.description}` : ''}
@@ -82,7 +94,7 @@ An app built in MCP Browser Client${app.version ? `, version ${app.version}` : '
 ## What's here
 
 - \`index.html\`: the screen, what people see. ${app.screen?.kind === 'html' ? (app.screen.from ? `A call to \`${app.screen.from.toolName}\` on ${serverName(app.screen.from.serverUrl)} made it.` : 'It was written as HTML.') : 'It was built from components, which app.dml lists.'}
-- \`app.dml\`: the screen's components and the flow, what happens when people use it, as markup.
+- \`app.dml\`: the screen's components and the flow, what happens when people use it, as markup.${parts.map(part => `\n- \`${partFile(part.id)}\`: the part \`${part.id}\`, ${made(part)}. On the screen its ids start with \`${part.id}.\`.`).join('')}
 
 ## The flow
 
@@ -108,6 +120,10 @@ export class Apps {
         this.app = null;
         this.saveTimer = null;
         this.elementsCache = null;
+        this.view = VIEWS[localStorage.getItem(VIEW_KEY)] ? localStorage.getItem(VIEW_KEY) : 'canvas';
+        this.selection = null;
+        // Each rule's last answer, while the page is open: Map<ruleId, answer>.
+        this.answers = new Map();
     }
 
     on(type, listener, signal) {
@@ -123,7 +139,7 @@ export class Apps {
     }
 
     async load() {
-        this.list = (await store.listApps()).sort((a, b) => a.createdAt - b.createdAt);
+        this.list = (await store.listApps()).map(normalizeApp).sort((a, b) => a.createdAt - b.createdAt);
         const shown = localStorage.getItem(SHOWN_KEY);
         this.show(this.list.some(app => app.id === shown) ? shown : CHAT);
         document.addEventListener('visibilitychange', () => {
@@ -136,8 +152,29 @@ export class Apps {
         this.app = id === CHAT ? null : this.list.find(app => app.id === id) || null;
         this.shownId = this.app ? this.app.id : CHAT;
         this.elementsCache = null;
+        this.selection = null;
+        this.answers.clear();
         localStorage.setItem(SHOWN_KEY, this.shownId);
         this.emit('shown', { id: this.shownId });
+    }
+
+    showView(view) {
+        if (!VIEWS[view] || view === this.view) return;
+        this.view = view;
+        localStorage.setItem(VIEW_KEY, view);
+        this.emit('view', { view });
+    }
+
+    // What's selected on the canvas: { kind: 'element', id }, { kind: 'rule', id },
+    // { kind: 'wire', id, ruleId }, { kind: 'start' }, or null for the app itself.
+    select(selection) {
+        this.selection = selection || null;
+        this.emit('select', { selection: this.selection });
+    }
+
+    setAnswer(ruleId, answer) {
+        this.answers.set(ruleId, answer);
+        this.emit('answer', { ruleId });
     }
 
     // --- Edits: applied at once, saved after a pause ---
@@ -170,6 +207,73 @@ export class Apps {
     elementName(id) {
         const element = this.elements().find(candidate => candidate.id === id);
         return element && element.label !== id ? `${element.label} (${id})` : id;
+    }
+
+    // --- HTML from a tool, or from a model: for an HTML screen, and for parts ---
+
+    // The Chat app's model, as the Chat app keeps it.
+    chatModel() {
+        try {
+            return JSON.parse(localStorage.getItem('chatModel')) || null;
+        } catch {
+            return null;
+        }
+    }
+
+    // Calls a tool for HTML: { html, call } with the HTML its answer holds (kept as a part keeps it,
+    // with `part`), or { error }. The call is a run from the app.
+    async htmlFrom(call, { part = false } = {}) {
+        const server = this.shell.servers[call?.serverUrl];
+        if (!call?.toolName || !server) return { error: 'Choose a server and the tool that makes the HTML first.' };
+        const tool = (server.tools || []).find(candidate => candidate.name === call.toolName) || { name: call.toolName };
+        let sentArgs;
+        try {
+            ({ sentArgs } = callArguments(call, { variables: this.workbench.variables, environmentName: this.workbench.environment?.name, schema: schemaOf(tool) }));
+        } catch (error) {
+            return { error: error.message };
+        }
+        const message = await this.shell.runTool({ url: server.url, tool, args: call.args || {}, sentArgs, show: false, source: 'app' });
+        const answer = answerOf(message);
+        if (!answer.ok) return { error: `${tool.name} failed: ${answer.values.error}` };
+        const html = htmlFromResult(toolResult(message.result));
+        if (!html) return { error: `${tool.name} answered, but not with HTML: “${answer.values.text.slice(0, 80)}”` };
+        return { html: part ? sanitizePart(html) : html, call };
+    }
+
+    // Asks the Chat app's model to make it, or with `current` to change that: { html, call } or { error }.
+    async htmlFromModel(ask, { part = false, current = '' } = {}) {
+        if (!String(ask ?? '').trim()) return { error: 'Say what to make first.' };
+        let call;
+        try {
+            call = modelCall(this.chatModel(), askPrompt(ask, { part, current }));
+        } catch (error) {
+            return { error: error.message };
+        }
+        return this.htmlFrom(call, { part });
+    }
+
+    // A screen of components, or of HTML. HTML starts as what the components make, so there's
+    // something to change.
+    setScreenKind(kind) {
+        if (!this.app || kind === this.app.screen.kind) return;
+        this.change(app => {
+            const screen = app.screen;
+            screen.kind = kind;
+            if (kind === 'html' && !screen.html?.trim()) screen.html = componentsHtml(screen.components, { title: app.name });
+            if (kind === 'html' && !screen.from) screen.from = { serverUrl: '', toolName: '', args: {} };
+            screen.components ??= [];
+        }, { part: 'screen' });
+    }
+
+    // Takes a wire's part out of its rule (graph.js). Returns the wire, or null when there's none.
+    removeWire(id) {
+        const wire = wiresOf(this.app?.flow || [], this.elements().map(element => element.id)).find(candidate => candidate.id === id);
+        if (!wire) return null;
+        const rule = this.app.flow.find(candidate => candidate.id === wire.ruleId);
+        const tool = (this.shell.servers[rule.call?.serverUrl]?.tools || []).find(candidate => candidate.name === rule.call?.toolName);
+        this.change(app => { app.flow = disconnect(app.flow, wire, { required: schemaOf(tool)?.required || [] }); }, { part: 'flow' });
+        this.select({ kind: 'rule', id: wire.ruleId });
+        return wire;
     }
 
     // Changes a component's id, taking the flow's references with it.
@@ -243,9 +347,11 @@ export class Apps {
         if (standalone) {
             download(`${base}.dml`, toDml(app, { standalone: true, serverNames }), 'application/xml');
         } else {
+            const parts = app.screen?.kind === 'html' ? [] : (app.screen?.components || []).filter(component => component.type === 'part');
             const files = [
                 { name: 'app.dml', data: toDml(app, { serverNames }) },
                 { name: 'index.html', data: screenHtml(app) },
+                ...parts.map(part => ({ name: partFile(part.id), data: part.html || '' })),
                 { name: 'README.md', data: readmeFor(app, { serverName: url => this.serverName(url) }) },
             ];
             const link = document.createElement('a');
@@ -268,7 +374,10 @@ export class Apps {
             const files = {};
             if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
                 const decoder = new TextDecoder();
-                for (const [name, data] of await unzip(bytes)) files[name.replace(/^[^/]+\/(?=[^/]+$)/, '')] = decoder.decode(data);
+                const entries = [...await unzip(bytes)];
+                // A download zipped again from its folder has that folder in front of every name.
+                const folder = entries.some(([name]) => name === 'app.dml') ? '' : entries.find(([name]) => /^[^/]+\/app\.dml$/.test(name))?.[0].slice(0, -'app.dml'.length) || '';
+                for (const [name, data] of entries) files[name.startsWith(folder) ? name.slice(folder.length) : name] = decoder.decode(data);
                 dml = files['app.dml'] ?? Object.entries(files).find(([name]) => name.endsWith('.dml'))?.[1];
                 if (dml === undefined) throw new Error("there's no app.dml in it");
             } else {
@@ -278,7 +387,7 @@ export class Apps {
             const now = Date.now();
             const existing = this.list.find(app => app.id === imported.id);
             const app = {
-                ...imported,
+                ...normalizeApp(imported),
                 id: imported.id || crypto.randomUUID(),
                 createdAt: existing?.createdAt || now,
                 updatedAt: now,

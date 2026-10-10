@@ -153,7 +153,12 @@
                     </section>
                     <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
                         <app-header></app-header>
-                        <div class="app-builder-body">
+                        <!-- Canvas: the screen running, with its wires to tools; Outline: the same app as cards. -->
+                        <div class="app-canvas-view" data-app-view="canvas">
+                            <app-canvas></app-canvas>
+                            <app-inspector role="region" aria-label="Inspector"></app-inspector>
+                        </div>
+                        <div class="app-builder-body" data-app-view="outline" hidden>
                             <div class="app-build">
                                 <app-screen></app-screen>
                                 <app-flow></app-flow>

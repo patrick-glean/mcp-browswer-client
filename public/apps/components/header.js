@@ -3,12 +3,14 @@
 // Duplicate and Delete in its menu.
 
 import { confirmThen, escapeHtml, timeAgo } from '../../workbench/util.js';
+import { VIEWS } from '../apps.js';
 import { AppElement } from './base.js';
 
 export class AppHeader extends AppElement {
     setup(signal) {
         this.apps.on('shown', () => this.render(), signal);
         this.apps.on('app', () => this.renderVersion(), signal);
+        this.apps.on('view', () => this.markView(), signal);
         this.addEventListener('input', event => {
             if (event.target.id === 'appName') this.apps.change(app => { app.name = event.target.value; }, { part: 'name', by: this });
             if (event.target.id === 'appDescription') this.apps.change(app => { app.description = event.target.value; }, { part: 'name', by: this });
@@ -24,6 +26,7 @@ export class AppHeader extends AppElement {
             if (!button) return;
             // Delete asks for a second click, so its menu stays open for it.
             if (button.id === 'deleteAppBtn') return confirmThen(button, () => this.apps.remove());
+            if (button.dataset.appViewChoice) return this.apps.showView(button.dataset.appViewChoice);
             button.closest('details.menu')?.removeAttribute('open');
             if (button.id === 'downloadAppBtn') this.apps.download();
             if (button.id === 'downloadDmlBtn') this.apps.download({ standalone: true });
@@ -43,6 +46,9 @@ export class AppHeader extends AppElement {
                     <input type="text" id="appName" class="app-name" aria-label="App name" autocomplete="off" spellcheck="false">
                     <input type="text" id="appDescription" class="app-description" aria-label="What the app does" placeholder="What it does, in a sentence (optional)" autocomplete="off">
                 </div>
+                <div class="wb-chips app-views" role="group" aria-label="How to see the app">
+                    ${Object.entries(VIEWS).map(([view, label]) => `<button type="button" class="wb-chip" data-app-view-choice="${view}" aria-pressed="${this.apps.view === view}" title="${view === 'canvas' ? 'The screen running, wired to its tools' : 'The screen and the flow as cards, with the app beside them'}">${label}</button>`).join('')}
+                </div>
                 <span class="app-version text-secondary" id="appVersion" aria-live="polite"></span>
                 <div class="split-button">
                     <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with app.dml (the flow, as markup), index.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
@@ -56,10 +62,17 @@ export class AppHeader extends AppElement {
                     </details>
                 </div>
             </div>
-            <p class="app-intro text-secondary">An app is a <strong>screen</strong> and a <strong>flow</strong>. Build the screen from components, or use HTML a tool makes. The flow is rules: <em>when</em> something happens on the screen, <em>call</em> a tool, <em>then</em> put what it returns back on the screen. Try it on the right as you go.</p>`;
+            <p class="app-intro text-secondary" data-outline-only>An app is a <strong>screen</strong> and a <strong>flow</strong>. Build the screen from components, or from HTML a model or a tool makes. The flow is rules: <em>when</em> something happens on the screen, <em>call</em> a tool, <em>then</em> put what it returns back on the screen. On the canvas, each rule is a tool with wires to the screen.</p>`;
         this.$('#appName').value = app.name || '';
         this.$('#appDescription').value = app.description || '';
         this.renderVersion();
+        this.markView();
+    }
+
+    // The canvas explains itself in its Inspector, so the intro is the Outline's.
+    markView() {
+        this.querySelectorAll('[data-app-view-choice]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.appViewChoice === this.apps.view)));
+        this.querySelectorAll('[data-outline-only]').forEach(element => { element.hidden = this.apps.view !== 'outline'; });
     }
 
     renderVersion() {
