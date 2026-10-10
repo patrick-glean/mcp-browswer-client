@@ -8,17 +8,21 @@
 //       <output id="answer" label="Answer"/>
 //     </screen>
 //     <flow>
-//       <when element="ask" event="click">
+//       <when element="ask" event="click" x="660" y="96">
+//         <or element="question" event="enter"/>
 //         <call server="https://…/mcp" tool="search"><arg name="query">{{question}}</arg></call>
 //         <then if="ok" into="answer">{{text}}</then>
 //         <then if="error" into="answer">{{error}}</then>
 //       </when>
 //     </flow>
+//
+// A <when> names its first trigger, and <or> each other one; x and y are where its tool sits on
+// the canvas.
 //   </app>
 //
 // It's XML, read and written here without a DOM, so the worker and Node can use it too.
 
-import { EVENTS, ROUTE_HOW, uid } from './flow.js';
+import { EVENTS, ROUTE_HOW, trigger, triggersOf, uid } from './flow.js';
 import { COMPONENT_TYPES } from './screen.js';
 
 export const DML_VERSION = 1;
@@ -62,7 +66,10 @@ function callNode(name, call) {
     return [name, { server: call?.serverUrl || '', tool: call?.toolName || '' }, ...args];
 }
 
-function componentNode(component) {
+// Where a part's HTML goes in a zip.
+export const partFile = id => `parts/${id}.html`;
+
+function componentNode(component, { standalone }) {
     const { id, type } = component;
     switch (type) {
         case 'title':
@@ -80,6 +87,11 @@ function componentNode(component) {
             return ['button', { id, label: component.label ?? '' }];
         case 'output':
             return ['output', { id, label: component.label ?? '', placeholder: orUndefined(component.placeholder) }];
+        case 'part':
+            return ['part', { id, label: orUndefined(component.label), src: standalone ? undefined : partFile(id) },
+                ...(component.ask ? [['ask', {}, component.ask]] : []),
+                ...(component.from ? [callNode('from', component.from)] : []),
+                ...(standalone ? [['html', {}, { cdata: component.html || '' }]] : [])];
         default:
             return [type, { id }];
     }
@@ -87,7 +99,8 @@ function componentNode(component) {
 
 // Every server the app calls, for people reading it and for importing it somewhere new.
 export function serversOf(app) {
-    const urls = [app?.screen?.from?.serverUrl, ...(app?.flow || []).map(rule => rule.call?.serverUrl)].filter(Boolean);
+    const parts = (app?.screen?.components || []).filter(component => component.type === 'part');
+    const urls = [app?.screen?.from?.serverUrl, ...parts.map(part => part.from?.serverUrl), ...(app?.flow || []).map(rule => rule.call?.serverUrl)].filter(Boolean);
     return [...new Set(urls)];
 }
 
@@ -102,12 +115,23 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
     const screen = app.screen || {};
     const src = standalone ? undefined : 'index.html';
     const screenNode = screen.kind === 'html'
-        ? ['screen', { src }, ...(screen.from ? [callNode('from', screen.from)] : []), ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
-        : ['screen', { src, 'built-from': 'components' }, ...(screen.components || []).map(componentNode)];
+        ? ['screen', { src },
+            ...(screen.ask ? [['ask', {}, screen.ask]] : []),
+            ...(screen.from ? [callNode('from', screen.from)] : []),
+            ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
+        : ['screen', { src, 'built-from': 'components' }, ...(screen.components || []).map(component => componentNode(component, { standalone }))];
     const servers = serversOf(app);
+    const triggerAttributes = candidate => (candidate
+        ? { element: candidate.event === 'open' ? undefined : candidate.element, event: candidate.event }
+        : {});
     const flow = (app.flow || []).map(rule => [
         'when',
-        { element: rule.when?.event === 'open' ? undefined : rule.when?.element || '', event: rule.when?.event || 'click' },
+        {
+            ...triggerAttributes(triggersOf(rule)[0]),
+            x: rule.position ? Math.round(rule.position.x) : undefined,
+            y: rule.position ? Math.round(rule.position.y) : undefined,
+        },
+        ...triggersOf(rule).slice(1).map(candidate => ['or', triggerAttributes(candidate)]),
         callNode('call', rule.call),
         ...(rule.then || []).map(route => ['then', {
             if: route.if === 'error' ? 'error' : 'ok',
@@ -310,6 +334,19 @@ export function fromDml(source, { files = {} } = {}) {
             if (node.name === 'textbox') Object.assign(component, { label: attr('label'), placeholder: attr('placeholder'), lines: Math.max(1, Number(node.attrs.lines) || 1), value: attr('value') });
             if (node.name === 'button') component.label = attr('label');
             if (node.name === 'output') Object.assign(component, { label: attr('label'), placeholder: attr('placeholder') });
+            if (node.name === 'part') {
+                const inline = one(node, 'html', { required: false });
+                const src = node.attrs.src;
+                if (!inline && src && typeof files[src] !== 'string') fail(node, `The part ${id} is in ${src}, which isn't with this file. Import the .zip it came in.`);
+                const from = one(node, 'from', { required: false });
+                const ask = one(node, 'ask', { required: false });
+                Object.assign(component, {
+                    label: attr('label'),
+                    html: inline ? textIn(inline) : src ? files[src] : '',
+                    from: from ? readCall(from) : null,
+                    ask: ask ? textIn(ask) : '',
+                });
+            }
             components.push(component);
         }
         screen = { kind: 'components', components };
@@ -323,15 +360,26 @@ export function fromDml(source, { files = {} } = {}) {
                 : '<screen> needs built-from="components", src="index.html" or an <html> inside it.');
         }
         const from = one(screenNode, 'from', { required: false });
-        screen = { kind: 'html', html, from: from ? readCall(from) : null };
+        const ask = one(screenNode, 'ask', { required: false });
+        screen = { kind: 'html', html, from: from ? readCall(from) : null, ask: ask ? textIn(ask) : '' };
     }
 
+    // A trigger's attributes. A <when> may have none yet: nothing starts its rule.
+    const readTrigger = (node, { optional = false } = {}) => {
+        const { event, element } = node.attrs;
+        if (optional && event === undefined && element === undefined) return null;
+        if (!Object.hasOwn(EVENTS, event)) fail(node, `<${node.name}> needs event="…", one of ${Object.keys(EVENTS).join(', ')}.`);
+        if (event !== 'open' && !element) fail(node, `<${node.name} event="${event}"> needs element="…", the id of what it waits for.`);
+        return trigger(element, event);
+    };
     const flow = [];
     for (const node of elementsIn(one(root, 'flow'), 'when')) {
-        const event = node.attrs.event;
-        if (!Object.hasOwn(EVENTS, event)) fail(node, `<when> needs event="…", one of ${Object.keys(EVENTS).join(', ')}.`);
-        const element = event === 'open' ? '' : node.attrs.element;
-        if (event !== 'open' && !element) fail(node, `<when event="${event}"> needs element="…", the id of what it waits for.`);
+        const when = [readTrigger(node, { optional: true }), ...elementsIn(node, 'or').map(or => readTrigger(or))].filter(Boolean);
+        let position = null;
+        if (node.attrs.x !== undefined || node.attrs.y !== undefined) {
+            position = { x: Number(node.attrs.x), y: Number(node.attrs.y) };
+            if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) fail(node, 'x and y are numbers together: where its tool sits on the canvas.');
+        }
         const then = elementsIn(node, 'then').map(route => {
             const how = route.attrs.how || 'replace';
             if (!Object.hasOwn(ROUTE_HOW, how)) fail(route, `how="${how}" isn't one of ${Object.keys(ROUTE_HOW).join(', ')}.`);
@@ -339,7 +387,7 @@ export function fromDml(source, { files = {} } = {}) {
             if (!route.attrs.into) fail(route, '<then> needs into="…", the id of where the answer goes.');
             return { if: route.attrs.if === 'error' ? 'error' : 'ok', show: textIn(route), into: route.attrs.into, how };
         });
-        flow.push({ id: uid('rule'), when: { element, event }, call: readCall(one(node, 'call')), then });
+        flow.push({ id: uid('rule'), when, call: readCall(one(node, 'call')), then, ...(position ? { position } : {}) });
     }
 
     const servers = elementsIn(one(root, 'servers', { required: false }) || { children: [] }, 'server')

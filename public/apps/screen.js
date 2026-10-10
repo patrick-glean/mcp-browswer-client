@@ -1,12 +1,20 @@
 // An app's screen: what people see. Either built here from components (a title, text, text boxes,
-// buttons and outputs, each with an id the flow names it by) or an HTML document, such as one a
-// tool call made, whose elements with ids the flow names the same way.
+// buttons, outputs, and parts a model or a tool makes, each with an id the flow names it by) or an
+// HTML document, such as one a tool call made, whose elements with ids the flow names the same way.
 //
-// screen: { kind: 'components', components: [component] } or { kind: 'html', html, from }
-// where `from` is the call that made the HTML, { serverUrl, toolName, args }, if one did.
+// screen: { kind: 'components', components: [component] } or { kind: 'html', html, from, ask }
+// where `from` is the call that made the HTML, { serverUrl, toolName, args }, if one did, and `ask`
+// what a model was asked for when one made it.
+//
+// A part ({ type: 'part', html, from, ask }) is HTML a model or a tool returned, such as a
+// dashboard, kept without its scripts. On the screen its ids get the part's id in front (`refresh` in the part
+// `dashboard` is `dashboard.refresh`) and its styles reach only inside it, so parts can't clash;
+// the flow takes over its buttons and fields by those ids.
 
 import { escapeHtml } from '../workbench/util.js';
-import { elementIdProblem, resultText } from './flow.js';
+import { elementIdProblem, htmlFromResult } from './flow.js';
+
+export { htmlFromResult };
 
 export const COMPONENT_TYPES = {
     title: { label: 'Title', kind: 'static', base: 'title' },
@@ -14,9 +22,20 @@ export const COMPONENT_TYPES = {
     textbox: { label: 'Text box', kind: 'input', base: 'input' },
     button: { label: 'Button', kind: 'button', base: 'button' },
     output: { label: 'Output', kind: 'output', base: 'output' },
+    part: { label: 'HTML part', kind: 'output', base: 'part' },
 };
 
 export const ELEMENT_KINDS = { button: 'Button', input: 'Field', output: 'Output', static: 'Text' };
+
+// What each component lets you set, in order: [prop, label, kind of field].
+export const COMPONENT_PROPS = {
+    title: [['text', 'Text', 'text']],
+    text: [['text', 'Text', 'lines']],
+    textbox: [['label', 'Label', 'text'], ['placeholder', 'Placeholder', 'text'], ['lines', 'Lines', 'number']],
+    button: [['label', 'Label', 'text']],
+    output: [['label', 'Label', 'text'], ['placeholder', 'When empty', 'text']],
+    part: [['label', 'Label', 'text']],
+};
 
 const DEFAULTS = {
     title: { text: 'Title' },
@@ -24,6 +43,7 @@ const DEFAULTS = {
     textbox: { label: 'Text box', placeholder: '', lines: 1, value: '' },
     button: { label: 'Button' },
     output: { label: 'Output', placeholder: 'What the tool returns shows here.' },
+    part: { label: 'Part', html: '', from: null, ask: '' },
 };
 
 // The first free id for a new component: input, input2, input3…
@@ -45,12 +65,109 @@ export function componentName(component) {
 }
 
 export function elementsOfComponents(components = []) {
-    return components.map(component => ({
+    return components.flatMap(component => [{
         id: component.id,
         kind: COMPONENT_TYPES[component.type]?.kind || 'static',
         type: component.type,
         label: componentName(component),
-    }));
+    }, ...(component.type === 'part' ? partElements(component) : [])]);
+}
+
+const kindOfTag = (tag, type = '') => (tag === 'button' || tag === 'a' || (tag === 'input' && ['button', 'submit', 'reset'].includes(type.toLowerCase())) ? 'button'
+    : ['input', 'textarea', 'select'].includes(tag) ? 'input'
+    : /^h[1-6]$|^label$/.test(tag) ? 'static'
+    : 'output');
+
+const shortLabel = text => {
+    const line = String(text ?? '').trim().replace(/\s+/g, ' ');
+    return line.length > 40 ? `${line.slice(0, 39)}…` : line;
+};
+
+// Start tags and their attributes, in HTML as a browser writes it out (values in double quotes).
+const START_TAG = /<([a-z][a-z0-9-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)(\s*\/?)>/gi;
+const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+const STYLE = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+const decode = text => text.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+const textOf = html => decode(html.replace(/<[^>]*>/g, ' '));
+
+function attributesOf(text) {
+    const attributes = {};
+    for (const [, key, double, single, bare] of text.matchAll(ATTRIBUTE)) attributes[key.toLowerCase()] = decode(double ?? single ?? bare ?? '');
+    return attributes;
+}
+
+// A part's HTML without its <style> elements, and their CSS.
+function splitStyles(html) {
+    const css = [...String(html ?? '').matchAll(STYLE)].map(match => match[1].trim()).filter(Boolean).join('\n');
+    return { html: String(html ?? '').replace(STYLE, '').trim(), css };
+}
+
+// The elements with ids inside a part, named as the screen names them (part.id).
+export function partElements(component) {
+    const { html } = splitStyles(component.html);
+    const labels = new Map([...html.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/gi)]
+        .map(([, attributes, inner]) => [attributesOf(attributes).for, textOf(inner)]).filter(([target]) => target));
+    const elements = [];
+    for (const match of html.matchAll(START_TAG)) {
+        const tag = match[1].toLowerCase();
+        const attributes = attributesOf(match[2]);
+        if (!attributes.id || ['script', 'style', 'template'].includes(tag)) continue;
+        const kind = kindOfTag(tag, attributes.type);
+        let label = attributes['aria-label'] || labels.get(attributes.id) || attributes.placeholder || attributes.title || '';
+        if (!label && (kind === 'button' || kind === 'static')) {
+            const rest = html.slice(match.index + match[0].length);
+            const close = rest.search(new RegExp(`</${tag}\\s*>`, 'i'));
+            label = textOf(close >= 0 ? rest.slice(0, close) : '');
+        }
+        const id = `${component.id}.${attributes.id}`;
+        elements.push({ id, kind, tag, part: component.id, label: shortLabel(label) || id });
+    }
+    return elements;
+}
+
+// The attributes that name another element, which move with a part's ids.
+const ID_ATTRIBUTES = new Set(['id', 'for', 'list']);
+const ID_LIST_ATTRIBUTES = new Set(['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns']);
+
+// A part's HTML as it goes on the screen: every id (and what refers to one) with `prefix.` in front.
+export function prefixIds(html, prefix) {
+    return String(html ?? '').replace(START_TAG, (tag, name, attributes, end) => {
+        const rewritten = attributes.replace(ATTRIBUTE, (attribute, key, double, single, bare) => {
+            const value = double ?? single ?? bare;
+            const lower = key.toLowerCase();
+            let next;
+            if (value && ID_ATTRIBUTES.has(lower)) next = `${prefix}.${value}`;
+            else if (value && ID_LIST_ATTRIBUTES.has(lower)) next = value.split(/\s+/).filter(Boolean).map(id => `${prefix}.${id}`).join(' ');
+            else if (value && lower === 'href' && value.startsWith('#') && value.length > 1) next = `#${prefix}.${value.slice(1)}`;
+            else return attribute;
+            return `${key}="${next.replace(/"/g, '&quot;')}"`;
+        });
+        return `<${name}${rewritten}${end}>`;
+    });
+}
+
+// A part's CSS, reaching only inside the part: its html, body and :root rules apply to the part.
+export function scopeCss(css, partId) {
+    const rules = String(css ?? '').replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope');
+    return `@scope ([data-part="${partId}"]) {\n${rules}\n}`;
+}
+
+// What a part keeps of the HTML a model or a tool returned: the body, and its styles, without
+// anything that could run, load or go anywhere (scripts, frames, embeds, links to stylesheets, on…
+// handlers and javascript: links); a form's fields stay, without the form. Needs a DOM, so it runs
+// in the page.
+export function sanitizePart(html) {
+    const doc = new DOMParser().parseFromString(String(html ?? ''), 'text/html');
+    const css = [...doc.querySelectorAll('style')].map(style => style.textContent.trim()).filter(Boolean).join('\n');
+    doc.querySelectorAll('script, style, meta, base, link, iframe, frame, frameset, object, embed, title, noscript, template').forEach(node => node.remove());
+    doc.querySelectorAll('form').forEach(form => form.replaceWith(...form.childNodes));
+    for (const element of doc.body.querySelectorAll('*')) {
+        for (const { name, value } of [...element.attributes]) {
+            if (/^on/i.test(name) || (/^(href|src|action|formaction|xlink:href)$/i.test(name) && /^\s*javascript:/i.test(value))) element.removeAttribute(name);
+        }
+    }
+    const body = doc.body.innerHTML.trim();
+    return css ? `<style>\n${css}\n</style>\n${body}` : body;
 }
 
 // The elements with ids in an HTML document, and what each is: a button, a field or something
@@ -77,21 +194,6 @@ export function elementsOfHtml(html) {
 
 export function elementsOf(screen) {
     return screen?.kind === 'html' ? elementsOfHtml(screen.html) : elementsOfComponents(screen?.components);
-}
-
-// The HTML in a tool's answer: an embedded text/html resource, structuredContent.html, or text that
-// is HTML (in a ```html block or on its own, as models write it). Null when there's none.
-export function htmlFromResult(result) {
-    const content = Array.isArray(result?.content) ? result.content : [];
-    for (const item of content) {
-        const resource = item?.type === 'resource' ? item.resource : null;
-        if (typeof resource?.text === 'string' && /^text\/html\b/i.test(resource.mimeType || '')) return resource.text;
-    }
-    if (typeof result?.structuredContent?.html === 'string') return result.structuredContent.html;
-    const text = resultText(result);
-    const fenced = text.match(/```(?:html)?[ \t]*\r?\n([\s\S]*?)```/i);
-    const candidate = (fenced ? fenced[1] : text).trim();
-    return /<(!doctype\s+html|html|head|body|main|section|article|div|form|input|textarea|button|h[1-6]|p)\b/i.test(candidate) ? candidate : null;
 }
 
 // The look of a screen built from components, light or dark with the system. It travels in the
@@ -122,6 +224,8 @@ button:disabled { cursor: progress; opacity: 0.55; }
 .output[aria-busy='true'] { opacity: 0.6; }
 .output[data-state='error'] { color: var(--error); }
 .output > .entry + .entry { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.part { display: block; min-width: 0; }
+.part-empty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); text-align: center; }
 `.trim();
 
 function componentHtml(component) {
@@ -143,6 +247,12 @@ function componentHtml(component) {
             return `<button id="${id}" type="button">${escapeHtml(component.label)}</button>`;
         case 'output':
             return `<section class="field">\n      <h2 class="label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="output" aria-label="${escapeHtml(component.label)}" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
+        case 'part': {
+            const { html, css } = splitStyles(component.html);
+            const style = css ? `\n      <style>\n${scopeCss(css, component.id)}\n      </style>` : '';
+            const body = html ? prefixIds(html, component.id) : `<p class="part-empty">${escapeHtml(component.label || component.id)}: nothing here yet. Ask a model for it, or get it from a tool.</p>`;
+            return `<section id="${id}" class="part" data-part="${id}" aria-label="${escapeHtml(component.label || component.id)}">${style}\n${body}\n    </section>`;
+        }
         default:
             return '';
     }

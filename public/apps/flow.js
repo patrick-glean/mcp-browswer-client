@@ -1,10 +1,14 @@
 // An app's flow: rules that say, in order, when something happens on the screen, which tool to
 // call with what, and where on the screen its answer goes. Values move with {{name}}: in a call's
 // arguments, {{question}} is what the screen's `question` element holds; in what a rule shows,
-// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{result.…}}, {{error}}).
+// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{html}}, {{result.…}},
+// {{error}}). An element of a part (HTML a model or a tool made) is named part.element, as
+// {{dashboard.search}}.
 //
-// A rule: { id, when: { element, event }, call: { serverUrl, toolName, args }, then: [route] }
+// A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position? }
+// A trigger: { element, event }; any of a rule's triggers starts it.
 // A route: { if: 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }
+// position: where the rule's tool sits on the canvas, { x, y }.
 // Pure functions, shared by the builder, the runner and the tests.
 
 import { resolveArguments, variablesIn } from '../workbench/template.js';
@@ -32,7 +36,7 @@ export const ROUTE_HOW = {
 };
 
 // The names a tool's answer brings to a rule's routes, so no element may use them as its id.
-export const ANSWER_NAMES = ['text', 'structured', 'json', 'result', 'error'];
+export const ANSWER_NAMES = ['text', 'structured', 'json', 'html', 'result', 'error'];
 
 const PLACEHOLDERS = /\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
 export const ELEMENT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
@@ -41,15 +45,36 @@ export class FlowError extends Error {}
 
 export const uid = prefix => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 
-export function newRule({ element = '', event = 'click', serverUrl = '', toolName = '', args = {}, into = '' } = {}) {
+export const trigger = (element, event) => ({ element: event === 'open' ? '' : element, event });
+
+// What an element's wire to a tool's Run waits for, unless you choose another of its events.
+export const defaultEvent = kind => (EVENTS_BY_KIND[kind] || EVENTS_BY_KIND.static)[0];
+
+// What a route shows when nothing changes the answer on its way.
+export const DEFAULT_SHOW = { ok: '{{text}}', error: '{{error}}' };
+
+// A rule's triggers. Rules saved before a rule could have several keep their one as an object.
+export function triggersOf(rule) {
+    const when = rule?.when;
+    const list = Array.isArray(when) ? when : when ? [when] : [];
+    return list.filter(candidate => candidate && (candidate.event === 'open' || candidate.element));
+}
+
+// A rule as the builder keeps it, whatever shape it was saved in.
+export const normalizeRule = rule => ({ ...rule, when: triggersOf(rule), then: rule.then || [] });
+
+// A rule with a trigger, a call and both routes; without an element (and not on open) it waits
+// for nothing yet, and `into: null` leaves the routes out.
+export function newRule({ element = '', event = 'click', serverUrl = '', toolName = '', args = {}, into = '', position = null } = {}) {
     return {
         id: uid('rule'),
-        when: { element: event === 'open' ? '' : element, event },
+        when: element || event === 'open' ? [trigger(element, event)] : [],
         call: { serverUrl, toolName, args },
-        then: [
-            { if: 'ok', show: '{{text}}', into, how: 'replace' },
-            { if: 'error', show: '{{error}}', into, how: 'replace' },
+        then: into === null ? [] : [
+            { if: 'ok', show: DEFAULT_SHOW.ok, into, how: 'replace' },
+            { if: 'error', show: DEFAULT_SHOW.error, into, how: 'replace' },
         ],
+        ...(position ? { position } : {}),
     };
 }
 
@@ -75,6 +100,21 @@ function parsedJson(text) {
     }
 }
 
+// The HTML in a tool's answer: an embedded text/html resource, structuredContent.html, or text that
+// is HTML (in a ```html block or on its own, as models write it). Null when there's none.
+export function htmlFromResult(result) {
+    const content = Array.isArray(result?.content) ? result.content : [];
+    for (const item of content) {
+        const resource = item?.type === 'resource' ? item.resource : null;
+        if (typeof resource?.text === 'string' && /^text\/html\b/i.test(resource.mimeType || '')) return resource.text;
+    }
+    if (typeof result?.structuredContent?.html === 'string') return result.structuredContent.html;
+    const text = resultText(result);
+    const fenced = text.match(/```(?:html)?[ \t]*\r?\n([\s\S]*?)```/i);
+    const candidate = (fenced ? fenced[1] : text).trim();
+    return /<(!doctype\s+html|html|head|body|main|section|article|div|form|input|textarea|button|h[1-6]|p)\b/i.test(candidate) ? candidate : null;
+}
+
 // What a call's answer gives its routes: whether it worked, and the values {{…}} can name. A
 // result the tool marked isError counts as failing, with its text as the error.
 export function answerOf(message) {
@@ -87,12 +127,14 @@ export function answerOf(message) {
     else if (result.isError) error = text || 'The tool reported an error.';
     return {
         ok: !error,
-        values: { text, structured: result?.structuredContent ?? null, json: parsedJson(text), result, error },
+        values: { text, structured: result?.structuredContent ?? null, json: parsedJson(text), html: htmlFromResult(result) ?? '', result, error },
     };
 }
 
-// A value at a path: `json.items.0.title` walks objects by key and arrays by index.
+// A value at a path: `json.items.0.title` walks objects by key and arrays by index. A name that is
+// a key as it is, as a part's element `dashboard.search`, is that value.
 export function valueAt(values, path) {
+    if (values && typeof values === 'object' && Object.hasOwn(values, path)) return values[path];
     let value = values;
     for (const key of path.split('.')) {
         if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) return undefined;
@@ -158,14 +200,18 @@ export function frameConfig(flow, elementIds) {
     const watch = [];
     const read = new Set();
     for (const rule of flow || []) {
-        if (rule.when?.event && rule.when.event !== 'open' && rule.when.element) watch.push({ element: rule.when.element, event: rule.when.event });
+        for (const { element, event } of triggersOf(rule)) if (event !== 'open') watch.push({ element, event });
         for (const name of screenNamesIn(rule, elementIds)) read.add(name);
     }
-    return { watch, read: [...read] };
+    return { watch, read: [...read], track: [...elementIds] };
 }
 
+// Which of a rule's triggers this is, or -1.
+export const triggerIndex = (rule, element, event) => triggersOf(rule)
+    .findIndex(candidate => candidate.event === event && (event === 'open' || candidate.element === element));
+
 export function rulesFor(flow, element, event) {
-    return (flow || []).filter(rule => rule.when?.event === event && (event === 'open' || rule.when.element === element));
+    return (flow || []).filter(rule => triggerIndex(rule, element, event) >= 0);
 }
 
 function replaceName(text, from, to) {
@@ -183,15 +229,16 @@ function renameInValue(value, from, to) {
 }
 
 // The flow after an element's id changed: rules that wait for it, read it or show things in it
-// follow it to its new name.
+// follow it to its new name, and so do the elements of a part (from.x becomes to.x).
 export function renameInFlow(flow, from, to) {
+    const renamed = id => (id === from ? to : String(id ?? '').startsWith(`${from}.`) ? `${to}${id.slice(from.length)}` : id);
     return (flow || []).map(rule => ({
         ...rule,
-        when: { ...rule.when, element: rule.when?.element === from ? to : rule.when?.element },
+        when: triggersOf(rule).map(candidate => ({ ...candidate, element: renamed(candidate.element) })),
         call: { ...rule.call, args: renameInValue(rule.call?.args || {}, from, to) },
         then: (rule.then || []).map(route => ({
             ...route,
-            into: route.into === from ? to : route.into,
+            into: renamed(route.into),
             show: ANSWER_NAMES.includes(from) ? route.show : replaceName(String(route.show ?? ''), from, to),
         })),
     }));
@@ -211,9 +258,9 @@ export function flowProblems(flow, { elements = [], servers = {} } = {}) {
     const ids = new Set(elements.map(element => element.id));
     return (flow || []).map(rule => {
         const problems = [];
-        const { element, event } = rule.when || {};
-        if (event !== 'open' && !element) problems.push('Choose what it waits for.');
-        else if (event !== 'open' && !ids.has(element)) problems.push(`${element} isn't on the screen.`);
+        const triggers = triggersOf(rule);
+        if (!triggers.length) problems.push('Nothing starts it yet: choose what it waits for.');
+        for (const { element, event } of triggers) if (event !== 'open' && !ids.has(element)) problems.push(`${element} isn't on the screen.`);
         const { serverUrl, toolName } = rule.call || {};
         if (!serverUrl) problems.push('Choose a server.');
         else if (!servers[serverUrl]) problems.push(`${serverUrl} isn't in your servers. Add it to run this rule.`);
@@ -234,10 +281,21 @@ const quoted = text => (/^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text) ? text : `
 
 // A rule as a sentence, for people reading the app: the zip's README and the builder.
 export function describeRule(rule, { elementName = id => id, serverName = url => url } = {}) {
-    const { element, event } = rule.when || {};
-    const when = event === 'open' ? 'When the app opens' : `When ${elementName(element)} ${EVENTS[event] || event}`;
+    const triggers = triggersOf(rule).map(({ element, event }) => (event === 'open' ? 'the app opens' : `${elementName(element)} ${EVENTS[event] || event}`));
+    const when = triggers.length ? `When ${triggers.join(' or ')}` : 'Once something starts it';
     const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? quoted(value) : JSON.stringify(value)}`);
     const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}`;
     const routes = (rule.then || []).map(route => `${route.if === 'error' ? 'if it fails' : 'if it works'}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }
+
+// What a route's transform shows on the canvas: the one value it takes, or the start of its template.
+export function routeSummary(route) {
+    const show = String(route?.show ?? '');
+    if (!show) return 'nothing';
+    const single = show.match(/^\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}$/);
+    if (single) return single[1];
+    return show.length > 22 ? `${show.slice(0, 21)}…` : show;
+}
+
+export const isDefaultShow = route => String(route?.show ?? '') === (route?.if === 'error' ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok);

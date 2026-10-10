@@ -6,15 +6,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
+import { askPrompt, modelCall } from '../public/apps/ask.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
 import {
-    answerOf, callArguments, describeRule, elementIdProblem, flowProblems, frameConfig, newRule, renameInFlow, renderTemplate, rulesFor,
+    answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, newRule, normalizeRule, renameInFlow,
+    renderTemplate, routeSummary, rulesFor, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
-import { componentsHtml, elementsOfComponents, freeId, htmlFromResult, newComponent } from '../public/apps/screen.js';
+import { canConnect, connect, disconnect, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
+import { componentsHtml, elementsOfComponents, freeId, htmlFromResult, newComponent, partElements, prefixIds, scopeCss } from '../public/apps/screen.js';
 import { crc32, unzip, zip } from '../public/apps/zip.js';
 
 const MOCK = 'http://127.0.0.1:8081/';
 const withoutRuleIds = app => ({ ...app, flow: app.flow.map(({ id, ...rule }) => rule) });
+const DASH = '<style>\nbody { font: 14px sans-serif; }\n</style>\n<h2>Tickets</h2><label for="search">Find</label><input id="search" placeholder="Ticket"><button id="refresh" type="button">Refresh</button><ul id="list"><li>T-1 ]]&gt; &amp; more</li></ul>';
 
 function sampleApp() {
     return {
@@ -31,12 +35,14 @@ function sampleApp() {
                 { id: 'details', type: 'textbox', label: 'Details', placeholder: '', lines: 4, value: 'first\nsecond' },
                 { id: 'ask', type: 'button', label: 'Ask' },
                 { id: 'answer', type: 'output', label: 'Answer', placeholder: 'It shows up here.' },
+                { id: 'dash', type: 'part', label: 'Tickets', ask: 'a ticket dashboard', html: DASH, from: { serverUrl: MOCK, toolName: 'chat', args: { message: 'Write one part…' } } },
             ],
         },
         flow: [
             {
                 id: 'rule-a',
-                when: { element: 'ask', event: 'click' },
+                when: [{ element: 'ask', event: 'click' }, { element: 'question', event: 'enter' }],
+                position: { x: 660, y: 96 },
                 call: { serverUrl: MOCK, toolName: 'search_notes', args: { query: '{{question}}', limit: 5, include_archived: false, tags: ['a', 'b&c'], snippet: { length: 200 }, nothing: null } },
                 then: [
                     { if: 'ok', show: 'Found: {{text}}', into: 'answer', how: 'replace' },
@@ -46,7 +52,7 @@ function sampleApp() {
             },
             {
                 id: 'rule-b',
-                when: { element: '', event: 'open' },
+                when: [{ element: '', event: 'open' }],
                 call: { serverUrl: MOCK, toolName: 'echo', args: { text: 'hello <world> & "you"' } },
                 then: [{ if: 'ok', show: '<em>{{text}}</em>', into: 'note', how: 'html' }],
             },
@@ -57,10 +63,13 @@ function sampleApp() {
 test('an app built from components comes back the same from its DML', () => {
     const app = sampleApp();
     const dml = toDml(app, { serverNames: { [MOCK]: 'Mock server' } });
-    const { app: back, servers } = fromDml(dml);
+    assert.throws(() => fromDml(dml), /The part dash is in parts\/dash\.html, which isn't with this file/);
+    const { app: back, servers } = fromDml(dml, { files: { 'parts/dash.html': DASH } });
     assert.deepEqual(withoutRuleIds(back), withoutRuleIds(app));
     assert.deepEqual(servers, [{ url: MOCK, name: 'Mock server' }]);
     assert.ok(back.flow.every(rule => /^rule-/.test(rule.id)), 'imported rules get ids');
+    const alone = fromDml(toDml(app, { standalone: true }));
+    assert.deepEqual(withoutRuleIds(alone.app), withoutRuleIds(app), 'on its own, the DML carries the part');
 });
 
 test('the DML reads like the flow it describes', () => {
@@ -69,7 +78,8 @@ test('the DML reads like the flow it describes', () => {
     assert.match(dml, /<app dml="1" id="app-1" name="Ask &amp; answer &lt;test&gt;" version="3">/);
     assert.match(dml, /<screen src="index\.html" built-from="components">/);
     assert.match(dml, /<textbox id="details" label="Details" lines="4" value="first&#10;second"\/>/);
-    assert.match(dml, /<when element="ask" event="click">\n {6}<call server="http:\/\/127\.0\.0\.1:8081\/" tool="search_notes">/);
+    assert.match(dml, /<when element="ask" event="click" x="660" y="96">\n {6}<or element="question" event="enter"\/>\n {6}<call server="http:\/\/127\.0\.0\.1:8081\/" tool="search_notes">/);
+    assert.match(dml, /<part id="dash" label="Tickets" src="parts\/dash\.html">\n {6}<ask>a ticket dashboard<\/ask>\n {6}<from server="http:\/\/127\.0\.0\.1:8081\/" tool="chat">/);
     assert.match(dml, /<arg name="query">\{\{question\}\}<\/arg>/);
     assert.match(dml, /<arg name="limit" type="json">5<\/arg>/);
     assert.match(dml, /<then if="ok" into="answer">Found: \{\{text\}\}<\/then>/);
@@ -84,6 +94,7 @@ test('an HTML screen travels as index.html in a zip, or inside the DML on its ow
         screen: { kind: 'html', html, from: { serverUrl: MOCK, toolName: 'make_screen', args: { title: 'Ask' } } },
         flow: [newRule({ element: 'go', serverUrl: MOCK, toolName: 'echo', args: { text: '{{q}}' }, into: 'out' })],
     };
+    app.screen.ask = '';
     const inZip = toDml(app);
     assert.match(inZip, /<screen src="index\.html">\n {4}<from server="http:\/\/127\.0\.0\.1:8081\/" tool="make_screen">/);
     assert.doesNotMatch(inZip, /<html>/);
@@ -95,9 +106,9 @@ test('an HTML screen travels as index.html in a zip, or inside the DML on its ow
     assert.match(alone, /<html><!\[CDATA\[<!DOCTYPE html>\n<html><body><input id="q">/, 'the HTML reads as HTML');
     assert.deepEqual(withoutRuleIds(fromDml(alone).app), withoutRuleIds(app));
 
-    const awkward = { ...app, screen: { ...app.screen, html: '<p id="x">a ]]> b</p>', from: null } };
+    const awkward = { ...app, screen: { ...app.screen, html: '<p id="x">a ]]> b</p>', from: null, ask: 'make it awkward' } };
     assert.deepEqual(fromDml(toDml(awkward, { standalone: true })).app.screen, awkward.screen);
-    const carriageReturns = { ...app, screen: { ...app.screen, html: '<p id="x">a\r\nb</p>', from: null } };
+    const carriageReturns = { ...app, screen: { ...app.screen, html: '<p id="x">a\r\nb</p>', from: null, ask: '' } };
     assert.deepEqual(fromDml(toDml(carriageReturns, { standalone: true })).app.screen, carriageReturns.screen);
 });
 
@@ -123,6 +134,8 @@ test('DML written by hand: CDATA, comments, single quotes and character referenc
     assert.equal(app.screen.components[1].label, 'Go →');
     assert.equal(app.flow[0].call.args.text, 'line\ntwo <3');
     assert.deepEqual(app.flow[0].then, [{ if: 'ok', show: '{{text}}', into: 'o', how: 'replace' }]);
+    const waiting = fromDml(`<app dml="1"><screen built-from="components"/><flow><when><call server="${MOCK}" tool="echo"/></when></flow></app>`).app;
+    assert.deepEqual(waiting.flow[0].when, [], 'a <when> with no trigger waits for nothing yet');
 });
 
 test('broken DML says what is wrong and on which line', () => {
@@ -138,6 +151,8 @@ test('broken DML says what is wrong and on which line', () => {
         ['<app dml="1"><screen built-from="components"><button id="a"/><output id="a"/></screen><flow/></app>', /Two components are a/],
         ['<app dml="1"><screen built-from="components"/><flow><when element="x" event="click"><call server="s" tool="t"><arg name="n" type="json">{oops</arg></call></when></flow></app>', /n says type="json", but its value isn't JSON/],
         ['<app dml="1"><screen built-from="components"/>', /<app> is never closed/],
+        ['<app dml="1"><screen built-from="components"/><flow><when element="a" event="click"><or event="change"/><call server="s" tool="t"/></when></flow></app>', /<or event="change"> needs element=/],
+        ['<app dml="1"><screen built-from="components"/><flow><when element="a" event="click" x="10"><call server="s" tool="t"/></when></flow></app>', /x and y are numbers together/],
     ];
     for (const [dml, expected] of cases) {
         assert.throws(() => fromDml(dml), error => error instanceof DmlError && expected.test(error.message), String(expected));
@@ -239,7 +254,7 @@ test('renaming an element takes the flow with it', () => {
     const [, open] = renameInFlow(sampleApp().flow, 'note', 'intro');
     assert.equal(open.then[0].into, 'intro');
     const [asked] = renameInFlow(sampleApp().flow, 'ask', 'go');
-    assert.equal(asked.when.element, 'go');
+    assert.equal(asked.when[0].element, 'go');
     const shown = renameInFlow([{ ...rule, then: [{ if: 'ok', show: 'You asked {{query}}: {{text}}', into: 'answer', how: 'replace' }] }], 'query', 'q');
     assert.equal(shown[0].then[0].show, 'You asked {{q}}: {{text}}');
 });
@@ -257,23 +272,28 @@ test('element ids are checked, and new components get free ones', () => {
 test("the screen's runtime watches what rules wait for and reads what they use", () => {
     const app = sampleApp();
     const ids = elementsOfComponents(app.screen.components).map(element => element.id);
-    assert.deepEqual(frameConfig(app.flow, ids), { watch: [{ element: 'ask', event: 'click' }], read: ['question'] });
+    assert.deepEqual(frameConfig(app.flow, ids), { watch: [{ element: 'ask', event: 'click' }, { element: 'question', event: 'enter' }], read: ['question'], track: ids });
     assert.deepEqual(rulesFor(app.flow, 'ask', 'click').map(rule => rule.id), ['rule-a']);
+    assert.deepEqual(rulesFor(app.flow, 'question', 'enter').map(rule => rule.id), ['rule-a']);
+    assert.equal(triggerIndex(app.flow[0], 'question', 'enter'), 1);
     assert.deepEqual(rulesFor(app.flow, '', 'open').map(rule => rule.id), ['rule-b']);
+    assert.deepEqual(triggersOf(normalizeRule({ when: { element: 'ask', event: 'click' } })), [{ element: 'ask', event: 'click' }], 'a rule saved with one trigger as an object still reads');
 });
 
 test('rules say what they do in a sentence, and what keeps them from running', () => {
     const app = sampleApp();
+    assert.match(describeRule(app.flow[0]), /^When ask is clicked or question gets Enter, call search_notes/);
+    assert.match(describeRule(newRule({ serverUrl: MOCK, toolName: 'echo' })), /^Once something starts it, call echo on/);
     const sentence = describeRule(app.flow[1], { serverName: () => 'Mock server' });
     assert.equal(sentence, 'When the app opens, call echo on Mock server with text = “hello <world> & "you"”; if it works, put “<em>{{text}}</em>” into note as HTML.');
-    assert.equal(describeRule(app.flow[0]), 'When ask is clicked, call search_notes on http://127.0.0.1:8081/ with query = {{question}}, limit = 5, include_archived = false, tags = ["a","b&c"], snippet = {"length":200}, nothing = null; if it works, put “Found: {{text}}” into answer; if it works, put nothing (clearing it) into question; if it fails, put {{error}} into answer after what it shows.');
+    assert.equal(describeRule(app.flow[0]), 'When ask is clicked or question gets Enter, call search_notes on http://127.0.0.1:8081/ with query = {{question}}, limit = 5, include_archived = false, tags = ["a","b&c"], snippet = {"length":200}, nothing = null; if it works, put “Found: {{text}}” into answer; if it works, put nothing (clearing it) into question; if it fails, put {{error}} into answer after what it shows.');
     const elements = elementsOfComponents(app.screen.components);
     const servers = { [MOCK]: { tools: [{ name: 'echo' }] } };
     const problems = Object.fromEntries(flowProblems(app.flow, { elements, servers }));
     assert.deepEqual(problems['rule-a'], ["search_notes isn't one of this server's tools."]);
     assert.deepEqual(problems['rule-b'], []);
     const [[, blank]] = flowProblems([newRule()], { elements, servers });
-    assert.deepEqual(blank, ['Choose what it waits for.', 'Choose a server.', 'Choose where the answer goes.']);
+    assert.deepEqual(blank, ['Nothing starts it yet: choose what it waits for.', 'Choose a server.', 'Choose where the answer goes.']);
     assert.deepEqual(serversOf(app), [MOCK]);
 });
 
@@ -286,7 +306,8 @@ test('a screen built from components is HTML with the ids the flow uses, its tex
     assert.match(html, /<textarea id="details" rows="4">first\nsecond<\/textarea>/);
     assert.match(html, /<button id="ask" type="button">Ask<\/button>/);
     assert.match(html, /<h2 class="label">Answer<\/h2>\n {6}<div id="answer" class="output" aria-label="Answer" aria-live="polite" data-placeholder="It shows up here\."><\/div>/);
-    assert.deepEqual([...html.matchAll(/ id="([^"]+)"/g)].map(match => match[1]), ['title', 'note', 'question', 'details', 'ask', 'answer'], 'only components have ids');
+    assert.deepEqual([...html.matchAll(/ id="([^"]+)"/g)].map(match => match[1]),
+        ['title', 'note', 'question', 'details', 'ask', 'answer', 'dash', 'dash.search', 'dash.refresh', 'dash.list'], 'only components and the elements of parts have ids');
     assert.doesNotMatch(html, /<script|https?:\/\//, 'a built screen needs no scripts and loads nothing');
 });
 
@@ -298,4 +319,121 @@ test("the HTML in a tool's answer is found wherever the tool put it", () => {
     assert.equal(htmlFromResult({ structuredContent: { html: page } }), page);
     assert.equal(htmlFromResult({ content: [{ type: 'text', text: 'Echo: hello' }] }), null);
     assert.equal(htmlFromResult(null), null);
+});
+
+test('the canvas draws each part of a rule as a wire: triggers, fields fed by the screen, and routes', () => {
+    const app = sampleApp();
+    const ids = elementsOfComponents(app.screen.components).map(element => element.id);
+    const wires = wiresOf(app.flow, ids).map(wire => `${wire.kind} ${wire.from} -> ${wire.to}`);
+    assert.deepEqual(wires, [
+        'trigger el:ask -> run:rule-a',
+        'trigger el:question -> run:rule-a',
+        'arg el:question -> arg:rule-a:query',
+        'answer ok:rule-a -> el:answer',
+        'answer ok:rule-a -> el:question',
+        'error err:rule-a -> el:answer',
+        'trigger start -> run:rule-b',
+        'answer ok:rule-b -> el:note',
+    ]);
+    assert.deepEqual(wiresOf(app.flow, ['ask']).map(wire => wire.id), ['t:rule-a:0', 't:rule-b:0'], "wires to elements that aren't on the screen aren't drawn");
+    assert.deepEqual(parsePort('arg:rule-a:snippet:length'), { kind: 'arg', ruleId: 'rule-a', arg: 'snippet:length' });
+    assert.deepEqual(parsePort('el:dash.refresh'), { kind: 'el', element: 'dash.refresh' });
+});
+
+test('connecting ports adds the part of the rule the wire is, and says why two ports don\'t join', () => {
+    const flow = [newRule({ serverUrl: MOCK, toolName: 'echo', into: null })];
+    const id = flow[0].id;
+    const kinds = { go: 'button', q: 'input', out: 'output' };
+    const kindOf = element => kinds[element];
+    let { flow: next, made } = connect(flow, 'el:go', `run:${id}`, { kindOf });
+    assert.deepEqual([made.kind, triggersOf(next[0])], ['trigger', [{ element: 'go', event: 'click' }]]);
+    ({ flow: next, made } = connect(next, `run:${id}`, 'el:q', { kindOf }));
+    assert.deepEqual(triggersOf(next[0]).at(-1), { element: 'q', event: 'enter' }, "a field's wire waits for Enter");
+    ({ flow: next, made } = connect(next, 'start', `run:${id}`, { kindOf }));
+    assert.deepEqual(triggersOf(next[0]).at(-1), { element: '', event: 'open' });
+    ({ flow: next, made } = connect(next, 'el:go', `run:${id}`, { kindOf }));
+    assert.equal(made.kind, 'already');
+    ({ flow: next } = connect(next, 'el:q', `arg:${id}:text`, { kindOf }));
+    assert.deepEqual(next[0].call.args, { text: '{{q}}' });
+    ({ flow: next } = connect(next, `ok:${id}`, 'el:out', { kindOf }));
+    ({ flow: next } = connect(next, 'el:out', `err:${id}`, { kindOf }));
+    assert.deepEqual(next[0].then, [
+        { if: 'ok', show: '{{text}}', into: 'out', how: 'replace' },
+        { if: 'error', show: '{{error}}', into: 'out', how: 'replace' },
+    ]);
+    assert.equal(canConnect('el:q', `arg:${id}:text`), true);
+    assert.equal(canConnect('el:q', 'el:out'), false);
+    assert.throws(() => connect(next, 'el:q', 'el:out', { kindOf }), error => error instanceof FlowError && /through a tool/.test(error.message));
+    assert.throws(() => connect(next, 'start', 'el:out', { kindOf }), /Start connects to a tool's Run/);
+    assert.throws(() => connect(next, `ok:${id}`, `run:${id}`, { kindOf }), /can't start another tool yet/);
+
+    const wires = wiresOf(next, ['go', 'q', 'out']);
+    const without = (kind, more = {}) => disconnect(next, wires.find(wire => wire.kind === kind && Object.entries(more).every(([key, value]) => wire[key] === value)), { required: ['text'] });
+    assert.deepEqual(triggersOf(without('trigger', { element: 'q' })[0]).map(candidate => candidate.element), ['go', '']);
+    assert.deepEqual(without('arg')[0].call.args, { text: '' }, 'a required field is left empty');
+    assert.deepEqual(disconnect(next, wires.find(wire => wire.kind === 'arg'))[0].call.args, {}, 'an optional one is left out');
+    assert.deepEqual(without('error')[0].then.map(route => route.if), ['ok']);
+    const mixed = [{ ...next[0], call: { ...next[0].call, args: { text: 'Hi {{q}}!' } } }];
+    assert.deepEqual(disconnect(mixed, wiresOf(mixed, ['q']).find(wire => wire.kind === 'arg'))[0].call.args, { text: 'Hi !' });
+});
+
+test('tools nobody placed go in a column beside what they use, clear of each other', () => {
+    const rules = ['a', 'b', 'c', 'd'].map(id => ({ id, when: [] }));
+    rules[3].position = { x: 600, y: 100 };
+    const anchors = { a: 120, b: 90, c: null };
+    const placed = placeRules(rules, { x: 600, top: 40, gap: 20, anchor: rule => anchors[rule.id], height: () => 100 });
+    assert.deepEqual(Object.fromEntries(placed), { b: { x: 600, y: 220 }, a: { x: 600, y: 340 }, c: { x: 600, y: 460 } });
+    const far = placeRules([{ id: 'e', when: [] }, { id: 'f', when: [], position: { x: 40, y: 0 } }], { x: 600, anchor: () => 0, height: () => 100 });
+    assert.deepEqual(Object.fromEntries(far), { e: { x: 600, y: 0 } }, 'a tool placed in another column is no obstacle');
+});
+
+test('a part a tool made goes on the screen with its ids named after it, and its styles kept inside it', () => {
+    const part = sampleApp().screen.components.find(component => component.type === 'part');
+    assert.deepEqual(partElements(part).map(element => `${element.id} ${element.kind} ${element.label}`), [
+        'dash.search input Find',
+        'dash.refresh button Refresh',
+        'dash.list output dash.list',
+    ]);
+    assert.equal(prefixIds('<a href="#top" id="go" aria-describedby="hint tip">x</a><label for="q">Q</label><input id="q" list="names" title="a > b">', 'p'),
+        '<a href="#p.top" id="p.go" aria-describedby="p.hint p.tip">x</a><label for="p.q">Q</label><input id="p.q" list="p.names" title="a > b">');
+    assert.equal(scopeCss('body { margin: 0 } html, :root { color: red } .body { x: y }', 'dash'),
+        '@scope ([data-part="dash"]) {\n:scope { margin: 0 } :scope, :scope { color: red } .body { x: y }\n}');
+    const html = componentsHtml([part]);
+    assert.match(html, /<section id="dash" class="part" data-part="dash" aria-label="Tickets">\n {6}<style>\n@scope \(\[data-part="dash"\]\) \{\n:scope \{ font: 14px sans-serif; \}\n\}\n {6}<\/style>\n<h2>Tickets<\/h2><label for="dash\.search">Find<\/label>/);
+    assert.match(componentsHtml([{ ...part, html: '' }]), /<p class="part-empty">Tickets: nothing here yet\. Ask a model for it, or get it from a tool\.<\/p>/);
+});
+
+test('a part keeps its elements through a rename, and its answers can be HTML', () => {
+    const app = sampleApp();
+    const flow = [newRule({ element: 'dash.refresh', serverUrl: MOCK, toolName: 'ticket', args: { prefix: '{{dash.search}}' }, into: 'dash.list' })];
+    const [renamed] = renameInFlow(flow, 'dash', 'board');
+    assert.deepEqual([renamed.when[0].element, renamed.call.args.prefix, renamed.then[0].into], ['board.refresh', '{{board.search}}', 'board.list']);
+    assert.deepEqual(callArguments(renamed.call, { screen: { 'board.search': 'T-' } }).sentArgs, { prefix: 'T-' });
+    assert.equal(renderTemplate('Found {{board.search}}', { 'board.search': 'T-9' }).text, 'Found T-9');
+    const page = '<!DOCTYPE html><p id="x">hi</p>';
+    assert.equal(answerOf({ result: { content: [{ type: 'text', text: 'Here:' }, { type: 'resource', resource: { uri: 'u', mimeType: 'text/html', text: page } }] } }).values.html, page);
+    assert.equal(answerOf({ result: { content: [{ type: 'text', text: 'no page' }] } }).values.html, '');
+    assert.match(elementIdProblem('html', []), /what a tool's answer brings/);
+    assert.deepEqual(serversOf(app), [MOCK]);
+});
+
+test("a transform's label is the value it takes, or the start of its template", () => {
+    assert.equal(routeSummary({ if: 'ok', show: '{{text}}' }), 'text');
+    assert.equal(routeSummary({ if: 'ok', show: '{{structured.counted}}' }), 'structured.counted');
+    assert.equal(routeSummary({ if: 'ok', show: 'You said {{question}} and more' }), 'You said {{question}}…');
+    assert.equal(routeSummary({ if: 'ok', show: '' }), 'nothing');
+});
+
+test("asking a model sends the Chat app's model what to make, with the rules a screen needs", () => {
+    const prompt = askPrompt('a ticket dashboard', { part: true });
+    assert.match(prompt, /^Write one part of an app's screen, as an HTML fragment \(not a whole page\): a ticket dashboard\n\n/);
+    assert.match(prompt, /an id of letters, digits, - or _/);
+    assert.match(prompt, /No scripts and nothing from the network/);
+    assert.doesNotMatch(prompt, /Change this HTML/);
+    assert.match(askPrompt('add a total', { current: '<p id="n">1</p>' }), /^Write the screen of an app, as one HTML page: add a total\n\nChange this HTML to do that, keeping its ids:\n\n```html\n<p id="n">1<\/p>\n```/);
+    const model = { serverUrl: MOCK, toolName: 'chat', args: { message: 'Please: {{message}}', style: 'brief' }, messageField: 'message', conversationField: 'history' };
+    assert.deepEqual(modelCall(model, 'make it'), { serverUrl: MOCK, toolName: 'chat', args: { message: 'Please: make it', style: 'brief', history: [] } });
+    assert.deepEqual(modelCall({ ...model, args: {} }, 'make it').args.message, 'make it');
+    assert.throws(() => modelCall(null, 'x'), /In Apps, open Chat, and under Model choose the tool that answers/);
+    assert.throws(() => modelCall({ ...model, messageField: null }, 'x'), /tick "Your message goes here"/);
 });
