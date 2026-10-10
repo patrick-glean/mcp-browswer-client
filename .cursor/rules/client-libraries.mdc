@@ -41,6 +41,7 @@ The app runs whichever MCP client library the page picks: the TypeScript SDK one
  - The flow runs in the page and calls tools only through `AppShell.runTool` with source `app`, so every call is a run and the worker needs nothing app-specific
  - The screen runs in a `sandbox="allow-scripts"` frame under the policy `frameDocument` sets: no network, no scripts but the runtime, no access to the page. It only reports events and shows what the page sends, with each message's token checked; never give it more, and never make it same-origin, even for HTML from our own tool calls: this origin's storage holds static tokens
  - HTML from a model or a tool goes in without scripts, handlers, frames or forms (`sanitizePart`, `frameDocument`, the runtime's `fragment`); the flow takes over its elements by id, through the runtime's document-level listeners
+ - The frame asks the page to open links (`open`); the page opens only http(s) addresses, with `noopener`. A box's answer is drawn in the page (`renderBox`), escaped, and sanitized again in the frame
  - Only calls a rule names are made; values from the screen fill arguments as `{{id}}`, never credentials. Asking a model for HTML sends the model's own arguments with what to make and the HTML there is now, nothing else
  - DML is the app's portable form: change `dml.js`'s reader and writer together, keep old files readable, and raise `DML_VERSION` for a change older readers can't read
 

@@ -111,6 +111,12 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] HTML parts a model or a tool makes, among the components: sanitized, ids named after the part, styles scoped, wired like any element; Ask a model (Make it, Change it) with the Chat app's model; `parts/<id>.html` in the zip
 - [x] The mock's `chat`, a stand-in model that writes a ticket dashboard, and the smoke test wiring the canvas with real mouse drags on both libraries
 
+### Done (app builder milestone 2, third step: dashboards)
+- [x] Boxes: outputs that say what they show (text, number, list, table, bar or line chart, HTML) and what goes in them; a rule wired to them adds to its prompt field a request for one JSON object with a key for each, and each box draws its key of the answer
+- [x] Answers' JSON read from a ```json block, with line breaks inside strings escaped and citation marks dropped, as Glean's chat writes it
+- [x] Wide screens with widths for components, and the Project pulse dashboard starter (Glean's chat, else the Chat app's model)
+- [x] Links in a box open in a new tab through the page; the mock's chat answers boxes with made-up JSON in their shapes
+
 ### Next
 - [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool), the Chat app's model, instructions and conversation as parts of a flow, allowed tools and output checks
 - [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server
