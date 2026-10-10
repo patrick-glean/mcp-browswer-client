@@ -74,7 +74,7 @@ export function starterApp({ shell, workbench, name }) {
     return newApp({ name, screen: { kind: 'components', components }, flow: [newRule({ element: 'run', event: 'click', ...call, into: 'output' })] });
 }
 
-export const isGlean = server => {
+const isGlean = server => {
     try {
         return /(^|\.)glean\.com$/i.test(new URL(server.url).hostname);
     } catch {

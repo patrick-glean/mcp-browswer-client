@@ -43,7 +43,8 @@ export class ModelPicker {
                 </div>
                 <p class="app-note text-secondary">${model?.chosen
                     ? `You chose it. <button type="button" class="link-button" data-model-found>Use the one found instead</button>`
-                    : "Found among your servers: Glean's chat if you've added Glean, else a server's chat tool. Choose another here."}</p>
+                    : model ? "Found among your servers: Glean's chat if you've added Glean, else a server's chat tool. Choose another here."
+                    : 'None of your servers has a chat tool. Add Glean, or the mock server, whose chat stands in for a model; or choose a tool that answers here.'}</p>
             </details>`;
         if (focused) this.container.querySelector(`[${focused}]`)?.focus();
     }
