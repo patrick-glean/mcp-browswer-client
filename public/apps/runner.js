@@ -3,18 +3,20 @@
 // call tools, reach the network or run the screen's own scripts. Each call goes to the worker like
 // a Workbench call, and is recorded as a run from the app.
 //
-// Frame -> page: ready { values }, event { element, event, values }, size { height }
+// Frame -> page: ready { values }, event { element, event, values },
+//                layout { height, rects: { id: { top, left, width, height } } }
 // Page -> frame: config { config }, show { element, value, how, failed }, busy { elements, busy },
 //                highlight { elements }
-// Every message carries the token this load of the frame was given.
+// Every message carries the token this load of the frame was given. `layout` says where each
+// element the config tracks is, so the canvas can put its ports on the running screen.
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
-import { answerOf, callArguments, frameConfig, renderTemplate, rulesFor } from './flow.js';
+import { answerOf, callArguments, frameConfig, renderTemplate, rulesFor, triggerIndex, triggersOf } from './flow.js';
 import { elementsOf, screenHtml } from './screen.js';
 
 // The screen's runtime. It's injected into the frame as source, so it may use nothing from outside.
 export function frameRuntime({ config, token }) {
-    let { watch, read } = config;
+    let { watch, read, track = [] } = config;
     const send = message => parent.postMessage({ ...message, token }, '*');
     const byId = id => document.getElementById(id);
     const isField = element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement;
@@ -58,11 +60,52 @@ export function frameRuntime({ config, token }) {
     }, true);
     document.addEventListener('submit', event => event.preventDefault(), true);
 
-    // HTML from a tool goes in without anything that could run, load or navigate.
-    const fragment = html => {
+    // Where each tracked element is, after things settle.
+    let layoutTimer = null;
+    const layout = () => {
+        clearTimeout(layoutTimer);
+        layoutTimer = setTimeout(() => {
+            const rects = {};
+            for (const id of track) {
+                const box = byId(id)?.getBoundingClientRect();
+                if (box && (box.width || box.height)) rects[id] = { top: box.top + scrollY, left: box.left + scrollX, width: box.width, height: box.height };
+            }
+            send({ type: 'layout', height: document.documentElement.scrollHeight, rects });
+        }, 30);
+    };
+
+    // HTML a rule shows (how: 'html') goes in without anything that could run, load or navigate; a
+    // form's fields stay, without the form. Inside a part, its ids get the part's id in front and
+    // its styles reach only inside the part, as when the part was made; elsewhere, only inside the
+    // element.
+    const fragment = (html, target) => {
         const doc = new DOMParser().parseFromString(html, 'text/html');
-        doc.querySelectorAll('script, meta, base, link, iframe, frame, object, embed, form').forEach(node => node.remove());
-        return [...doc.body.childNodes];
+        const css = [...doc.querySelectorAll('style')].map(style => style.textContent).join('\n');
+        doc.querySelectorAll('script, style, meta, base, link, iframe, frame, frameset, object, embed, title, noscript, template').forEach(node => node.remove());
+        doc.querySelectorAll('form').forEach(form => form.replaceWith(...form.childNodes));
+        const part = target.closest('[data-part]')?.dataset.part;
+        for (const element of doc.body.querySelectorAll('*')) {
+            for (const { name, value } of [...element.attributes]) {
+                if (/^on/i.test(name) || (/^(href|src|action|formaction)$/i.test(name) && /^\s*javascript:/i.test(value))) element.removeAttribute(name);
+            }
+            if (!part) continue;
+            if (element.id) element.id = `${part}.${element.id}`;
+            for (const name of ['for', 'list']) if (element.getAttribute(name)) element.setAttribute(name, `${part}.${element.getAttribute(name)}`);
+            for (const name of ['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns']) {
+                const ids = element.getAttribute(name);
+                if (ids) element.setAttribute(name, ids.split(/\s+/).filter(Boolean).map(id => `${part}.${id}`).join(' '));
+            }
+            const href = element.getAttribute('href');
+            if (href?.startsWith('#') && href.length > 1) element.setAttribute('href', `#${part}.${href.slice(1)}`);
+        }
+        const nodes = [...doc.body.childNodes];
+        if (css.trim()) {
+            const style = document.createElement('style');
+            const root = part ? `[data-part="${part}"]` : `[id="${target.id.replace(/["\\]/g, '\\$&')}"]`;
+            style.textContent = `@scope (${root}) {\n${css.replace(/(^|[\s,{}>+~])(?:html|body|:root)(?=[\s,{.:#[>+~]|$)/g, '$1:scope')}\n}`;
+            nodes.unshift(style);
+        }
+        return nodes;
     };
     const show = ({ element: id, value, how, failed }) => {
         const element = byId(id);
@@ -70,7 +113,7 @@ export function frameRuntime({ config, token }) {
         if (isField(element)) {
             element.value = how === 'append' && element.value ? `${element.value}\n${value}` : value;
         } else if (how === 'html') {
-            element.replaceChildren(...fragment(value));
+            element.replaceChildren(...fragment(value, element));
         } else if (how === 'append') {
             const entry = document.createElement('div');
             entry.className = 'entry';
@@ -82,6 +125,7 @@ export function frameRuntime({ config, token }) {
         }
         if (failed) element.dataset.state = 'error';
         else delete element.dataset.state;
+        layout();
     };
     const busy = (ids, on) => {
         for (const element of ids.map(byId).filter(Boolean)) {
@@ -107,13 +151,16 @@ export function frameRuntime({ config, token }) {
     window.addEventListener('message', event => {
         if (event.source !== parent || event.data?.token !== token) return;
         const message = event.data;
-        if (message.type === 'config') ({ watch, read } = message.config);
-        else if (message.type === 'show') show(message);
+        if (message.type === 'config') {
+            ({ watch, read, track = [] } = message.config);
+            layout();
+        } else if (message.type === 'show') show(message);
         else if (message.type === 'busy') busy(message.elements || [], message.busy);
         else if (message.type === 'highlight') highlight(message.elements);
     });
-    new ResizeObserver(() => send({ type: 'size', height: document.documentElement.scrollHeight })).observe(document.documentElement);
+    new ResizeObserver(layout).observe(document.documentElement);
     send({ type: 'ready', values: values() });
+    layout();
 }
 
 const FRAME_CSS = '[data-app-highlight] { outline: 2px dashed #2468fa !important; outline-offset: 3px; }';
@@ -151,14 +198,24 @@ const shortText = (text, max = 80) => {
 };
 
 // Runs one app in one frame. `getApp` returns the app as it is now, so edits to the flow apply to
-// the next event; `onTrace` gets each step of what happened, in words.
+// the next event. It tells its owner what happens: `onTrace` each step in words, `onLayout` where
+// the screen's elements are, `onActivity` a rule starting its call ({ ruleId, phase: 'call',
+// trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error', routes }), and `onAnswer` each
+// rule's answer, for picking values from it.
 export class AppRunner {
-    constructor({ shell, workbench, getApp, onTrace = () => {}, onSize = () => {}, signal }) {
-        Object.assign(this, { shell, workbench, getApp, onTrace, onSize });
+    constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, signal }) {
+        Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer });
         this.frame = null;
         this.token = null;
         this.running = new Set();
         window.addEventListener('message', event => this.received(event), { signal });
+    }
+
+    // Lets go of the frame: its messages and the runs still out are ignored from now on.
+    stop() {
+        this.frame = null;
+        this.token = null;
+        this.ready = false;
     }
 
     // Shows the app's screen; with `start`, its "when the app opens" rules run once it's ready.
@@ -166,6 +223,7 @@ export class AppRunner {
         const app = this.getApp();
         if (this.frame !== frame) {
             frame.addEventListener('load', () => {
+                if (this.frame !== frame) return;
                 this.loads++;
                 if (this.loads > 1 && !this.navigated) {
                     this.navigated = true;
@@ -186,7 +244,7 @@ export class AppRunner {
     // The flow changed: the frame watches for what its rules wait for now.
     flowChanged() {
         const app = this.getApp();
-        if (app) this.post({ type: 'config', config: frameConfig(app.flow, this.elementIds) });
+        if (app && this.ready && this.elementIds) this.post({ type: 'config', config: frameConfig(app.flow, this.elementIds) });
     }
 
     highlight(elements) {
@@ -211,8 +269,8 @@ export class AppRunner {
             }
         } else if (message.type === 'event' && typeof message.element === 'string' && PAST[message.event]) {
             this.fire(message.element, message.event, message.values || {});
-        } else if (message.type === 'size' && Number.isFinite(message.height)) {
-            this.onSize(message.height);
+        } else if (message.type === 'layout' && Number.isFinite(message.height)) {
+            this.onLayout({ height: message.height, rects: message.rects && typeof message.rects === 'object' ? message.rects : {} });
         }
     }
 
@@ -229,10 +287,10 @@ export class AppRunner {
         this.group = crypto.randomUUID();
         this.trace({ kind: 'event', text: event === 'open' ? 'The app opened' : `${element} ${PAST[event]}` });
         const screen = { ...values };
-        for (const rule of rules) await this.run(rule, screen);
+        for (const rule of rules) await this.run(rule, screen, triggerIndex(rule, element, event));
     }
 
-    async run(rule, screen) {
+    async run(rule, screen, trigger) {
         if (this.running.has(rule.id)) {
             this.trace({ kind: 'note', text: 'That rule is still waiting for its last call, so it was skipped this time.' });
             return;
@@ -241,7 +299,8 @@ export class AppRunner {
         const server = this.shell.servers[serverUrl];
         const fail = text => {
             this.trace({ kind: 'error', text });
-            this.route(rule, answerOf({ error: text }), screen);
+            const answer = answerOf({ error: text });
+            this.onActivity({ ruleId: rule.id, phase: 'error', trigger, routes: this.route(rule, answer, screen) });
         };
         if (!serverUrl || !toolName) return fail('This rule has no tool to call yet. Choose a server and a tool.');
         if (!server) return fail(`${serverUrl} isn't in your servers. Add it with + beside Servers in the Workbench.`);
@@ -259,7 +318,9 @@ export class AppRunner {
         }
         const where = serverLabel(server, serverUrl);
         this.trace({ kind: 'call', text: `Calling ${toolName} on ${where} with ${shortText(JSON.stringify(prepared.sentArgs), 120)}` });
-        const busy = [...new Set([rule.when?.element, ...(rule.then || []).map(route => route.into)].filter(Boolean))];
+        this.onActivity({ ruleId: rule.id, phase: 'call', trigger });
+        const triggerElement = triggersOf(rule)[trigger]?.element || '';
+        const busy = [...new Set([triggerElement, ...(rule.then || []).map(route => route.into)].filter(Boolean))];
         this.post({ type: 'busy', elements: busy, busy: true });
         this.running.add(rule.id);
         let message;
@@ -277,16 +338,18 @@ export class AppRunner {
         this.trace(answer.ok
             ? { kind: 'ok', text: `${toolName} answered${took}: ${shortText(answer.values.text || JSON.stringify(answer.values.result))}`, runId: message.run?.id }
             : { kind: 'error', text: `${toolName} failed${took}: ${shortText(answer.values.error, 160)}`, runId: message.run?.id });
-        this.route(rule, answer, screen);
+        this.onAnswer(rule.id, answer);
+        this.onActivity({ ruleId: rule.id, phase: answer.ok ? 'ok' : 'error', trigger, routes: this.route(rule, answer, screen), durationMs: message?.run?.durationMs });
     }
 
+    // Puts the answer where the rule's routes for this outcome say. Returns their indexes.
     route(rule, answer, screen) {
-        const routes = (rule.then || []).filter(route => (route.if === 'error') === !answer.ok);
-        if (!routes.length) {
+        const taken = (rule.then || []).map((route, index) => [route, index]).filter(([route]) => (route.if === 'error') === !answer.ok);
+        if (!taken.length) {
             this.trace({ kind: 'note', text: `This rule doesn't say what to do when it ${answer.ok ? 'works' : 'fails'}.` });
-            return;
+            return [];
         }
-        for (const route of routes) {
+        for (const [route] of taken) {
             if (!this.elementIds.includes(route.into)) {
                 this.trace({ kind: 'error', text: `${route.into || 'Where the answer goes'} isn't on the screen.` });
                 continue;
@@ -297,5 +360,6 @@ export class AppRunner {
             const empty = missing.length ? ` ({{${missing[0]}}} had no value)` : '';
             this.trace({ kind: 'route', text: text ? `Put “${shortText(text)}” into ${route.into}${empty}` : `Cleared ${route.into}${empty}` });
         }
+        return taken.map(([, index]) => index);
     }
 }
