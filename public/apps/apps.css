@@ -997,7 +997,7 @@ app-canvas[data-mode='run'] .app-screen-overlay {
     position: absolute;
     top: var(--y);
     right: 0;
-    left: 26px;
+    left: 18px;
     display: flex;
     align-items: center;
     justify-content: flex-end;

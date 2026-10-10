@@ -15,7 +15,7 @@ import { AppElement } from './base.js';
 import { TraceList } from './trace.js';
 
 // The canvas's geometry, which the styles read as custom properties.
-const SCREEN = { x: 24, y: 76, width: 300, bar: 30, gutter: 96 };
+const SCREEN = { x: 24, y: 76, width: 300, bar: 30, gutter: 112 };
 // Room between the screen's ports and the tools for a transform's label on a wire.
 const TOOLS_GAP = 120;
 const TOOL_WIDTH = 220;
@@ -286,11 +286,13 @@ export class AppCanvas extends AppElement {
     renderGutter() {
         const slots = this.portSlots();
         const elements = this.elements();
+        // A part's elements go under the part's own row, by the rest of their id (.refresh under part).
+        const shortId = element => (element.part ? element.id.slice(element.part.length) : element.id);
         this.$('[data-gutter]').innerHTML = `
-            <svg class="app-leads" aria-hidden="true">${Object.values(slots).map(slot => `<path d="M 0 ${SCREEN.bar + slot.at} C 14 ${SCREEN.bar + slot.at}, 10 ${SCREEN.bar + slot.y}, 24 ${SCREEN.bar + slot.y}"/>`).join('')}</svg>
+            <svg class="app-leads" aria-hidden="true">${Object.values(slots).map(slot => `<path d="M 0 ${SCREEN.bar + slot.at} C 9 ${SCREEN.bar + slot.at}, 7 ${SCREEN.bar + slot.y}, 16 ${SCREEN.bar + slot.y}"/>`).join('')}</svg>
             ${elements.filter(element => slots[element.id]).map(element => `
                 <div class="app-gutter-row" style="--y: ${SCREEN.bar + slots[element.id].y}px" data-gutter-row="${escapeHtml(element.id)}">
-                    <span class="app-gutter-label mono" title="${escapeHtml(`${element.label} (${element.id})`)}">${escapeHtml(element.id)}</span>
+                    <span class="app-gutter-label mono" title="${escapeHtml(`${element.label} (${element.id})`)}">${escapeHtml(shortId(element))}</span>
                     <span class="app-port app-port-element app-port-${element.kind}" data-port="${escapeHtml(elementPort(element.id))}" title="${escapeHtml(`${element.id}: drag to a tool's Run or one of its fields, or from a tool's Answer to here`)}"></span>
                 </div>`).join('')}`;
     }
