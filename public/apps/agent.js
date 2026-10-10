@@ -13,6 +13,11 @@ export const TOOLS_INSTRUCTIONS = `You can call the tools listed below. To call 
 
 Call a tool when it would help you answer, and only the tools listed here; don't make up tools, calls or results. Each call runs, and its result joins the conversation, as a message from Tool, which you get with the next message.`;
 
+// A model's answer without the details Glean's chat puts after it: a line of three dashes, then
+// the conversation's metadata from chatId on. A conversation shows the answer alone, and the
+// model gets it back alone.
+export const answerText = text => String(text ?? '').replace(/\n+---\nchatId: [\s\S]*$/, '').trimEnd();
+
 // The field of a model's tool the conversation so far goes in: a list of text named like one
 // (Glean's chat calls it context).
 const CONVERSATION_NAMES = ['history', 'context', 'conversation', 'messages', 'chat_history'];

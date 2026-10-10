@@ -295,10 +295,14 @@ def box_value(key, kind, about):
 
 
 def boxes_reply(message):
-    """Answers a prompt an app's boxes added to: one JSON object, with a key for each box, and the
-    conversation's details after it, as Glean's chat answers."""
+    """Answers a prompt an app's boxes added to: one JSON object, with a key for each box."""
     answer = {key: box_value(key, kind.lower(), about) for key, kind, about in BOX_LINE.findall(message)}
-    return f"```json\n{json.dumps(answer, indent=2)}\n```\n\n---\nchatId: mock-{uuid.uuid4().hex[:12]}"
+    return f"```json\n{json.dumps(answer, indent=2)}\n```"
+
+
+def with_details(answer):
+    """An answer as Glean's chat sends one: the conversation's details after a line of dashes."""
+    return f"{answer}\n\n---\nchatId: mock-{uuid.uuid4().hex[:12]}\nmessages[1]:\n  -\n    stepId: MOCK"
 
 
 # What an app adds to a model's prompt around what the person said: the tools it may call, after
@@ -738,7 +742,7 @@ class Handler(BaseHTTPRequestHandler):
             text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
         elif name == "chat":
             history = args.get("history") if isinstance(args.get("history"), list) else []
-            text = chat_reply(str(args.get("message", "")), history)
+            text = with_details(chat_reply(str(args.get("message", "")), history))
         elif name == "make_screen":
             page = SCREEN_HTML.replace("{title}", html.escape(str(args.get("title") or "Ask the mock")))
             return self.respond(request_id, {**result, "content": [

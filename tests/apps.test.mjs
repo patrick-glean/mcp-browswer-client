@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
-import { allowedCall, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
+import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { chatApp, dashboardApp, foundModel } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
@@ -716,6 +716,12 @@ test("a model that may call tools is told which there are, never a server's cred
         + 'And:\n```\n{\\"jsonrpc\\": \\"2.0\\", \\"method\\": \\"count\\", \\"id\\": 2}\n```\n```json\n{"not": "a call"}\n```';
     assert.deepEqual(toolCallsIn(answer).map(call => [call.method, call.params]), [['echo', { text: 'hi' }], ['count', undefined]]);
     assert.deepEqual(toolCallsIn('No code here.'), []);
+    // Glean's chat, asked with this prompt, writes the call, then the conversation's details.
+    const fromGlean = '```json\n{"jsonrpc":"2.0","method":"ticket","params":{"prefix":"SUP-"},"id":1}\n```\n\n---\nchatId: 0d6c5e1f\nchatSessionTrackingToken: KiIS\nmessages[2]:\n  -\n    ts: "2026-10-10"';
+    const answered = answerOf({ result: { content: [{ type: 'text', text: fromGlean }] } }).values.text;
+    assert.equal(answered, '```json\n{"jsonrpc":"2.0","method":"ticket","params":{"prefix":"SUP-"},"id":1}\n```', 'an answer is shown and sent back without them');
+    assert.deepEqual(toolCallsIn(answered), [{ jsonrpc: '2.0', method: 'ticket', params: { prefix: 'SUP-' }, id: 1 }]);
+    assert.equal(answerText('Before\n\n---\n\nA rule, then more.'), 'Before\n\n---\n\nA rule, then more.', 'a rule in the answer itself stays');
     assert.equal(serverWithTool(servers, 'echo').server.url, MOCK, 'a connected server first');
     assert.equal(serverWithTool(servers, 'nothing'), null);
 

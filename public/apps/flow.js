@@ -5,13 +5,16 @@
 // {{error}}). An element of a part (HTML a model or a tool made) is named part.element, as
 // {{dashboard.search}}.
 //
-// A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position? }
+// A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position?,
+//           prompt?, instructions?, tools? }
 // A trigger: { element, event }; any of a rule's triggers starts it.
-// A route: { if: 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }
-// position: where the rule's tool sits on the canvas, { x, y }.
+// A route: { if: 'sent' | 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }
+// position: where the rule's tool sits on the canvas, { x, y }. prompt: the argument a model's
+// prompt goes in, which instructions and, with tools, your servers' tools are added to (agent.js).
 // Pure functions, shared by the builder, the runner and the tests.
 
 import { resolveArguments, variablesIn } from '../workbench/template.js';
+import { answerText } from './agent.js';
 
 // What a rule can wait for. `open` belongs to the app itself, so its element is ''.
 export const EVENTS = {
@@ -170,7 +173,7 @@ export function htmlFromResult(result) {
 // result the tool marked isError counts as failing, with its text as the error.
 export function answerOf(message) {
     const result = toolResult(message?.result);
-    const text = resultText(result);
+    const text = answerText(resultText(result));
     let error = '';
     if (message?.error) error = String(message.error);
     else if (!result) error = 'The tool sent back nothing.';
