@@ -21,7 +21,7 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - Errors cross into JavaScript as JSON `McpError { kind, message, status?, code?, data? }` with a message a user can act on.
 - Connection state is per server URL (`src/mcp/registry.rs`, `sdk-client/mcp.js`). In Rust, never hold a `RefCell` borrow (or any lock) across `.await`.
 - The service worker can be stopped at any time: MCP exports reconnect on demand, and message handling runs inside `event.waitUntil()`.
-- Bearer tokens come only from the page (or the server list the page registers) or the worker's sign-in store, never from tool output, and are redacted from logs. They never go into anything sent to a model: the Chat app's server list goes through `serversForModel`.
+- Bearer tokens come only from the page, with each message for its server, or the worker's sign-in store, never from tool output, and are redacted from logs. They never go into anything sent to a model: what a rule's model is told about your servers comes from `toolsForModel` (`public/apps/agent.js`), each server's name, URL and tools only.
 
 ### Sign-in (OAuth)
 - Follow the MCP authorization spec (2026-07-28). Each library (`src/oauth/`, `sdk-client/oauth.js` over the SDK's `auth()`) does discovery, registration, PKCE, the authorization URL, the callback checks, code exchange and refresh. It stores nothing: the worker keeps clients, tokens and pending sign-ins in IndexedDB (`public/authStore.js`).
@@ -44,13 +44,14 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - Opening a tool fills only its required fields; Fill beside a field fills that one (`fieldTestData`). Never fill optional fields unasked, and never generate an optional pagination cursor. A value from a description must be one the description gives as a value, not prose: add the description to `tests/prefill.test.mjs` when one fills something that makes no sense.
 - Runs compare on a hash of the result with sorted keys and no `_meta`. A saved request's runs compare with each other, and other calls with the same tool and sent arguments.
 - Never put credentials in Workbench records. Arguments are stored as written, and tokens travel only in `mcpOptions`.
-- The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `app`, `chat` and `reply`; treat `sandbox` (from before the rename) as `workbench`.
+- The store keeps its first name, `mcp_sandbox`. Changing its stores or indexes needs a new `DB_VERSION` with an upgrade path for existing data. Run sources are `workbench`, `collection`, `app` and `reply` (a tool call in a model's answer to an app); treat `sandbox` (from before the rename) as `workbench`. Runs from the Chat app the Chat example replaced say `chat`.
 - Saved requests, steps and app manifests share one shape for a call, `{serverUrl, toolName, args}`. Keep it that way, so saved requests can become workflow steps.
 
 ### Apps you build
 - An app is a screen and a flow (`public/apps/`). The flow runs in the page and calls tools only through `AppShell.runTool` with `source: 'app'` and the arguments it filled in (`sentArgs`), so each call is a run and the worker has no app logic.
 - The screen runs in a `sandbox="allow-scripts"` frame under `frameDocument`'s policy: no network, no scripts but the runtime, an opaque origin (never same-origin, even for HTML our own tool calls return). It reports events and shows values; it never calls tools. Messages both ways carry the load's token, and a frame that navigates stops the app.
-- A part is HTML a model or a tool made, kept without scripts, handlers or forms (`sanitizePart`), its ids prefixed with the part's id and its styles in `@scope`. Ask a model calls the Chat app's model (`ask.js`), a run from the app like any other call.
+- A part is HTML a model or a tool made, kept without scripts, handlers or forms (`sanitizePart`), its ids prefixed with the part's id and its styles in `@scope`. Ask a model calls the model (`Apps.model()`, `ask.js`), a run from the app like any other call.
+- There's one kind of app. The agent loop is a rule's: its model's prompt field gets its `instructions` and, with `tools`, your servers' tools; the JSON-RPC calls in its answer run through `AppShell.runTool` with source `reply`, at most three every 10 seconds per rule, and their results join the conversations the answer went to (`agent.js`, `runner.js`). Chat is an example of it (`chatApp`), not an app of its own.
 - A rule's `when` is a list of triggers; `{{name}}` is an element's value, then an environment variable; a whole `{{name}}` takes the field's type. What a route shows is a template over the answer (`text`, `structured`, `json`, `html`, `result`, `error`) and the screen. Element ids can't be those answer names.
 - The canvas draws the flow (`graph.js`): every wire is one part of a rule, and the canvas keeps only where each tool sits (`rule.position`). Change the flow's shape and the graph together.
 - DML (`dml.js`) is the portable form. Its reader and writer change together and stay DOM-free; old files must stay readable, and a change older readers can't read raises `DML_VERSION`. Apps live in IndexedDB `mcp_apps`, separate from `mcp_sandbox`.
@@ -117,11 +118,18 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] Wide screens with widths for components, and the Project pulse dashboard starter (Glean's chat, else the Chat app's model)
 - [x] Links in a box open in a new tab through the page; the mock's chat answers boxes with made-up JSON in their shapes
 
+### Done (app builder milestone 2, fourth step: Chat as an example)
+- [x] One kind of app: the Chat app is gone, and Chat is an example in the builder (a conversation, a message field, Send and one rule) beside Project pulse; with no app shown, the page offers the examples
+- [x] The agent loop in the app runner: a rule's instructions and tools added to its model's prompt, the tool calls in its answer run as runs from a reply, at most three every 10 seconds, and their results in the conversation
+- [x] Conversations (outputs that keep entries with who they're from, whose value is the list of them) and routes as it's sent, with a Sent port on the canvas; `show="conversation"`, `<instructions>`, `tools="yes"` and `<then if="sent">` in DML
+- [x] The model the builder asks: Glean's chat, else a server's chat tool, unless chosen with the Model menus; its other required text fields get the person's words (Glean's `_user_goal`)
+- [x] The worker without a chat pipeline or a server list; the Chat app's old settings and conversations removed; the mock's chat writes a tool call when asked
+
 ### Next
-- [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool), the Chat app's model, instructions and conversation as parts of a flow, allowed tools and output checks
+- [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool, so a model gets its tools' results at once), allowed tools for a rule's model, and output checks
 - [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server
 - [ ] Client ID metadata documents (the spec's preferred registration), step-up authorization, token revocation on sign-out
-- [ ] Durable state in IndexedDB (server config, era cache, conversations)
+- [ ] Durable state in IndexedDB (server config, era cache, an app's conversations across reloads)
 - [ ] `input_required` / elicitation UI (multi round-trip requests)
 - [ ] `subscriptions/listen` for list-change notifications and resource subscriptions
 - [ ] Completions for prompt and resource template arguments
@@ -129,5 +137,5 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 
 ## Testing Requirements
 - Protocol logic that doesn't touch the browser (SSE parsing, header encoding, era classification, envelopes) gets native unit tests in its module.
-- Changes to a library, the connection flow, sign-in, the service worker or the Workbench and Apps UI must pass `npm run test:browser -- --reference` (the default, TypeScript SDK) and `npm run test:browser:wasm -- --reference`, which cover modern, legacy, SSE, dual-era, strict-CORS, token-protected and OAuth mock servers, sign-in and refresh, the layout and inspector, the Workbench, the Chat app, the official Python SDK server, a service worker restart, a second tab, unreachable servers and what the log records. `npm run test:public` adds the public servers the in-app Guide suggests.
+- Changes to a library, the connection flow, sign-in, the service worker or the Workbench and Apps UI must pass `npm run test:browser -- --reference` (the default, TypeScript SDK) and `npm run test:browser:wasm -- --reference`, which cover modern, legacy, SSE, dual-era, strict-CORS, token-protected and OAuth mock servers, sign-in and refresh, the layout and inspector, the Workbench, the app builder and its examples, the official Python SDK server, a service worker restart, a second tab, unreachable servers and what the log records. `npm run test:public` adds the public servers the in-app Guide suggests.
 - New server behaviors should be added to `test_mcp_server.py` (standard library only) rather than mocked in the client.
