@@ -151,6 +151,21 @@ TOOLS = [
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
+    {
+        # A stand-in for a model, so the Chat app and the app builder's "Ask a model" work without one.
+        "name": "chat",
+        "title": "Chat (a stand-in model)",
+        "description": "A stand-in for a model: it answers what you say, and when you ask for HTML it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "What you say to it."},
+                "history": {"type": "array", "items": {"type": "string"}, "description": "The conversation so far."},
+            },
+            "required": ["message"],
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
 ]
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
@@ -195,6 +210,59 @@ SCREEN_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+# What chat writes when asked for a dashboard: cards, a search field, a Refresh button and a list,
+# with an inline handler and a script that must never run where an app shows it.
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tickets</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; }
+    .dash { display: grid; gap: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .card { padding: 10px 12px; border-radius: 10px; background: #eef2ff; color: #1e2a5a; }
+    .card b { display: block; font-size: 1.5rem; }
+    .row { display: flex; gap: 8px; }
+    .row input { flex: 1; padding: 8px 10px; font: inherit; }
+    #tickets { margin: 0; padding-left: 18px; }
+    #details { min-height: 36px; padding: 8px 10px; border-radius: 8px; background: #f4f4f5; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main class="dash">
+    <h2>{title}</h2>
+    <div class="cards">
+      <div class="card">Open <b id="open">12</b></div>
+      <div class="card">Today <b id="today">3</b></div>
+      <div class="card">Waiting <b id="waiting">5</b></div>
+    </div>
+    <form class="row" onsubmit="alert('submitted')">
+      <label for="search" hidden>Find a ticket</label>
+      <input id="search" placeholder="Find a ticket">
+      <button id="refresh" type="submit" onclick="alert('clicked')">Refresh</button>
+    </form>
+    <ul id="tickets"><li>T-1 The printer jams</li><li>T-2 The VPN drops</li></ul>
+    <div id="details" aria-live="polite"></div>
+  </main>
+  <script>document.getElementById('details').textContent = 'The dashboard ran its own script';</script>
+</body>
+</html>
+"""
+
+
+def chat_reply(message):
+    """What the stand-in model says: an answer, or a page when asked for HTML."""
+    if "html" not in message.lower():
+        return f"You said: {message}"
+    request = message.split("\n", 1)[0].split(": ", 1)[-1].strip()
+    if "dashboard" in request.lower():
+        page = DASHBOARD_HTML.replace("{title}", html.escape(request[:1].upper() + request[1:60]))
+    else:
+        page = SCREEN_HTML.replace("{title}", html.escape(request[:60] or "Ask the mock"))
+    return f"Here is a page for that.\n\n```html\n{page}```\n\nIts buttons and fields have ids, so an app can wire them up."
+
+
 PROMPTS = [
     {
         "name": "greet",
@@ -554,6 +622,8 @@ class Handler(BaseHTTPRequestHandler):
             if problems:
                 return self.respond(request_id, {**result, "content": [text_content("; ".join(problems))], "isError": True})
             text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+        elif name == "chat":
+            text = chat_reply(str(args.get("message", "")))
         elif name == "make_screen":
             page = SCREEN_HTML.replace("{title}", html.escape(str(args.get("title") or "Ask the mock")))
             return self.respond(request_id, {**result, "content": [

@@ -531,11 +531,11 @@ async function main() {
         check('logs: the worker reports the client build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -600,7 +600,7 @@ async function main() {
         check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
         check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 6)', inspector.filtered);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 7)', inspector.filtered);
         check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
@@ -625,7 +625,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 6 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 7 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
