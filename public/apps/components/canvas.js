@@ -520,7 +520,7 @@ export class AppCanvas extends AppElement {
             const box = route?.if !== 'error' && rule?.prompt ? this.element(route?.into) : null;
             this.hint(made.kind === 'trigger' ? 'Connected: that starts the tool. Choose what it waits for in the Inspector.'
                 : made.kind === 'arg' ? 'Connected: that fills the field.'
-                : isBox(box) ? `Connected: ${rule.call.toolName} is asked in ${rule.prompt} for the ${BOX_KINDS[box.show].noun} ${box.id} shows.`
+                : isBox(box) ? `Connected: ${box.id} asks ${rule.call.toolName} for ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}, in ${rule.prompt}.`
                 : 'Connected: the answer goes there. Its transform says what of it shows.');
         } catch (error) {
             if (!(error instanceof FlowError)) throw error;

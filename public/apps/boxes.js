@@ -123,7 +123,12 @@ function series(value) {
 }
 
 const chartLabel = ({ labels, values }) => labels.map((label, index) => `${label || index + 1}: ${shortNumber(values[index])}`).join(', ');
-const axis = labels => `<div class="chart-axis">${labels.map(label => `<span title="${escapeHtml(label)}">${escapeHtml(label)}</span>`).join('')}</div>`;
+// A chart's labels under it: at most about six, evenly spread, so each has room; the rest keep
+// their place, empty, with their label as a tooltip.
+const axis = labels => {
+    const every = Math.ceil(labels.length / 6);
+    return `<div class="chart-axis">${labels.map((label, index) => `<span title="${escapeHtml(label)}">${index % every === 0 ? escapeHtml(label) : ''}</span>`).join('')}</div>`;
+};
 
 const RENDER = {
     text: value => `<p class="box-text">${escapeHtml(typeof value === 'string' ? tidy(value) : JSON.stringify(value, null, 2))}</p>`,

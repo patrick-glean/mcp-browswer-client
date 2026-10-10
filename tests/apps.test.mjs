@@ -544,6 +544,9 @@ test('each box draws its piece of the answer, and says when it doesn\'t fit', ()
     assert.match(renderBox('bar', [{ label: 'a', value: 1 }, { label: 'b', value: 3 }]).html, /<span title="b">b<\/span>/);
     assert.match(renderBox('bar', { Mon: 1, Tue: 2 }).html, /<span title="Tue">Tue<\/span>/);
     assert.match(renderBox('line', { labels: ['a', 'b', 'c'], values: [1, 3, 2] }).html, /<polyline points="0,95 50,5 100,50"\/>/);
+    const weeks = Array.from({ length: 8 }, (_, index) => `Week ${index + 1}`);
+    assert.deepEqual([...renderBox('line', { labels: weeks, values: [1, 2, 3, 4, 5, 6, 7, 8] }).html.matchAll(/<span title="[^"]+">([^<]*)<\/span>/g)].map(match => match[1]),
+        ['Week 1', '', 'Week 3', '', 'Week 5', '', 'Week 7', ''], 'eight labels show every other one');
     assert.equal(renderBox('html', '<b>hi</b>').html, '<b>hi</b>');
     for (const [kind, value, problem] of [
         ['bar', 'twelve', 'A chart takes {"labels": [...], "values": [...]}.'],

@@ -1217,7 +1217,7 @@ async function main() {
             const banner = await frameWaitFor(`!document.body.dataset.before && document.querySelector('#panel .banner') ? document.querySelector('#panel .banner').textContent : null`);
             const htmlAsked = await page.waitFor(`${latestPrompt}.then(prompt => (prompt.match(/^- "panel" \\(HTML\\): .*$/m) || [])[0] || null)`, 5000);
             check('Apps: an HTML box wired to the Answer asks for HTML to fit its width, and shows it',
-                panelWire === 'Connected: chat is asked in message for the HTML panel shows.' && banner === 'On track. The beta starts once the API review is done.'
+                panelWire === 'Connected: panel asks chat for HTML, in message.' && banner === 'On track. The beta starts once the API review is done.'
                     && htmlAsked === '- "panel" (HTML): HTML. As a string of HTML for a box about 1030 px wide: no scripts, nothing from the network, inline styles only.',
                 `${panelWire}; ${banner}; ${htmlAsked}`);
 
