@@ -12,18 +12,27 @@
 // asks the page to open a link's http(s) address in a new tab, which the sandbox can't.
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
-import { asksOf, BOX_KINDS, formatRequest, isBox, renderBox } from './boxes.js';
-import { answerOf, callArguments, displayValue, frameConfig, listed, renderTemplate, rulesFor, templateValue, triggerIndex, triggersOf } from './flow.js';
+import { allowedCall, composePrompt, serverWithTool, toolCallsIn } from './agent.js';
+import { asksOf, BOX_KINDS, CONVERSATION_ROLES, formatRequest, isBox, isConversation, renderBox, ROUTE_ROLES } from './boxes.js';
+import {
+    answerOf, callArguments, displayValue, frameConfig, listed, renderTemplate, routeWhen, rulesFor, templateValue, triggerIndex, triggersOf,
+} from './flow.js';
 import { elementsOf, screenHtml } from './screen.js';
 
-// The screen's runtime. It's injected into the frame as source, so it may use nothing from outside.
-export function frameRuntime({ config, token }) {
+// The screen's runtime. It's injected into the frame as source, so it may use nothing from outside;
+// `roles` names who each entry of a conversation is from, as its value says.
+export function frameRuntime({ config, token, roles = {} }) {
     let { watch, read, track = [] } = config;
     const send = message => parent.postMessage({ ...message, token }, '*');
     const byId = id => document.getElementById(id);
     const isField = element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement;
+    const textIn = element => (element.innerText ?? element.textContent ?? '').trim();
     const valueOf = element => {
-        if (!isField(element)) return (element.innerText ?? element.textContent ?? '').trim();
+        // A conversation is its entries, each with who it's from: what a model is told came before.
+        if (element.classList.contains('box-conversation')) {
+            return [...element.children].filter(child => child.classList.contains('entry')).map(entry => `${roles[entry.dataset.role] || 'Note'}: ${textIn(entry)}`);
+        }
+        if (!isField(element)) return textIn(element);
         if (element.type === 'checkbox' || element.type === 'radio') return String(element.checked);
         return element.value;
     };
@@ -112,7 +121,7 @@ export function frameRuntime({ config, token }) {
         }
         return nodes;
     };
-    const show = ({ element: id, value, how, failed }) => {
+    const show = ({ element: id, value, how, failed, role }) => {
         const element = byId(id);
         if (!element) return;
         if (isField(element)) {
@@ -122,6 +131,7 @@ export function frameRuntime({ config, token }) {
         } else if (how === 'append') {
             const entry = document.createElement('div');
             entry.className = 'entry';
+            if (role) entry.dataset.role = role;
             entry.textContent = value;
             element.append(entry);
             element.scrollTop = element.scrollHeight;
@@ -190,7 +200,7 @@ export function frameDocument(html, { config, token }) {
     doc.head.append(style);
     const script = doc.createElement('script');
     script.setAttribute('nonce', nonce);
-    script.textContent = `(${frameRuntime.toString()})(${scriptJson({ config, token })});`;
+    script.textContent = `(${frameRuntime.toString()})(${scriptJson({ config, token, roles: CONVERSATION_ROLES })});`;
     doc.body.append(script);
     return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
 }
@@ -213,6 +223,8 @@ export class AppRunner {
         this.frame = null;
         this.token = null;
         this.running = new Set();
+        // When each rule's answers last called tools: Map<ruleId, [time]>.
+        this.replyCalls = new Map();
         window.addEventListener('message', event => this.received(event), { signal });
     }
 
@@ -337,45 +349,96 @@ export class AppRunner {
             return fail(`Didn't call ${toolName}: ${error.message}`);
         }
         const where = serverLabel(server, serverUrl);
-        // The boxes the rule fills ask for what they show, in its prompt field.
+        // The prompt field also gets the rule's instructions, the tools its model may call, and
+        // what the boxes it fills need.
         const app = this.getApp();
-        const asks = rule.prompt ? asksOf(rule, elementsOf(app?.screen)) : [];
-        if (asks.length) {
-            const prompt = prepared.sentArgs[rule.prompt];
-            const request = formatRequest(asks, { size: app?.screen?.size });
-            prepared.sentArgs[rule.prompt] = typeof prompt === 'string' && prompt.trim() ? `${prompt}\n\n${request}` : request;
+        const added = [];
+        if (rule.prompt) {
+            const asks = asksOf(rule, elementsOf(app?.screen));
+            const instructions = String(rule.instructions ?? '').trim();
+            const servers = rule.tools ? Object.fromEntries(Object.entries(this.shell.servers).filter(([, candidate]) => candidate.tools?.length)) : null;
+            if (instructions) added.push('its instructions');
+            if (servers) added.push(`the tools of ${Object.keys(servers).length === 1 ? 'your server' : `your ${Object.keys(servers).length} servers`}`);
+            if (asks.length) added.push(`a request for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}`);
+            if (added.length) {
+                prepared.sentArgs[rule.prompt] = composePrompt(prepared.sentArgs[rule.prompt], {
+                    instructions, servers, request: asks.length ? formatRequest(asks, { size: app?.screen?.size }) : '',
+                });
+            }
         }
         this.trace({ kind: 'call', text: `Calling ${toolName} on ${where} with ${shortText(JSON.stringify(prepared.sentArgs), 120)}` });
-        if (asks.length) this.trace({ kind: 'note', text: `Asked in ${rule.prompt} for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}.` });
-        this.onActivity({ ruleId: rule.id, phase: 'call', trigger });
+        if (added.length) this.trace({ kind: 'note', text: `Added to ${rule.prompt} ${listed(added)}.` });
+        // What goes on the screen as it's sent, with the values the call was made with: a chat's
+        // message into its conversation, say.
+        const sentRoutes = this.route(rule, { ok: true, values: {} }, screen, 'sent');
+        this.onActivity({ ruleId: rule.id, phase: 'call', trigger, routes: sentRoutes });
         const triggerElement = triggersOf(rule)[trigger]?.element || '';
         const busy = [...new Set([triggerElement, ...(rule.then || []).map(route => route.into)].filter(Boolean))];
         this.post({ type: 'busy', elements: busy, busy: true });
+        // Until the tool calls in its answer have run too, so the next message gets their results.
         this.running.add(rule.id);
-        let message;
         try {
-            message = await this.shell.runTool({
+            const message = await this.shell.runTool({
                 url: serverUrl, tool, args: rule.call.args || {}, sentArgs: prepared.sentArgs, show: false, source: 'app',
                 environmentName: prepared.variablesUsed.length ? this.workbench.environment?.name || null : null,
             });
+            const answer = answerOf(message);
+            const took = typeof message?.run?.durationMs === 'number' ? ` in ${Math.round(message.run.durationMs)} ms` : '';
+            this.trace(answer.ok
+                ? { kind: 'ok', text: `${toolName} answered${took}: ${shortText(answer.values.text || JSON.stringify(answer.values.result))}`, runId: message.run?.id }
+                : { kind: 'error', text: `${toolName} failed${took}: ${shortText(answer.values.error, 160)}`, runId: message.run?.id });
+            this.onAnswer(rule.id, answer);
+            this.onActivity({ ruleId: rule.id, phase: answer.ok ? 'ok' : 'error', trigger, routes: this.route(rule, answer, screen), durationMs: message?.run?.durationMs });
+            if (answer.ok && rule.tools) await this.runToolCalls(rule, answer, screen);
         } finally {
             this.running.delete(rule.id);
             this.post({ type: 'busy', elements: busy, busy: false });
         }
-        const answer = answerOf(message);
-        const took = typeof message?.run?.durationMs === 'number' ? ` in ${Math.round(message.run.durationMs)} ms` : '';
-        this.trace(answer.ok
-            ? { kind: 'ok', text: `${toolName} answered${took}: ${shortText(answer.values.text || JSON.stringify(answer.values.result))}`, runId: message.run?.id }
-            : { kind: 'error', text: `${toolName} failed${took}: ${shortText(answer.values.error, 160)}`, runId: message.run?.id });
-        this.onAnswer(rule.id, answer);
-        this.onActivity({ ruleId: rule.id, phase: answer.ok ? 'ok' : 'error', trigger, routes: this.route(rule, answer, screen), durationMs: message?.run?.durationMs });
     }
 
-    // Puts the answer where the rule's routes for this outcome say. Returns their indexes.
-    route(rule, answer, screen) {
-        const taken = (rule.then || []).map((route, index) => [route, index]).filter(([route]) => (route.if === 'error') === !answer.ok);
+    // The tool calls in a model's answer, run one after another as runs from a reply. Their results
+    // join the conversations the answer went to, which the model gets with the next message.
+    async runToolCalls(rule, answer, screen) {
+        const calls = toolCallsIn(answer.values.text);
+        if (!calls.length) return;
+        const elements = new Map(elementsOf(this.getApp()?.screen).map(element => [element.id, element]));
+        const conversations = [...new Set((rule.then || []).filter(route => routeWhen(route) === 'ok' && isConversation(elements.get(route.into))).map(route => route.into))];
+        const add = (text, role) => conversations.forEach(id => {
+            this.post({ type: 'show', element: id, value: text, how: 'append', role });
+            screen[id] = [...(Array.isArray(screen[id]) ? screen[id] : []), `${CONVERSATION_ROLES[role]}: ${text}`];
+        });
+        for (const call of calls) {
+            const limit = allowedCall(this.replyCalls.get(rule.id));
+            this.replyCalls.set(rule.id, limit.times);
+            if (!limit.allowed) {
+                this.trace({ kind: 'note', text: `Skipped ${call.method}: an answer's tool calls run at most 3 in 10 seconds.` });
+                continue;
+            }
+            const found = serverWithTool(this.shell.servers, call.method);
+            if (!found) {
+                this.trace({ kind: 'error', text: `The answer asks for ${call.method}, which none of your servers has.` });
+                add(`${call.method} isn't one of your servers' tools.`, 'error');
+                continue;
+            }
+            const params = call.params && typeof call.params === 'object' && !Array.isArray(call.params) ? call.params : {};
+            const { server, tool } = found;
+            this.trace({ kind: 'call', text: `The answer asks for ${tool.name}: calling it on ${serverLabel(server, server.url)} with ${shortText(JSON.stringify(params), 120)}` });
+            const message = await this.shell.runTool({ url: server.url, tool, args: params, sentArgs: params, show: false, source: 'reply' });
+            const result = answerOf(message);
+            const took = typeof message?.run?.durationMs === 'number' ? ` in ${Math.round(message.run.durationMs)} ms` : '';
+            this.trace(result.ok
+                ? { kind: 'ok', text: `${tool.name} answered${took}: ${shortText(result.values.text || JSON.stringify(result.values.result))}`, runId: message.run?.id }
+                : { kind: 'error', text: `${tool.name} failed${took}: ${shortText(result.values.error, 160)}`, runId: message.run?.id });
+            add(`${tool.name}: ${result.ok ? result.values.text : result.values.error}`, result.ok ? 'tool' : 'error');
+        }
+    }
+
+    // Puts the answer where the rule's routes for this outcome (`phase`: sent, ok or error) say,
+    // and returns their indexes. Routes as it's sent have only the screen's values.
+    route(rule, answer, screen, phase = answer.ok ? 'ok' : 'error') {
+        const taken = (rule.then || []).map((route, index) => [route, index]).filter(([route]) => routeWhen(route) === phase);
         if (!taken.length) {
-            this.trace({ kind: 'note', text: `This rule doesn't say what to do when it ${answer.ok ? 'works' : 'fails'}.` });
+            if (phase !== 'sent') this.trace({ kind: 'note', text: `This rule doesn't say what to do when it ${answer.ok ? 'works' : 'fails'}.` });
             return [];
         }
         const elements = new Map(elementsOf(this.getApp()?.screen).map(element => [element.id, element]));
@@ -393,6 +456,16 @@ export class AppRunner {
                 continue;
             }
             const box = elements.get(route.into);
+            // A conversation keeps each piece as an entry from whoever it's from; nothing clears it.
+            if (isConversation(box)) {
+                const { text, missing } = renderTemplate(route.show, values);
+                const role = ROUTE_ROLES[phase];
+                this.post(text ? { type: 'show', element: route.into, value: text, how: 'append', role } : { type: 'show', element: route.into, value: '', how: 'replace' });
+                screen[route.into] = text ? [...(Array.isArray(screen[route.into]) ? screen[route.into] : []), `${CONVERSATION_ROLES[role]}: ${text}`] : [];
+                const empty = missing.length ? ` ({{${missing[0]}}} had no value)` : '';
+                this.trace({ kind: 'route', text: text ? `Added “${shortText(text)}” to ${route.into}${empty}` : `Cleared ${route.into}${empty}` });
+                continue;
+            }
             if (answer.ok && isBox(box) && route.how !== 'append') {
                 const value = templateValue(route.show, values);
                 const { html, problem } = renderBox(box.show, value);

@@ -374,6 +374,25 @@ app-preview {
     min-width: 0;
 }
 
+.app-prompt-more {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.app-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-check input {
+    flex: none;
+    margin: 2px 0 0;
+}
+
 .app-prompt-preview summary {
     color: var(--theme-text-secondary);
     font-size: 0.75rem;
@@ -827,11 +846,13 @@ app-inspector:empty {
 
 .app-wire-trigger { --wire: var(--theme-warning-foreground); }
 .app-wire-arg { --wire: var(--theme-link); }
+.app-wire-sent { --wire: var(--theme-info-foreground); }
 .app-wire-answer { --wire: var(--theme-success-foreground); }
 .app-wire-error { --wire: var(--theme-error); }
 
 .app-arrow-trigger path { fill: var(--theme-warning-foreground); }
 .app-arrow-arg path { fill: var(--theme-link); }
+.app-arrow-sent path { fill: var(--theme-info-foreground); }
 .app-arrow-answer path { fill: var(--theme-success-foreground); }
 .app-arrow-error path { fill: var(--theme-error); }
 
@@ -1094,6 +1115,7 @@ app-canvas[data-mode='run'] .app-screen-overlay {
 .app-port-input,
 .app-port-arg { --port: var(--theme-link); }
 .app-port-output,
+.app-port-sent { --port: var(--theme-info-foreground); }
 .app-port-answer { --port: var(--theme-success-foreground); }
 .app-port-error { --port: var(--theme-error); }
 
@@ -1262,6 +1284,10 @@ app-canvas[data-mode='run'] .app-port {
 
 .app-pill-error {
     --pill: var(--theme-error);
+}
+
+.app-pill-sent {
+    --pill: var(--theme-info-foreground);
 }
 
 .app-pill-custom {

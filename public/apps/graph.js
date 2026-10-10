@@ -3,25 +3,30 @@
 // part and removing it takes the part away:
 //   trigger   an element (or Start) to the tool's Run          one of rule.when
 //   argument  an element to one of the tool's fields           {{element}} in rule.call.args
+//   sent      the tool's Sent to an element                    a route of rule.then, as it's sent
 //   answer    the tool's Answer to an element                  a route of rule.then, if it works
 //   error     the tool's Error to an element                   a route of rule.then, if it fails
-// Ports are strings: 'start', 'el:<id>', 'run:<rule>', 'arg:<rule>:<field>', 'ok:<rule>', 'err:<rule>'.
-// Pure functions, so the tests can check them without a page.
+// Ports are strings: 'start', 'el:<id>', 'run:<rule>', 'arg:<rule>:<field>', 'sent:<rule>',
+// 'ok:<rule>', 'err:<rule>'. Pure functions, so the tests can check them without a page.
 
 import { variablesIn } from '../workbench/template.js';
-import { defaultEvent, DEFAULT_SHOW, FlowError, trigger, triggersOf } from './flow.js';
+import { defaultEvent, DEFAULT_SHOW, FlowError, routeWhen, trigger, triggersOf } from './flow.js';
 
 export function parsePort(port) {
     const [kind, ...rest] = String(port ?? '').split(':');
     if (kind === 'start') return { kind };
     if (kind === 'el') return { kind, element: rest.join(':') };
-    if (kind === 'run' || kind === 'ok' || kind === 'err') return { kind, ruleId: rest.join(':') };
+    if (kind === 'run' || kind === 'sent' || kind === 'ok' || kind === 'err') return { kind, ruleId: rest.join(':') };
     if (kind === 'arg') return { kind, ruleId: rest[0], arg: rest.slice(1).join(':') };
     return { kind: null };
 }
 
+// A route's port and wire kind, by when it runs.
+const ROUTE_PORTS = { sent: ['sent', 'sent'], ok: ['ok', 'answer'], error: ['err', 'error'] };
+const PHASE_OF = { sent: 'sent', ok: 'ok', err: 'error' };
+
 // Which kinds of port a wire joins, in either direction.
-const PAIRS = new Set(['el+run', 'run+start', 'arg+el', 'el+ok', 'el+err']);
+const PAIRS = new Set(['el+run', 'run+start', 'arg+el', 'el+sent', 'el+ok', 'el+err']);
 const pairOf = (a, b) => [parsePort(a).kind, parsePort(b).kind].sort().join('+');
 
 export const canConnect = (a, b) => a !== b && PAIRS.has(pairOf(a, b));
@@ -31,7 +36,8 @@ function whyNot(pair) {
     if (pair === 'el+el') return "Two parts of the screen don't connect to each other: connect them through a tool.";
     if (pair.includes('start')) return "Start connects to a tool's Run: that tool is called when the app opens.";
     if (pair === 'ok+run' || pair === 'err+run' || pair === 'arg+ok' || pair === 'arg+err') return "A tool's answer can't start another tool yet; send it to the screen.";
-    return "Those don't connect. Wires go from the screen (or Start) to a tool's Run or one of its fields, and from a tool's Answer or Error back to the screen.";
+    if (pair.includes('sent')) return "A tool's Sent goes to the screen: wire it to where what's sent should show, or to a field to clear it.";
+    return "Those don't connect. Wires go from the screen (or Start) to a tool's Run or one of its fields, and from a tool's Sent, Answer or Error back to the screen.";
 }
 
 // The wires the flow has, each with what it joins and which part of which rule it is. Wires to
@@ -55,11 +61,8 @@ export function wiresOf(flow, elementIds = []) {
         }
         (rule.then || []).forEach((route, index) => {
             if (!onScreen.has(route.into)) return;
-            const failing = route.if === 'error';
-            wires.push({
-                id: `r:${rule.id}:${index}`, kind: failing ? 'error' : 'answer', ruleId: rule.id, index, element: route.into,
-                from: `${failing ? 'err' : 'ok'}:${rule.id}`, to: `el:${route.into}`,
-            });
+            const [port, kind] = ROUTE_PORTS[routeWhen(route)];
+            wires.push({ id: `r:${rule.id}:${index}`, kind, ruleId: rule.id, index, element: route.into, from: `${port}:${rule.id}`, to: `el:${route.into}` });
         });
     }
     return wires;
@@ -68,14 +71,14 @@ export function wiresOf(flow, elementIds = []) {
 // The flow with a wire between two ports: { flow, made }, where `made` says which part of which
 // rule the wire is ({ kind: 'trigger' | 'arg' | 'route', ruleId, index | arg }), or that the rule
 // already had it ({ kind: 'already' }). `kindOf(id)` is an element's kind, for its trigger's event,
-// and `defaultShow({ element, failing, rule })` what a new route shows (else {{text}} or {{error}}).
+// and `defaultShow({ element, phase, rule })` what a new route shows (else DEFAULT_SHOW's).
 // Throws a FlowError saying why when the ports don't join.
 export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () => null } = {}) {
     const pair = pairOf(a, b);
     if (a === b || !PAIRS.has(pair)) throw new FlowError(whyNot(pair));
     const ports = [parsePort(a), parsePort(b)];
     const port = kind => ports.find(candidate => candidate.kind === kind);
-    const { ruleId } = port('run') || port('arg') || port('ok') || port('err');
+    const { ruleId } = port('run') || port('arg') || port('sent') || port('ok') || port('err');
     const element = port('el')?.element;
     let made = null;
     const next = (flow || []).map(rule => {
@@ -92,12 +95,12 @@ export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () 
             made = { kind: 'arg', ruleId, arg };
             return { ...rule, call: { ...rule.call, args: { ...(rule.call?.args || {}), [arg]: `{{${element}}}` } } };
         }
-        const failing = pair === 'el+err';
+        const phase = PHASE_OF[ports.find(candidate => candidate.kind !== 'el').kind];
         const then = rule.then || [];
-        const index = then.findIndex(route => (route.if === 'error') === failing && route.into === element);
+        const index = then.findIndex(route => routeWhen(route) === phase && route.into === element);
         made = index >= 0 ? { kind: 'already', ruleId } : { kind: 'route', ruleId, index: then.length };
-        const show = defaultShow({ element, failing, rule }) ?? (failing ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok);
-        const route = { if: failing ? 'error' : 'ok', show, into: element, how: 'replace' };
+        const show = defaultShow({ element, phase, rule }) ?? DEFAULT_SHOW[phase];
+        const route = { if: phase, show, into: element, how: 'replace' };
         return index >= 0 ? rule : { ...rule, then: [...then, route] };
     });
     if (!made) throw new FlowError("That tool isn't in the flow anymore.");

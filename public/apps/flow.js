@@ -50,8 +50,14 @@ export const trigger = (element, event) => ({ element: event === 'open' ? '' : e
 // What an element's wire to a tool's Run waits for, unless you choose another of its events.
 export const defaultEvent = kind => (EVENTS_BY_KIND[kind] || EVENTS_BY_KIND.static)[0];
 
-// What a route shows when nothing changes the answer on its way.
-export const DEFAULT_SHOW = { ok: '{{text}}', error: '{{error}}' };
+// What a route shows when nothing changes the answer on its way. A route "as it's sent" runs
+// before there's an answer, with the screen's values: a chat puts the message in its
+// conversation that way, and clears the field it was typed in.
+export const DEFAULT_SHOW = { ok: '{{text}}', error: '{{error}}', sent: '' };
+
+// When a route runs, as its sentence says it.
+export const ROUTE_WHEN = { sent: "as it's sent", ok: 'if it works', error: 'if it fails' };
+export const routeWhen = route => (Object.hasOwn(ROUTE_WHEN, route?.if) ? route.if : 'ok');
 
 // A rule's triggers. Rules saved before a rule could have several keep their one as an object.
 export function triggersOf(rule) {
@@ -330,7 +336,10 @@ export function flowProblems(flow, { elements = [], servers = {} } = {}) {
         const found = (servers[serverUrl]?.tools || []).find(tool => tool.name === toolName);
         const schema = found?.inputSchema || found?.input_schema;
         if (rule.prompt && schema?.properties && !Object.hasOwn(schema.properties, rule.prompt)) {
-            problems.push(`${toolName} has no field ${rule.prompt} to ask for the boxes in.`);
+            problems.push(`${toolName} has no field ${rule.prompt} for its prompt.`);
+        }
+        if (!rule.prompt && (rule.tools || String(rule.instructions ?? '').trim())) {
+            problems.push('Choose the field its prompt goes in: its instructions and the tools go there.');
         }
         for (const route of rule.then || []) {
             if (!route.into) problems.push('Choose where the answer goes.');
@@ -346,14 +355,25 @@ export const listed = items => (items.length < 3 ? items.join(' and ') : `${item
 // Text in a sentence: a lone {{name}} as it is, anything else in quotes.
 const quoted = text => (/^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text) ? text : `“${text}”`);
 
+// What a rule adds to its prompt field, in its sentence: its instructions, the tools its model
+// may call, and the request of the boxes it fills ({{json.…}}).
+function promptAdded(rule) {
+    if (!rule.prompt) return '';
+    const parts = [
+        String(rule.instructions ?? '').trim() && 'its instructions',
+        rule.tools && "your servers' tools",
+        (rule.then || []).some(route => /^\s*\{\{\s*json\./.test(String(route.show ?? ''))) && 'what its boxes show',
+    ].filter(Boolean);
+    return parts.length ? `, adding to ${rule.prompt} ${listed(parts)}` : `, asking in ${rule.prompt}`;
+}
+
 // A rule as a sentence, for people reading the app: the zip's README and the builder.
 export function describeRule(rule, { elementName = id => id, serverName = url => url } = {}) {
     const triggers = triggersOf(rule).map(({ element, event }) => (event === 'open' ? 'the app opens' : `${elementName(element)} ${EVENTS[event] || event}`));
     const when = triggers.length ? `When ${triggers.join(' or ')}` : 'Once something starts it';
     const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? quoted(value) : JSON.stringify(value)}`);
-    const asking = rule.prompt ? `, asking in ${rule.prompt} for what its boxes show` : '';
-    const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}${asking}`;
-    const routes = (rule.then || []).map(route => `${route.if === 'error' ? 'if it fails' : 'if it works'}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
+    const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}${promptAdded(rule)}`;
+    const routes = (rule.then || []).map(route => `${ROUTE_WHEN[routeWhen(route)]}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }
 
@@ -375,4 +395,4 @@ export function routeSummary(route, { max = 12 } = {}) {
     return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
 
-export const isDefaultShow = route => String(route?.show ?? '') === (route?.if === 'error' ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok);
+export const isDefaultShow = route => String(route?.show ?? '') === DEFAULT_SHOW[routeWhen(route)];

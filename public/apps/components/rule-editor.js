@@ -3,11 +3,16 @@
 // shows one for each rule, and the Inspector one for the rule picked on the canvas.
 
 import { escapeHtml, schemaOf } from '../../workbench/util.js';
+import { composePrompt } from '../agent.js';
 import { answerKey, asksOf, BOX_KINDS, formatRequest, isBox } from '../boxes.js';
 import {
-    ANSWER_NAMES, DEFAULT_SHOW, describeRule, displayValue, ELEMENT_ID, EVENTS, EVENTS_BY_KIND, flowProblems, listed, ROUTE_HOW, trigger, triggersOf,
+    ANSWER_NAMES, DEFAULT_SHOW, describeRule, displayValue, ELEMENT_ID, EVENTS, EVENTS_BY_KIND, flowProblems, listed, ROUTE_HOW, ROUTE_WHEN, routeWhen,
+    trigger, triggersOf,
 } from '../flow.js';
 import { CallEditor } from './call-editor.js';
+
+// A tool that takes a message, a prompt or a question, as a model does.
+const looksLikeModel = schema => Object.entries(schema?.properties || {}).some(([key, prop]) => prop?.type === 'string' && /^(message|prompt|question)$/i.test(key));
 
 const ANSWER_CHIPS = [
     ['text', 'The text the tool returned'],
@@ -48,6 +53,12 @@ export class RuleEditor {
         container.addEventListener('change', event => this.changed(event), { signal });
         container.addEventListener('input', event => {
             if (event.target.matches('[data-route-show]')) this.editRoute(event.target, route => { route.show = event.target.value; });
+            if (event.target.matches('[data-instructions]')) {
+                this.change(rule => {
+                    if (event.target.value.trim()) rule.instructions = event.target.value;
+                    else delete rule.instructions;
+                });
+            }
         }, { signal });
         container.addEventListener('focusin', event => {
             if (event.target.matches('[data-route-show]')) this.lastShow = event.target;
@@ -126,9 +137,13 @@ export class RuleEditor {
                     <div class="app-call" data-rule-call></div>
                 </div>
                 <div class="app-rule-row" data-prompt-row hidden>
-                    <span class="app-rule-label">Asks</span>
+                    <span class="app-rule-label">Prompt</span>
                     <div class="app-prompt">
-                        <label class="app-field"><span>What its boxes need goes in</span><select data-prompt-field aria-label="The field the call asks for its boxes in"></select></label>
+                        <label class="app-field"><span>The prompt goes in</span><select data-prompt-field aria-label="The field the prompt goes in"></select></label>
+                        <div class="app-prompt-more" data-prompt-more>
+                            <label class="app-field"><span>Instructions, before what it's asked</span><textarea rows="3" data-instructions placeholder="You're the assistant for the platform team. Answer briefly."></textarea></label>
+                            <label class="app-check"><input type="checkbox" data-tools><span>It can call your servers' tools: it's told which there are, and the calls in its answer run</span></label>
+                        </div>
                         <p class="app-note text-secondary" data-prompt-note></p>
                         <details class="app-prompt-preview" data-prompt-details><summary>What it adds to the prompt</summary><pre class="mono" data-prompt-preview></pre></details>
                     </div>
@@ -138,7 +153,7 @@ export class RuleEditor {
                     <div class="app-routes">
                         <ol class="app-route-list">${(rule.then || []).map((route, index) => `
                             <li class="app-route${focused('route', index)}" data-route="${index}">
-                                <select data-route-if aria-label="When this happens"><option value="ok">If it works</option><option value="error">If it fails</option></select>
+                                <select data-route-if aria-label="When this happens">${Object.entries(ROUTE_WHEN).map(([when, label]) => `<option value="${when}">${label[0].toUpperCase()}${label.slice(1)}</option>`).join('')}</select>
                                 <span class="app-route-word">put</span>
                                 <input type="text" class="mono" data-route-show aria-label="What to show" placeholder="nothing, which clears it" autocomplete="off" spellcheck="false">
                                 <span class="app-route-where">
@@ -152,6 +167,7 @@ export class RuleEditor {
                         <div class="app-chips" data-route-chips></div>
                         <div class="app-picks" data-picks hidden></div>
                         <div class="app-route-add">
+                            <button type="button" class="btn-sm btn-tertiary" data-add-route="sent" title="Runs before there's an answer, with what's on the screen: a chat puts the message in its conversation"><span class="icon icon-plus" aria-hidden="true"></span>As it's sent</button>
                             <button type="button" class="btn-sm btn-tertiary" data-add-route="ok"><span class="icon icon-plus" aria-hidden="true"></span>If it works</button>
                             <button type="button" class="btn-sm btn-tertiary" data-add-route="error"><span class="icon icon-plus" aria-hidden="true"></span>If it fails</button>
                         </div>
@@ -191,7 +207,7 @@ export class RuleEditor {
         this.container.querySelectorAll('[data-route]').forEach(row => {
             const route = rule.then[Number(row.dataset.route)];
             if (!route) return;
-            row.querySelector('[data-route-if]').value = route.if === 'error' ? 'error' : 'ok';
+            row.querySelector('[data-route-if]').value = routeWhen(route);
             row.querySelector('[data-route-show]').value = route.show ?? '';
             const into = row.querySelector('[data-route-into]');
             into.innerHTML = this.elementOptions(['output', 'input', 'static', 'button'], route.into);
@@ -228,33 +244,46 @@ export class RuleEditor {
         }).join('')}` : '';
     }
 
-    // Where the call asks for what the rule's boxes show, and what it adds there. Shown once the
-    // rule fills a box (or asks in a field).
+    // The rule's prompt: the field it goes in, and what the rule adds there (its instructions, the
+    // tools its model may call, and what the boxes it fills need). Shown for a tool that looks
+    // like a model, and once the rule fills a box or has a prompt.
     fillPrompt() {
         const rule = this.rule;
         const row = this.container.querySelector('[data-prompt-row]');
         if (!rule || !row) return;
         const elements = this.apps.elements();
         const asks = asksOf(rule, elements);
-        const fillsBoxes = (rule.then || []).some(route => route.if !== 'error' && isBox(elements.find(element => element.id === route.into)));
-        row.hidden = !rule.prompt && !fillsBoxes && !asks.length;
+        const schema = schemaOf(this.callEditor?.tool);
+        const fillsBoxes = (rule.then || []).some(route => routeWhen(route) === 'ok' && isBox(elements.find(element => element.id === route.into)));
+        row.hidden = !rule.prompt && !fillsBoxes && !asks.length && !looksLikeModel(schema);
         if (row.hidden) return;
-        const fields = Object.entries(schemaOf(this.callEditor?.tool)?.properties || {}).filter(([, prop]) => prop?.type === 'string').map(([key]) => key);
+        const fields = Object.entries(schema?.properties || {}).filter(([, prop]) => prop?.type === 'string').map(([key]) => key);
         if (rule.prompt && !fields.includes(rule.prompt)) fields.unshift(rule.prompt);
         const select = row.querySelector('[data-prompt-field]');
         if (document.activeElement !== select) {
-            select.innerHTML = `<option value="">Nowhere: don't ask for them</option>${fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(field)}</option>`).join('')}`;
+            select.innerHTML = `<option value="">Nowhere: it's not a model</option>${fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(field)}</option>`).join('')}`;
             select.value = rule.prompt || '';
         }
-        const tool = rule.call?.toolName || 'The tool';
+        row.querySelector('[data-prompt-more]').hidden = !rule.prompt;
+        const instructions = row.querySelector('[data-instructions]');
+        if (document.activeElement !== instructions) instructions.value = rule.instructions || '';
+        row.querySelector('[data-tools]').checked = !!rule.tools;
+        const added = [
+            String(rule.instructions ?? '').trim() && 'its instructions',
+            rule.tools && "your servers' tools",
+            asks.length && `a request for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}, as one JSON object`,
+        ].filter(Boolean);
+        const tool = rule.call?.toolName || 'the tool';
         row.querySelector('[data-prompt-note]').textContent = !rule.prompt
-            ? 'Its boxes each take a piece of a JSON answer. Choose the field its question goes in, and the call asks there for what each box shows.'
-            : asks.length
-                ? `Each call adds to ${rule.prompt} a request for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}, as one JSON object, from what each box says goes in it.`
-                : `Wire ${tool}'s Answer to a box, and the call asks in ${rule.prompt} for what the box shows.`;
-        const details = row.querySelector('[data-prompt-details]');
-        details.hidden = !rule.prompt || !asks.length;
-        row.querySelector('[data-prompt-preview]').textContent = asks.length ? formatRequest(asks, { size: this.apps.app?.screen?.size }) : '';
+            ? `Choose the field ${tool}'s question goes in, and the call can add instructions there, the tools it may call, and what the boxes it fills need.`
+            : added.length
+                ? `Each call adds to ${rule.prompt} ${listed(added)}.`
+                : `Each call sends ${rule.prompt} as it is. Wire ${tool}'s Answer to a box, and the box's request goes in it too.`;
+        row.querySelector('[data-prompt-details]').hidden = !rule.prompt || !added.length;
+        const servers = rule.tools ? this.shell.servers : null;
+        row.querySelector('[data-prompt-preview]').textContent = rule.prompt && added.length
+            ? composePrompt(`‹what ${rule.prompt} holds›`, { instructions: rule.instructions, servers, request: asks.length ? formatRequest(asks, { size: this.apps.app?.screen?.size }) : '' })
+            : '';
     }
 
     // The sentence and what keeps the rule from running, after any change to it.
@@ -311,7 +340,7 @@ export class RuleEditor {
             this.editTrigger(target, candidate => trigger(candidate.element, target.value));
         } else if (target.matches('[data-route-if]')) {
             this.editRoute(target, route => {
-                if (route.show === DEFAULT_SHOW[route.if === 'error' ? 'error' : 'ok']) route.show = DEFAULT_SHOW[target.value];
+                if (route.show === DEFAULT_SHOW[routeWhen(route)]) route.show = DEFAULT_SHOW[target.value];
                 route.if = target.value;
             });
             this.fill();
@@ -320,10 +349,15 @@ export class RuleEditor {
             const box = isBox(this.apps.elements().find(element => element.id === target.value));
             this.editRoute(target, route => {
                 const plain = route.show === DEFAULT_SHOW.ok || route.show === `{{json.${answerKey(route.into)}}}`;
-                if (route.if !== 'error' && plain && (box || this.rule.prompt)) route.show = `{{json.${answerKey(target.value)}}}`;
+                if (routeWhen(route) === 'ok' && plain) route.show = box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW.ok;
                 route.into = target.value;
             });
             this.fill();
+        } else if (target.matches('[data-tools]')) {
+            this.change(rule => {
+                if (target.checked) rule.tools = true;
+                else delete rule.tools;
+            });
         } else if (target.matches('[data-route-how]')) {
             this.editRoute(target, route => { route.how = target.value; });
         } else if (target.matches('[data-prompt-field]')) {

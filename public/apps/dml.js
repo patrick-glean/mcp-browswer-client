@@ -19,12 +19,14 @@
 // A <when> names its first trigger, and <or> each other one; x and y are where its tool sits on
 // the canvas. A box is an <output> that says what it shows (show="bar") and, as its text, what
 // goes in it; its rule asks for it in the <arg role="prompt">, and takes it as {{json.<id>}}.
+// That prompt also gets the rule's <instructions> and, with tools="yes" on its <when>, the tools
+// its model may call; a <then if="sent"> runs as the call is sent, before there's an answer.
 //   </app>
 //
 // It's XML, read and written here without a DOM, so the worker and Node can use it too.
 
 import { BOX_KINDS, WIDTHS } from './boxes.js';
-import { EVENTS, ROUTE_HOW, trigger, triggersOf, uid } from './flow.js';
+import { EVENTS, ROUTE_HOW, ROUTE_WHEN, routeWhen, trigger, triggersOf, uid } from './flow.js';
 import { COMPONENT_TYPES } from './screen.js';
 
 export const DML_VERSION = 1;
@@ -145,11 +147,13 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
             ...triggerAttributes(triggersOf(rule)[0]),
             x: rule.position ? Math.round(rule.position.x) : undefined,
             y: rule.position ? Math.round(rule.position.y) : undefined,
+            tools: rule.tools ? 'yes' : undefined,
         },
         ...triggersOf(rule).slice(1).map(candidate => ['or', triggerAttributes(candidate)]),
+        ...(String(rule.instructions ?? '').trim() ? [['instructions', {}, rule.instructions]] : []),
         callNode('call', rule.call, { prompt: rule.prompt }),
         ...(rule.then || []).map(route => ['then', {
-            if: route.if === 'error' ? 'error' : 'ok',
+            if: routeWhen(route),
             into: route.into || '',
             how: route.how && route.how !== 'replace' ? route.how : undefined,
         }, route.show ?? '']),
@@ -412,17 +416,25 @@ export function fromDml(source, { files = {} } = {}) {
         const then = elementsIn(node, 'then').map(route => {
             const how = route.attrs.how || 'replace';
             if (!Object.hasOwn(ROUTE_HOW, how)) fail(route, `how="${how}" isn't one of ${Object.keys(ROUTE_HOW).join(', ')}.`);
-            if (!['ok', 'error', undefined].includes(route.attrs.if)) fail(route, `if="${route.attrs.if}" has to be ok or error.`);
+            if (route.attrs.if !== undefined && !Object.hasOwn(ROUTE_WHEN, route.attrs.if)) fail(route, `if="${route.attrs.if}" has to be ok, error or sent.`);
             if (!route.attrs.into) fail(route, '<then> needs into="…", the id of where the answer goes.');
-            return { if: route.attrs.if === 'error' ? 'error' : 'ok', show: textIn(route), into: route.attrs.into, how };
+            return { if: route.attrs.if ?? 'ok', show: textIn(route), into: route.attrs.into, how };
         });
         const callNode = one(node, 'call');
-        // The argument that also asks for what the rule's boxes need.
+        // The argument that's the prompt, which the rule's instructions, tools and boxes add to.
         const prompts = elementsIn(callNode, 'arg').filter(arg => arg.attrs.role !== undefined);
         for (const arg of prompts) if (arg.attrs.role !== 'prompt') fail(arg, `role="${arg.attrs.role}" isn't one an <arg> has; the one there is is role="prompt".`);
         if (prompts.length > 1) fail(prompts[1], 'Only one <arg> of a call is its prompt.');
         const prompt = prompts[0]?.attrs.name;
-        flow.push({ id: uid('rule'), when, call: readCall(callNode), then, ...(position ? { position } : {}), ...(prompt ? { prompt } : {}) });
+        if (node.attrs.tools !== undefined && node.attrs.tools !== 'yes') fail(node, `tools="${node.attrs.tools}" is yes, or left out.`);
+        const instructions = one(node, 'instructions', { required: false });
+        flow.push({
+            id: uid('rule'), when, call: readCall(callNode), then,
+            ...(position ? { position } : {}),
+            ...(prompt ? { prompt } : {}),
+            ...(instructions && textIn(instructions).trim() ? { instructions: textIn(instructions) } : {}),
+            ...(node.attrs.tools === 'yes' ? { tools: true } : {}),
+        });
     }
 
     const servers = elementsIn(one(root, 'servers', { required: false }) || { children: [] }, 'server')

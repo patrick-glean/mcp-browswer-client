@@ -20,6 +20,7 @@ export const BOX_KINDS = {
     bar: { label: 'Bar chart', noun: 'bar chart', help: 'Numbers as bars, one for each label', shape: '{"labels": [string], "values": [number]}', base: 'chart', example: 'Tickets opened per week, the last 8 weeks, oldest first' },
     line: { label: 'Line chart', noun: 'line chart', help: 'Numbers over time, as a line', shape: '{"labels": [string], "values": [number]}', base: 'trend', example: 'Weekly active users, the last 12 weeks, oldest first' },
     html: { label: 'HTML', noun: 'HTML', help: 'HTML the model writes to fit this box', shape: 'a string of HTML', base: 'panel', example: 'A one-line status banner, green when things are on track' },
+    conversation: { label: 'Conversation', noun: 'conversation', help: "Messages one after another, as a chat shows them: what's sent, the answers and the tools' results", shape: 'a string', base: 'conversation', example: 'The conversation so far' },
 };
 
 // How much of a row a component takes, on a screen wide enough for rows.
@@ -27,7 +28,7 @@ export const WIDTHS = { full: 'Full width', 'two-thirds': 'Two thirds', half: 'H
 const FRACTION = { full: 1, 'two-thirds': 2 / 3, half: 1 / 2, third: 1 / 3 };
 
 // A box from the Library starts as wide as its kind usually is.
-export const BOX_WIDTHS = { text: 'full', number: 'third', list: 'half', table: 'full', bar: 'two-thirds', line: 'two-thirds', html: 'full' };
+export const BOX_WIDTHS = { text: 'full', number: 'third', list: 'half', table: 'full', bar: 'two-thirds', line: 'two-thirds', html: 'full', conversation: 'full' };
 
 // How wide a screen's content is, in a browser: narrow for a form, wide for a dashboard.
 export const SCREEN_SIZES = { narrow: 592, wide: 1032 };
@@ -36,9 +37,16 @@ export class BoxError extends Error {}
 
 const ASK_KEY = /^\s*\{\{\s*json\.([A-Za-z_][\w-]*)\s*\}\}\s*$/;
 
+// An output that keeps all it's given, one entry after another, as a chat does: what's sent, each
+// answer, and the results of the tools a model calls. Its value is the list of them, each with
+// who it's from (CONVERSATION_ROLES), the route that put it there saying who (ROUTE_ROLES).
+export const isConversation = element => element?.type === 'output' && element.show === 'conversation';
+export const CONVERSATION_ROLES = { you: 'User', reply: 'Assistant', tool: 'Tool', error: 'Error' };
+export const ROUTE_ROLES = { sent: 'you', ok: 'reply', error: 'error' };
+
 // An output that takes part of an answer by shape: it shows something other than text, or says
 // what goes in it.
-export const isBox = element => element?.type === 'output' && ((element.show && element.show !== 'text') || !!element.about);
+export const isBox = element => element?.type === 'output' && !isConversation(element) && ((element.show && element.show !== 'text') || !!element.about);
 
 // What a rule asks its tool for: one key for each element its answer fills as {{json.key}}, with
 // the element's kind and what goes in it. [{ key, kind, about, width, into }]
@@ -46,7 +54,7 @@ export function asksOf(rule, elements = []) {
     const byId = new Map(elements.map(element => [element.id, element]));
     const asks = [];
     for (const route of rule?.then || []) {
-        if (route.if === 'error') continue;
+        if (route.if === 'error' || route.if === 'sent') continue;
         const key = String(route.show ?? '').match(ASK_KEY)?.[1];
         const element = byId.get(route.into);
         if (!key || !element || asks.some(ask => ask.key === key)) continue;

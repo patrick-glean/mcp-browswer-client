@@ -49,11 +49,20 @@ export function previewText(text, variables = {}) {
     return { value, missing };
 }
 
+// A value as text: a list (an app's conversation, say) a line for each item.
+const textOf = value => (Array.isArray(value) ? value.map(textOf).join('\n') : value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value));
+
 function resolveValue(value, prop, variables, path) {
     if (typeof value === 'string') {
         const whole = value.match(WHOLE);
-        if (whole) return convert(String(variables[whole[1]]), whole[1], prop, path);
-        return value.replace(PLACEHOLDERS, (match, name) => String(variables[name]));
+        if (whole) {
+            const found = variables[whole[1]];
+            // A value that's already a list or an object stays one where the field takes one.
+            const type = schemaType(prop);
+            if (found !== null && typeof found === 'object' && (type === 'array' || type === 'object')) return found;
+            return convert(textOf(found), whole[1], prop, path);
+        }
+        return value.replace(PLACEHOLDERS, (match, name) => textOf(variables[name]));
     }
     if (Array.isArray(value)) {
         const items = prop?.items && !Array.isArray(prop.items) ? prop.items : null;

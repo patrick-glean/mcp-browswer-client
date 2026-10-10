@@ -275,6 +275,14 @@ a.item-title:hover { text-decoration-color: currentColor; }
 .chart-plot { position: relative; height: 150px; }
 .chart-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .chart-plot polyline { fill: none; stroke: var(--chart); stroke-width: 2.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.box-conversation { display: flex; flex-direction: column; gap: 8px; min-height: 160px; max-height: 440px; overflow-y: auto; }
+.box-conversation > .entry, .box-conversation > .entry + .entry { max-width: 88%; margin: 0; padding: 8px 12px; border: none; border-radius: 14px; background: var(--bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.box-conversation > .entry[data-role='you'] { align-self: flex-end; background: var(--accent); color: var(--on-accent); }
+.box-conversation > .entry[data-role='tool'] { color: var(--muted); font: 0.8125rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.box-conversation > .entry[data-role='error'] { color: var(--error); }
+.box-conversation[aria-busy='true'] { opacity: 1; background-image: none; animation: none; }
+.box-conversation[aria-busy='true']::after { content: '…'; align-self: flex-start; padding: 2px 14px 8px; border-radius: 14px; background: var(--bg); color: var(--muted); font-weight: 700; letter-spacing: 2px; animation: typing 0.9s ease-in-out infinite alternate; }
+@keyframes typing { from { opacity: 0.3; } to { opacity: 1; } }
 .chart-high, .chart-low { position: absolute; left: 0; color: var(--muted); font-size: 0.6875rem; }
 .chart-high { top: -2px; }
 .chart-low { bottom: -2px; }

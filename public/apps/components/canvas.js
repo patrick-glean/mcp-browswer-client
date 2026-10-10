@@ -29,7 +29,9 @@ const TRANSFORMS = [
     ['json', 'JSON', 'The whole result, as JSON', { show: '{{result}}', how: 'replace' }],
     ['html', 'HTML', 'The HTML in its answer, shown as HTML', { show: '{{html}}', how: 'html' }],
 ];
-const WIRE_KINDS = ['trigger', 'arg', 'answer', 'error'];
+const WIRE_KINDS = ['trigger', 'arg', 'sent', 'answer', 'error'];
+// The wires that carry something to the screen, each with its transform: what of it shows.
+const ROUTE_KINDS = new Set(['sent', 'answer', 'error']);
 // How near an edge of the canvas a wire being dragged starts it scrolling.
 const EDGE = 40;
 
@@ -253,7 +255,7 @@ export class AppCanvas extends AppElement {
     }
 
     nodeHeight(rule) {
-        return 40 + (1 + this.shownArgs(rule).length) * ROW + 10 + 2 * ROW + 22;
+        return 40 + (1 + this.shownArgs(rule).length) * ROW + 10 + 3 * ROW + 22;
     }
 
     screenWidth() {
@@ -355,6 +357,10 @@ export class AppCanvas extends AppElement {
                     }).join('')}
                     <div class="app-node-split"></div>
                     <div class="app-node-row app-node-out">
+                        <span class="app-port app-port-sent" data-port="sent:${escapeHtml(rule.id)}" title="Sent: wire it to where what's sent shows as it goes, such as a chat's conversation, or to a field to clear it"></span>
+                        <span class="app-node-name">↗ Sent</span>
+                    </div>
+                    <div class="app-node-row app-node-out">
                         <span class="app-port app-port-answer" data-port="ok:${escapeHtml(rule.id)}" title="Answer: wire it to where it goes on the screen"></span>
                         <span class="app-node-name">✓ Answer</span>
                     </div>
@@ -371,9 +377,9 @@ export class AppCanvas extends AppElement {
         this.style.setProperty('--surface-h', `${bottom}px`);
     }
 
-    // A transform on every Answer and Error wire: what of the answer it shows. Placed when the wires are.
+    // A transform on every Sent, Answer and Error wire: what of it shows. Placed when the wires are.
     renderPills() {
-        const wires = wiresOf(this.app.flow, this.elementIds()).filter(wire => wire.kind === 'answer' || wire.kind === 'error');
+        const wires = wiresOf(this.app.flow, this.elementIds()).filter(wire => ROUTE_KINDS.has(wire.kind));
         this.$('[data-pills]').innerHTML = wires.map(wire => {
             const route = this.app.flow.find(rule => rule.id === wire.ruleId).then[wire.index];
             const custom = !isDefaultShow(route) || route.how === 'html';
@@ -464,7 +470,7 @@ export class AppCanvas extends AppElement {
         if (phase === 'call') {
             node?.classList.add('app-node-running');
             const args = wiresOf([rule], this.elementIds()).filter(wire => wire.kind === 'arg').map(wire => wire.id);
-            light([`t:${ruleId}:${trigger}`, ...args]);
+            light([`t:${ruleId}:${trigger}`, ...args, ...routes.map(index => `r:${ruleId}:${index}`)]);
             this.statuses.set(ruleId, 'Calling…');
         } else {
             node?.classList.remove('app-node-running');
@@ -491,21 +497,32 @@ export class AppCanvas extends AppElement {
         return this.element(id)?.kind || 'static';
     }
 
+    // What a new wire to the screen shows. A box takes its own key of the answer. As it's sent,
+    // an element shows what the call sends (the prompt, or the one value a field takes), and the
+    // field that value came from is cleared.
+    defaultShow(element, phase, rule) {
+        if (phase === 'ok') return isBox(this.element(element)) ? `{{json.${answerKey(element)}}}` : null;
+        if (phase !== 'sent') return null;
+        const lone = value => String(value ?? '').match(/^\s*\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}\s*$/)?.[1];
+        const args = rule.call?.args || {};
+        const sent = lone(args[rule.prompt]) || Object.values(args).map(lone).find(Boolean);
+        return sent && sent !== element ? `{{${sent}}}` : '';
+    }
+
     wire(a, b) {
         try {
             let made;
             this.changeFlow(flow => {
                 const result = connect(flow, a, b, {
                     kindOf: id => this.kindOf(id),
-                    // A rule that asks for its boxes gives each its own key of the answer.
-                    defaultShow: ({ element, failing, rule }) => (!failing && (rule.prompt || isBox(this.element(element))) ? `{{json.${answerKey(element)}}}` : null),
+                    defaultShow: ({ element, phase, rule }) => this.defaultShow(element, phase, rule),
                 });
                 made = result.made;
                 if (made.kind !== 'route') return result.flow;
                 // A box wired to a tool asks it, in the tool's prompt field, for what the box shows.
                 return result.flow.map(rule => {
                     const route = rule.id === made.ruleId ? rule.then[made.index] : null;
-                    if (!route || rule.prompt || route.if === 'error' || !isBox(this.element(route.into))) return rule;
+                    if (!route || rule.prompt || route.if !== 'ok' || !isBox(this.element(route.into))) return rule;
                     const prompt = promptFieldOf(schemaOf(this.toolOf(rule)));
                     return prompt ? { ...rule, prompt } : rule;
                 });
@@ -517,9 +534,10 @@ export class AppCanvas extends AppElement {
             this.apps.select({ kind: 'wire', id, ruleId: made.ruleId });
             const rule = this.app.flow.find(candidate => candidate.id === made.ruleId);
             const route = made.kind === 'route' ? rule?.then[made.index] : null;
-            const box = route?.if !== 'error' && rule?.prompt ? this.element(route?.into) : null;
+            const box = route?.if === 'ok' && rule?.prompt ? this.element(route?.into) : null;
             this.hint(made.kind === 'trigger' ? 'Connected: that starts the tool. Choose what it waits for in the Inspector.'
                 : made.kind === 'arg' ? 'Connected: that fills the field.'
+                : route?.if === 'sent' ? (route.show ? `Connected: ${route.into} shows ${route.show} as it's sent.` : `Connected: ${route.into} is cleared as it's sent.`)
                 : isBox(box) ? `Connected: ${box.id} asks ${rule.call.toolName} for ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}, in ${rule.prompt}.`
                 : 'Connected: the answer goes there. Its transform says what of it shows.');
         } catch (error) {
