@@ -125,6 +125,9 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] The model the builder asks: Glean's chat, else a server's chat tool, unless chosen with the Model menus; its other required text fields get the person's words (Glean's `_user_goal`)
 - [x] The worker without a chat pipeline or a server list; the Chat app's old settings and conversations removed; the mock's chat writes a tool call when asked
 
+### Done (app builder milestone 2, fifth step: Preview)
+- [x] Preview: the app as it is when launched, over the whole window and from the start, with nothing of the builder; a phone's, a tablet's or the window's width; Restart; Escape on the page or the screen ends it
+
 ### Next
 - [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool, so a model gets its tools' results at once), allowed tools for a rule's model, and output checks
 - [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server
