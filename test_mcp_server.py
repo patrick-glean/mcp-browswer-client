@@ -155,7 +155,7 @@ TOOLS = [
         # A stand-in for a model, so the Chat app and the app builder's "Ask a model" work without one.
         "name": "chat",
         "title": "Chat (a stand-in model)",
-        "description": "A stand-in for a model: it answers what you say, and when you ask for HTML it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
+        "description": "A stand-in for a model: it answers what you say; asked for an app's boxes, it answers with one JSON object of made-up values in their shapes; and asked for HTML, it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -251,8 +251,61 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 """
 
 
+# How an app's boxes ask for their pieces of an answer: a line for each key, as
+# - "key" (kind): what goes in it. As its shape.
+BOX_LINE = re.compile(r'^- "([^"]+)" \(([^)]+)\): (.*)$', re.M)
+WEEKS = ["Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28", "Oct 5"]
+
+
+def box_value(key, kind, about):
+    """A made-up piece of an answer for one box, in the shape its kind asks for."""
+    words = f"{key} {about}".lower()
+    if kind == "number":
+        if "health" in words or "track" in words:
+            return {"value": "On track", "note": "Two open risks, neither blocking"}
+        return {"value": 12, "note": "Up 3 since last week"}
+    if kind in ("bar chart", "line chart"):
+        found = re.search(r"(\d+)\s+(?:weeks|months|days)", about)
+        count = max(2, min(int(found.group(1)) if found else 6, 12))
+        values = [4, 7, 5, 9, 12, 8, 10, 6, 11, 13, 9, 14]
+        return {"labels": WEEKS if count == 6 else [f"Week {n + 1}" for n in range(count)], "values": values[:count]}
+    if kind == "list":
+        if "risk" in words or "block" in words:
+            return [
+                {"title": "The beta date depends on the API review", "detail": "Raised by the platform team"},
+                {"title": "Two pilot customers haven't signed off", "detail": "Raised by sales"},
+                {"title": "On-call isn't staffed for launch week", "detail": "Raised by support"},
+            ]
+        if "who" in words or "people" in words:
+            return [
+                {"title": "Ada Lovelace", "detail": "Leads it"},
+                {"title": "Grace Hopper", "detail": "Runs the beta"},
+            ]
+        return [
+            {"title": "Design doc", "url": "https://example.com/docs/design", "detail": "What it is, and the choices made so far"},
+            {"title": "Launch plan", "url": "https://example.com/docs/launch", "detail": "Dates, owners and the go/no-go list"},
+            {"title": "Weekly notes", "url": "https://example.com/docs/weekly", "detail": "Decisions from the last three meetings"},
+        ]
+    if kind == "table":
+        return {"columns": ["Item", "Owner", "Status"], "rows": [["Design review", "Ada", "Done"], ["Beta", "Grace", "In progress"], ["Launch", "Alan", "Not started"]]}
+    if kind == "html":
+        return ('<div class="banner" style="padding:12px 14px;border-radius:10px;background:#e7f6ec;color:#14532d">'
+                "<strong>On track.</strong> The beta starts once the API review is done.</div>")
+    return "On track: the design review closed last week, and the beta starts once the API review is done. Two risks are open, neither blocking."
+
+
+def boxes_reply(message):
+    """Answers a prompt an app's boxes added to: one JSON object, with a key for each box, and the
+    conversation's details after it, as Glean's chat answers."""
+    answer = {key: box_value(key, kind.lower(), about) for key, kind, about in BOX_LINE.findall(message)}
+    return f"```json\n{json.dumps(answer, indent=2)}\n```\n\n---\nchatId: mock-{uuid.uuid4().hex[:12]}"
+
+
 def chat_reply(message):
-    """What the stand-in model says: an answer, or a page when asked for HTML."""
+    """What the stand-in model says: an answer, the JSON an app's boxes ask for, or a page when
+    asked for HTML."""
+    if "one JSON object" in message and BOX_LINE.search(message):
+        return boxes_reply(message)
     if "html" not in message.lower():
         return f"You said: {message}"
     request = message.split("\n", 1)[0].split(": ", 1)[-1].strip()
