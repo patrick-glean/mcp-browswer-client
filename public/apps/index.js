@@ -8,9 +8,10 @@ import { AppCanvas } from './components/canvas.js';
 import { AppFlow } from './components/flow.js';
 import { AppHeader } from './components/header.js';
 import { AppInspector } from './components/inspector.js';
-import { AppTry } from './components/try.js';
+import { AppPreview } from './components/preview.js';
 import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
+import { AppTry } from './components/try.js';
 
 const COMPONENTS = {
     'apps-rail': AppsRail,
@@ -21,6 +22,7 @@ const COMPONENTS = {
     'app-screen': AppScreen,
     'app-flow': AppFlow,
     'app-try': AppTry,
+    'app-preview': AppPreview,
 };
 
 export async function installApps(shell, { showMode } = {}) {
@@ -33,6 +35,8 @@ export async function installApps(shell, { showMode } = {}) {
     apps.on('shown', ({ id }) => {
         document.getElementById('appsStart').hidden = !!id;
         document.getElementById('appBuilder').hidden = !id;
+        // Another app opens out of Preview, in the view Preview came from.
+        showView();
     });
     for (const [name, component] of Object.entries(COMPONENTS)) {
         if (!customElements.get(name)) customElements.define(name, component);

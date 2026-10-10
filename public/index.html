@@ -113,7 +113,8 @@
                     <apps-start id="appsStart" role="region" aria-label="Start an app" hidden></apps-start>
                     <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
                         <app-header></app-header>
-                        <!-- Canvas: the screen running, with its wires to tools; Outline: the same app as cards. -->
+                        <!-- Canvas: the screen running, with its wires to tools; Outline: the same app as cards;
+                             Preview: the app as it is when it's launched, over the whole window. -->
                         <div class="app-canvas-view" data-app-view="canvas">
                             <app-canvas></app-canvas>
                             <app-inspector role="region" aria-label="Inspector"></app-inspector>
@@ -125,6 +126,7 @@
                             </div>
                             <app-try></app-try>
                         </div>
+                        <app-preview data-app-view="preview" role="dialog" aria-modal="true" aria-label="Preview" hidden></app-preview>
                     </section>
                 </div>
             </section>

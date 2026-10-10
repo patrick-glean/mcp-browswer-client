@@ -9,7 +9,8 @@
 //   model      the model the builder asks changed
 //   app        the shown app changed
 //              { part: 'screen' | 'flow' | 'layout' | 'name' | 'version', by }
-//   view       the builder switched between Canvas and Outline  { view }
+//   view       the builder switched between Canvas and Outline,  { view }
+//              or to Preview (view 'preview') and back
 //   select     what's selected on the canvas changed            { selection }
 //   answer     a rule got an answer, for picking values from it { ruleId }
 //   restart    run the shown app again from the start
@@ -30,6 +31,9 @@ const SHOWN_KEY = 'appsShown';
 const VIEW_KEY = 'appsView';
 const MODEL_KEY = 'appsModel';
 export const VIEWS = { canvas: 'Canvas', outline: 'Outline' };
+// The app as it is when it's launched: the window is its screen, and nothing of the builder shows.
+// A view like the two above, so their components stop while it runs, but never the one kept.
+export const PREVIEW = 'preview';
 
 // An app as the builder keeps it, whatever shape it was saved in.
 export const normalizeApp = app => ({ ...app, flow: (app.flow || []).map(normalizeRule) });
@@ -247,6 +251,8 @@ export class Apps {
         this.saveTimer = null;
         this.elementsCache = null;
         this.view = VIEWS[localStorage.getItem(VIEW_KEY)] ? localStorage.getItem(VIEW_KEY) : 'canvas';
+        // The view Preview goes back to.
+        this.editView = this.view;
         this.selection = null;
         // Each rule's last answer, while the page is open: Map<ruleId, answer>.
         this.answers = new Map();
@@ -273,9 +279,11 @@ export class Apps {
         });
     }
 
-    // Shows an app, or with null none: the page then offers the examples.
+    // Shows an app, or with null none: the page then offers the examples. A preview is of the app it
+    // was opened for, so another app opens in the view Preview came from.
     show(id) {
         this.flush();
+        if (this.view === PREVIEW) this.view = this.editView;
         this.app = this.list.find(app => app.id === id) || null;
         this.shownId = this.app?.id ?? null;
         this.elementsCache = null;
@@ -287,10 +295,22 @@ export class Apps {
     }
 
     showView(view) {
-        if (!VIEWS[view] || view === this.view) return;
+        if ((!VIEWS[view] && view !== PREVIEW) || view === this.view) return;
         this.view = view;
-        localStorage.setItem(VIEW_KEY, view);
+        if (VIEWS[view]) {
+            this.editView = view;
+            localStorage.setItem(VIEW_KEY, view);
+        }
         this.emit('view', { view });
+    }
+
+    // Preview, from the start, as when the app is launched; and back to the view it came from.
+    preview() {
+        if (this.app) this.showView(PREVIEW);
+    }
+
+    exitPreview() {
+        if (this.view === PREVIEW) this.showView(this.editView);
     }
 
     // What's selected on the canvas: { kind: 'element', id }, { kind: 'rule', id },

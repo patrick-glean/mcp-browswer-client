@@ -127,6 +127,7 @@ hr.divider {
 }
 
 .icon-external-link { --icon: url('icons/external-link.svg'); }
+.icon-eye { --icon: url('icons/eye.svg'); }
 .icon-play { --icon: url('icons/play.svg'); }
 .icon-plus { --icon: url('icons/plus.svg'); }
 .icon-power { --icon: url('icons/power.svg'); }

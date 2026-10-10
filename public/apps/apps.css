@@ -90,6 +90,94 @@ apps-start[hidden] {
     gap: 6px;
 }
 
+/* ---------- Preview: the app as it is when it's launched, over the whole window ---------- */
+
+/* Above the top bar and the Guide; Go to and status messages stay above it. */
+app-preview {
+    position: fixed;
+    inset: 0;
+    z-index: 1150;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-background-mid);
+}
+
+app-preview[hidden] {
+    display: none;
+}
+
+.app-preview-bar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-height: 44px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+}
+
+.app-preview-badge {
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: var(--theme-info-background);
+    color: var(--theme-info-foreground);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.app-preview-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.app-preview-status {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-preview-bar kbd {
+    margin-left: 6px;
+}
+
+.app-preview-stage {
+    display: flex;
+    flex: 1;
+    align-items: flex-start;
+    justify-content: center;
+    min-height: 0;
+    overflow: auto;
+}
+
+.app-preview-frame {
+    flex: none;
+    width: var(--device-w, 100%);
+    max-width: 100%;
+    height: var(--device-h, 100%);
+    max-height: 100%;
+    border: 0;
+    background: var(--theme-background);
+}
+
+.app-preview-stage:is([data-device='phone'], [data-device='tablet']) {
+    padding: 20px;
+}
+
+/* The app gets the device's whole width, and the border sits outside it. */
+.app-preview-stage:is([data-device='phone'], [data-device='tablet']) .app-preview-frame {
+    box-sizing: content-box;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: 20px;
+    box-shadow: 0 10px 36px rgb(0 0 0 / 18%);
+}
+
 /* ---------- The model the builder asks, and the examples call ---------- */
 
 .app-model > summary {

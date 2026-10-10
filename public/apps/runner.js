@@ -4,12 +4,14 @@
 // a Workbench call, and is recorded as a run from the app.
 //
 // Frame -> page: ready { values }, event { element, event, values },
-//                layout { height, rects: { id: { top, left, width, height } } }, open { url }
+//                layout { height, rects: { id: { top, left, width, height } } }, open { url },
+//                escape
 // Page -> frame: config { config }, show { element, value, how, failed }, busy { elements, busy },
 //                highlight { elements }
 // Every message carries the token this load of the frame was given. `layout` says where each
 // element the config tracks is, so the canvas can put its ports on the running screen. `open`
-// asks the page to open a link's http(s) address in a new tab, which the sandbox can't.
+// asks the page to open a link's http(s) address in a new tab, which the sandbox can't. `escape`
+// is Escape pressed in the frame, which the page's own keys never see (Preview closes on it).
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
 import { allowedCall, composePrompt, serverWithTool, toolCallsIn } from './agent.js';
@@ -173,6 +175,9 @@ export function frameRuntime({ config, token, roles = {} }) {
         else if (message.type === 'busy') busy(message.elements || [], message.busy);
         else if (message.type === 'highlight') highlight(message.elements);
     });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') send({ type: 'escape' });
+    }, true);
     new ResizeObserver(layout).observe(document.documentElement);
     send({ type: 'ready', values: values() });
     layout();
@@ -215,11 +220,11 @@ const shortText = (text, max = 80) => {
 // Runs one app in one frame. `getApp` returns the app as it is now, so edits to the flow apply to
 // the next event. It tells its owner what happens: `onTrace` each step in words, `onLayout` where
 // the screen's elements are, `onActivity` a rule starting its call ({ ruleId, phase: 'call',
-// trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error', routes }), and `onAnswer` each
-// rule's answer, for picking values from it.
+// trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error', routes }), `onAnswer` each
+// rule's answer, for picking values from it, and `onEscape` Escape pressed on the screen.
 export class AppRunner {
-    constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, signal }) {
-        Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer });
+    constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, onEscape = () => {}, signal }) {
+        Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer, onEscape });
         this.frame = null;
         this.token = null;
         this.running = new Set();
@@ -290,6 +295,8 @@ export class AppRunner {
             this.onLayout({ height: message.height, rects: message.rects && typeof message.rects === 'object' ? message.rects : {} });
         } else if (message.type === 'open' && typeof message.url === 'string') {
             this.open(message.url);
+        } else if (message.type === 'escape') {
+            this.onEscape();
         }
     }
 
