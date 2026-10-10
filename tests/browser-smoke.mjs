@@ -790,7 +790,7 @@ async function main() {
                 starter === 'When run is clicked, call echo on modern server with text = {{input}}; if it works, put {{text}} into output; if it fails, put {{error}} into output.', starter);
             const screen = await frameWaitFor(`document.getElementById('run') && document.getElementById('output') ? document.body.innerText.replace(/\\s+/g, ' ').trim() : null`);
             check('Apps: the screen runs in a frame of its own', /^New app Input Run Output/.test(screen || ''), screen);
-            const sandbox = await page.run(`document.querySelector('app-preview iframe').getAttribute('sandbox')`);
+            const sandbox = await page.run(`document.querySelector('app-try iframe').getAttribute('sandbox')`);
             const confined = await frameRun(`Promise.all([
                 fetch(${JSON.stringify(modernUrl)}).then(() => 'fetched', () => 'no network'),
                 new Promise(resolve => { try { resolve(String(localStorage.length)); } catch { resolve('no storage'); } }),
@@ -809,7 +809,7 @@ async function main() {
             await typeAndClick('input', 'hello from an app', 'run');
             const answered = await frameWaitFor(`document.getElementById('output').textContent === 'Echo: hello from an app' && !document.getElementById('output').dataset.state`);
             const whatHappened = await page.waitFor(`(() => {
-                const lines = [...document.querySelectorAll('app-preview .app-trace-text')].map(line => line.textContent.trim());
+                const lines = [...document.querySelectorAll('app-try .app-trace-text')].map(line => line.textContent.trim());
                 return lines.some(line => line === 'Put “Echo: hello from an app” into output') ? lines.join(' | ') : null;
             })()`, 5000);
             check('Apps: clicking the button calls the tool, puts its answer in the output and says what happened',
@@ -951,7 +951,7 @@ async function main() {
                 description.dispatchEvent(new Event('input', { bubbles: true }));
             })()`);
             const next = await page.run(`document.getElementById('downloadAppBtn').textContent.trim() + ' | ' + document.querySelector('apps-rail [aria-current="true"]').textContent.trim().replace(/\\s+/g, ' ')`);
-            const lastSteps = await page.run(`[...document.querySelectorAll('app-preview .app-trace-text')].slice(-4).map(line => line.textContent.trim()).join(' | ')`);
+            const lastSteps = await page.run(`[...document.querySelectorAll('app-try .app-trace-text')].slice(-4).map(line => line.textContent.trim()).join(' | ')`);
             check('Apps: the imported app runs as before, and a change makes the next download version 2',
                 !!reimported && next === 'Download v2 | New app v1', `${next}; ${reimported ? '' : `the screen shows "${await frameRun(`document.getElementById('answer')?.textContent || 'nothing'`)}" after ${lastSteps}`}`);
             rmSync(appDownloads, { recursive: true, force: true });

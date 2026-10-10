@@ -6,7 +6,7 @@ import { AppRunner } from '../runner.js';
 import { AppElement } from './base.js';
 import { TraceList } from './trace.js';
 
-export class AppPreview extends AppElement {
+export class AppTry extends AppElement {
     setup(signal) {
         this.trace = new TraceList();
         this.waiting = null;

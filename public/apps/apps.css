@@ -7,7 +7,7 @@ apps-rail,
 app-header,
 app-screen,
 app-flow,
-app-preview {
+app-try {
     display: block;
     min-width: 0;
 }
@@ -136,7 +136,7 @@ apps-start[hidden] {
     min-width: 0;
 }
 
-app-preview {
+app-try {
     position: sticky;
     top: 0;
 }
@@ -146,7 +146,7 @@ app-preview {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    app-preview {
+    app-try {
         position: static;
     }
 }

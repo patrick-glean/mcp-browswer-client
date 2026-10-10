@@ -8,7 +8,7 @@ import { AppCanvas } from './components/canvas.js';
 import { AppFlow } from './components/flow.js';
 import { AppHeader } from './components/header.js';
 import { AppInspector } from './components/inspector.js';
-import { AppPreview } from './components/preview.js';
+import { AppTry } from './components/try.js';
 import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
 
@@ -20,7 +20,7 @@ const COMPONENTS = {
     'app-inspector': AppInspector,
     'app-screen': AppScreen,
     'app-flow': AppFlow,
-    'app-preview': AppPreview,
+    'app-try': AppTry,
 };
 
 export async function installApps(shell, { showMode } = {}) {
