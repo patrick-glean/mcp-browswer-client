@@ -53,9 +53,14 @@ export function freeId(base, takenIds) {
     for (let n = 2; ; n++) if (!taken.has(`${base}${n}`)) return `${base}${n}`;
 }
 
+// A second one of a kind is numbered as its id is (output2 is "Output 2"), so menus that show
+// labels can tell them apart.
 export function newComponent(type, takenIds = [], props = {}) {
-    const id = props.id && !elementIdProblem(props.id, takenIds) ? props.id : freeId(COMPONENT_TYPES[type].base, takenIds);
-    return { ...DEFAULTS[type], ...props, id, type };
+    const { base } = COMPONENT_TYPES[type];
+    const id = props.id && !elementIdProblem(props.id, takenIds) ? props.id : freeId(base, takenIds);
+    const number = id.startsWith(base) ? id.slice(base.length) : '';
+    const numbered = DEFAULTS[type].label && props.label === undefined && /^\d+$/.test(number) ? { label: `${DEFAULTS[type].label} ${number}` } : {};
+    return { ...DEFAULTS[type], ...numbered, ...props, id, type };
 }
 
 // What the builder calls an element: its label, its text, or its id.

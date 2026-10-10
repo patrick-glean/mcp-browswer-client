@@ -266,7 +266,10 @@ test('element ids are checked, and new components get free ones', () => {
     assert.match(elementIdProblem('ask', ['ask']), /already ask/);
     assert.equal(freeId('input', ['input', 'input2']), 'input3');
     const made = newComponent('textbox', ['input']);
-    assert.deepEqual([made.id, made.type, made.lines], ['input2', 'textbox', 1]);
+    assert.deepEqual([made.id, made.type, made.lines, made.label], ['input2', 'textbox', 1, 'Text box 2']);
+    assert.equal(newComponent('output', []).label, 'Output');
+    assert.equal(newComponent('output', ['output']).label, 'Output 2');
+    assert.equal(newComponent('button', ['button'], { label: 'Send' }).label, 'Send');
 });
 
 test("the screen's runtime watches what rules wait for and reads what they use", () => {
