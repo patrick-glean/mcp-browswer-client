@@ -756,6 +756,15 @@ async function main() {
                 document.querySelector('[data-mode="apps"]').click();
                 document.getElementById('newAppBtn').click();
             })()`);
+            const onCanvas = await page.waitFor(`(() => {
+                const wires = [...document.querySelectorAll('app-canvas [data-wire]')].map(wire => wire.dataset.wire.split(':')[0]);
+                const picked = document.querySelector('app-inspector .app-inspector-kind')?.textContent;
+                return !document.getElementById('appBuilder').hidden && wires.length === 4 && picked ? wires.join(',') + ' | ' + picked : null;
+            })()`, 10000);
+            check('Apps: a new app opens on the canvas, its screen wired to its tool, and the Inspector shows the screen',
+                onCanvas === 't,a,r,r | Screen', onCanvas);
+            // These checks use the Outline, which shows the screen and the rules as cards.
+            await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
             const starter = await page.waitFor(`(() => {
                 const sentence = document.querySelector('app-flow .app-rule-sentence')?.textContent;
                 return !document.getElementById('appBuilder').hidden && document.getElementById('chatApp').hidden && sentence ? sentence : null;
@@ -835,6 +844,8 @@ async function main() {
 
             // A screen a tool made: the mock's make_screen returns a page (with a script that mustn't run).
             await page.run(`document.querySelector('app-screen [data-screen-kind="html"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-screen [data-source="tool"]')`, 5000);
+            await page.run(`document.querySelector('app-screen [data-source="tool"]').click()`);
             await page.waitFor(`!!document.querySelector('app-screen [data-call-server]')`, 5000);
             await page.run(`(() => {
                 const server = document.querySelector('app-screen [data-call-server]');
@@ -888,7 +899,7 @@ async function main() {
             check('Apps: Download saves a zip with the flow as DML, the screen as HTML and a README',
                 zipName === 'new-app-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, README.md'
                     && fromZip.version === 1 && fromZip.screen?.kind === 'html' && fromZip.screen.from?.toolName === 'make_screen'
-                    && /<input id="question"/.test(zippedText('index.html')) && fromZip.flow?.[0]?.when?.element === 'ask'
+                    && /<input id="question"/.test(zippedText('index.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
                     && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`'),
                 `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
             const firstVersion = await page.waitFor(`(() => {
@@ -927,6 +938,214 @@ async function main() {
             check('Apps: the imported app runs as before, and a change makes the next download version 2',
                 !!reimported && next === 'Download v2 | New app v1', `${next}; ${reimported ? '' : `the screen shows "${await frameRun(`document.getElementById('answer')?.textContent || 'nothing'`)}" after ${lastSteps}`}`);
             rmSync(appDownloads, { recursive: true, force: true });
+        }
+        {
+            // The canvas: the app's screen running with a port beside each element, Start, a node for
+            // each rule's tool, and wires between them, each one part of a rule. These checks build
+            // onto a new app with real mouse drags, at a size where all of it shows.
+            await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+            // Ask a model asks the Chat app's model, chosen in Chat: here the mock's stand-in, chat.
+            await page.run(`(() => {
+                document.querySelector('apps-rail [data-show-app="chat"]').click();
+                const server = document.getElementById('chatServerSelect');
+                server.value = ${JSON.stringify(modernUrl)};
+                server.dispatchEvent(new Event('change'));
+                const tool = document.getElementById('chatToolSelect');
+                tool.value = 'chat';
+                tool.dispatchEvent(new Event('change'));
+            })()`);
+            await page.waitFor(`!!document.querySelector('#chatToolConfigForm .chat-message-field[data-field="message"]')`, 5000);
+            await page.run(`(() => {
+                const box = document.querySelector('#chatToolConfigForm .chat-message-field[data-field="message"]');
+                if (!box.checked) {
+                    box.checked = true;
+                    box.dispatchEvent(new Event('change'));
+                }
+                document.getElementById('newAppBtn').click();
+            })()`);
+            await page.waitFor(`document.getElementById('appName')?.value === 'New app 2' && !!document.querySelector('app-header [data-app-view-choice="canvas"]')`, 5000);
+            await page.run(`document.querySelector('app-header [data-app-view-choice="canvas"]').click()`);
+            await page.waitFor(`document.querySelectorAll('app-canvas [data-wire]').length === 4`, 10000);
+
+            const port = name => `document.querySelector('app-canvas [data-port="${name}"]')`;
+            const fromLibrary = async item => {
+                await page.run(`document.querySelector('app-canvas [data-toggle-library]').click()`);
+                await page.waitFor(`!!document.querySelector('app-canvas [data-library]:not([hidden]) ${item}')`, 5000);
+                await page.run(`document.querySelector('app-canvas [data-library] ${item}').click()`);
+            };
+            // Drags from one port to another as a person would, with both in view.
+            const drag = async (from, to) => {
+                const points = await page.run(`(() => {
+                    const ends = () => [${JSON.stringify(from)}, ${JSON.stringify(to)}].map(name => document.querySelector('app-canvas [data-port="' + name + '"]')?.getBoundingClientRect());
+                    const scroller = document.querySelector('app-canvas [data-canvas-scroll]');
+                    scroller.scrollIntoView({ block: 'nearest' });
+                    let [a, b] = ends();
+                    if (!a || !b) return null;
+                    const box = scroller.getBoundingClientRect();
+                    scroller.scrollTop += (a.top + b.top) / 2 - (box.top + box.height / 2);
+                    scroller.scrollLeft += (a.left + b.left) / 2 - (box.left + box.width / 2);
+                    [a, b] = ends();
+                    return [a.left + a.width / 2, a.top + a.height / 2, b.left + b.width / 2, b.top + b.height / 2];
+                })()`);
+                if (!points) return;
+                const [x1, y1, x2, y2] = points;
+                await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1, y: y1 });
+                await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x1, y: y1, button: 'left', buttons: 1, clickCount: 1 });
+                for (let step = 1; step <= 6; step++) {
+                    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1 + ((x2 - x1) * step) / 6, y: y1 + ((y2 - y1) * step) / 6, button: 'left', buttons: 1 });
+                }
+                await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x2, y: y2, button: 'left', buttons: 0, clickCount: 1 });
+            };
+
+            // The Library adds an output and a tool; dragging wires the tool between them.
+            await fromLibrary('[data-library-item="component"][data-type="output"]');
+            await page.waitFor(`!!${port('el:output2')}`, 10000);
+            await fromLibrary(`[data-library-item="tool"][data-server="${modernUrl}"][data-tool="count"]`);
+            const countRule = await page.waitFor(`(() => {
+                const nodes = document.querySelectorAll('app-canvas [data-node]');
+                return nodes.length === 2 ? nodes[1].dataset.node : null;
+            })()`, 5000);
+            await drag('el:run', `run:${countRule}`);
+            const triggered = await page.waitFor(`!!document.querySelector('app-canvas [data-wire="t:${countRule}:0"]')`, 5000);
+            await drag(`ok:${countRule}`, 'el:output2');
+            const wired = await page.waitFor(`document.querySelector('app-canvas [data-wire="r:${countRule}:0"]') ? document.querySelector('app-inspector .app-rule-sentence')?.textContent || null : null`, 5000);
+            check('Apps: on the canvas, dragging from a button to a tool\'s Run, and from its Answer to an output, wires them into its rule',
+                !!triggered && wired === 'When run is clicked, call count on modern server with n = 3; if it works, put {{text}} into output2.', wired);
+            await drag('el:input', 'el:output2');
+            const refused = await page.waitFor(`(() => {
+                const hint = document.querySelector('app-canvas [data-canvas-hint]');
+                return hint.classList.contains('text-error') ? hint.textContent : null;
+            })()`, 3000);
+            check('Apps: two parts of the screen don\'t wire to each other, and the canvas says why',
+                refused === "Two parts of the screen don't connect to each other: connect them through a tool.", refused);
+
+            // Run: the screen takes clicks, and both tools wired to the button answer.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('output2')`);
+            await frameRun(`(() => {
+                document.getElementById('input').value = 'from the canvas';
+                document.getElementById('run').click();
+                return true;
+            })()`);
+            const ran = await frameWaitFor(`(() => {
+                const shown = ['output', 'output2'].map(id => document.getElementById(id)?.textContent).join(' | ');
+                return shown === 'Echo: from the canvas | Counted to 3' ? shown : null;
+            })()`);
+            const answered = await page.waitFor(`(() => {
+                const statuses = [...document.querySelectorAll('app-canvas [data-node-status]')].map(status => status.textContent);
+                return statuses.length === 2 && statuses.every(text => /^✓ Answered in \\d+ ms$/.test(text)) ? statuses.join(' | ') : null;
+            })()`, 5000);
+            check('Apps: in Run, one click starts both tools, each answer goes where its wire goes, and each tool says it answered',
+                !!ran && !!answered, `${ran}; ${answered}`);
+
+            // A transform on the answer's wire says what of it shows: one value, picked from the last
+            // answer, with words around it.
+            const pill = `document.querySelector('app-canvas [data-pill="r:${countRule}:0"]')`;
+            await page.run(`${pill}.click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-route="0"].app-focus')`, 5000);
+            await fromLibrary('[data-library-item="transform"][data-transform="value"]');
+            const valuePill = await page.waitFor(`${pill}?.textContent === 'structured' ? 'structured' : null`, 5000);
+            // Picked again, the wire's value has no cursor in it, so the value picked takes its place.
+            await page.run(`${pill}.click()`);
+            const pick = `document.querySelector('app-inspector [data-picks] [data-insert-show="{{structured.counted}}"]')`;
+            await page.waitFor(`!!${pick} && !document.querySelector('app-inspector [data-route-show]:focus')`, 5000);
+            await page.run(`${pick}.click()`);
+            const pickedShow = await page.run(`document.querySelector('app-inspector [data-route="0"] [data-route-show]').value`);
+            await page.run(`(() => {
+                const show = document.querySelector('app-inspector [data-route="0"] [data-route-show]');
+                show.value = 'Counted ' + show.value + ' steps';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await frameRun(`(document.getElementById('run').click(), true)`);
+            const transformed = await frameWaitFor(`document.getElementById('output2')?.textContent === 'Counted 3 steps'`);
+            check('Apps: a transform shows one value of the answer, picked from its last answer, with words around it',
+                valuePill === 'structured' && pickedShow === '{{structured.counted}}' && !!transformed, `${valuePill}; ${pickedShow}; ${transformed ? 'shown' : 'not shown'}`);
+
+            // Start begins the app: wired to a tool's Run, it calls the tool when the app opens.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            await drag('start', `run:${countRule}`);
+            const started = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${countRule}:1"]') ? document.querySelector('app-inspector .app-inspector-title')?.textContent : null`, 5000);
+            await frameRun(`(document.body.dataset.before = 'restart', true)`);
+            await page.run(`document.querySelector('app-canvas [data-restart]').click()`);
+            const opened = await frameWaitFor(`(() => {
+                if (document.body.dataset.before) return null;
+                const shown = ['output', 'output2'].map(id => document.getElementById(id)?.textContent || 'empty').join(' | ');
+                return shown === 'empty | Counted 3 steps' ? shown : null;
+            })()`);
+            check('Apps: Start wired to a tool\'s Run calls it when the app opens, and Restart opens it again',
+                started === 'Start → count' && opened === 'empty | Counted 3 steps', `${started}; ${opened}`);
+
+            // A part of the screen a model makes: the Chat app's model writes a ticket dashboard, which
+            // runs without its script, handlers or form, its ids named after the part.
+            await fromLibrary('[data-library-item="component"][data-type="part"]');
+            await page.waitFor(`!!document.querySelector('app-inspector [data-part-source] [data-ask]')`, 5000);
+            await page.run(`(() => {
+                const ask = document.querySelector('app-inspector [data-ask]');
+                ask.value = 'a ticket dashboard';
+                ask.dispatchEvent(new Event('input', { bubbles: true }));
+                document.querySelector('app-inspector [data-make]').click();
+            })()`);
+            const made = await page.waitFor(`(() => {
+                const found = document.querySelector('app-inspector [data-found]')?.textContent || '';
+                return /part\\.refresh/.test(found) ? found.replace(/\\s+/g, ' ') : null;
+            })()`, 15000);
+            const dashboard = await frameWaitFor(`(() => {
+                const refresh = document.getElementById('part.refresh');
+                if (!refresh) return null;
+                return [document.getElementById('part.details').textContent || 'empty', refresh.getAttribute('onclick') ?? 'no handler', document.querySelector('form') ? 'a form' : 'no form'].join(', ');
+            })()`);
+            check('Apps: a part of the screen can be HTML a model makes, and its elements are the flow\'s to wire',
+                /^7 elements with ids the flow can use: part\.open .*part\.search field, part\.refresh button, .*part\.details output$/.test(made || '') && dashboard === 'empty, no handler, no form',
+                `${made}; ${dashboard}`);
+            await fromLibrary(`[data-library-item="tool"][data-server="${modernUrl}"][data-tool="ticket"]`);
+            const ticketRule = await page.waitFor(`(() => {
+                const nodes = document.querySelectorAll('app-canvas [data-node]');
+                return nodes.length === 3 && ${port('el:part.refresh')} ? nodes[2].dataset.node : null;
+            })()`, 5000);
+            await drag('el:part.refresh', `run:${ticketRule}`);
+            await drag(`ok:${ticketRule}`, 'el:part.details');
+            const ticketWired = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${ticketRule}:0"]') && document.querySelector('app-canvas [data-wire="r:${ticketRule}:0"]') ? document.querySelector('app-inspector .app-rule-sentence')?.textContent || null : null`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameRun(`(document.getElementById('part.refresh').click(), true)`);
+            const ticketShown = await frameWaitFor(`(() => {
+                const text = document.getElementById('part.details')?.textContent || '';
+                return /^T-\\d+$/.test(text) ? text : null;
+            })()`);
+            check('Apps: a part\'s button and output wire to a tool like any other, and the answer shows inside the part',
+                ticketWired === 'When part.refresh is clicked, call ticket on modern server; if it works, put {{text}} into part.details.' && !!ticketShown,
+                `${ticketWired}; ${ticketShown}`);
+
+            // Tidy up puts every tool beside what it's wired to. The download keeps where each one sits,
+            // Start, the part's HTML (in parts/) and what the model was asked.
+            await page.run(`document.querySelector('app-canvas [data-tidy]').click()`);
+            const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-canvas-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
+            await page.run(`document.getElementById('downloadAppBtn').click()`);
+            let zipName;
+            for (let i = 0; i < 50 && !zipName; i++) {
+                zipName = readdirSync(appDownloads).find(name => name.endsWith('.zip'));
+                if (!zipName) await sleep(100);
+            }
+            const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
+            const zippedText = name => (zipped.has(name) ? new TextDecoder().decode(zipped.get(name)) : '');
+            let fromZip;
+            try {
+                fromZip = fromDml(zippedText('app.dml'), { files: Object.fromEntries([...zipped.keys()].map(name => [name, zippedText(name)])) }).app;
+            } catch (error) {
+                fromZip = { error: error.message };
+            }
+            const part = fromZip.screen?.components?.find(component => component.type === 'part');
+            const counting = fromZip.flow?.find(rule => rule.call?.toolName === 'count');
+            check('Apps: the download keeps the part\'s HTML in parts/, what the model was asked, Start, and where each tool sits',
+                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, parts/part.html, README.md'
+                    && part?.ask === 'a ticket dashboard' && part.from?.toolName === 'chat' && /id="refresh"/.test(part.html)
+                    && /id="part\.refresh"/.test(zippedText('index.html'))
+                    && counting?.when?.map(candidate => candidate.event).join(', ') === 'click, open'
+                    && fromZip.flow.length === 3 && fromZip.flow.every(rule => Number.isFinite(rule.position?.x) && Number.isFinite(rule.position?.y))
+                    && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
+                `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+            rmSync(appDownloads, { recursive: true, force: true });
+            await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);
 
