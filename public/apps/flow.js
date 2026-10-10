@@ -289,13 +289,22 @@ export function describeRule(rule, { elementName = id => id, serverName = url =>
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }
 
-// What a route's transform shows on the canvas: the one value it takes, or the start of its template.
-export function routeSummary(route) {
+// A value's path by its last name (structured.counted is counted), keeping the name before an
+// index (json.items.0 is items.0).
+const shortPath = path => {
+    const names = path.split('.');
+    return names.length > 1 && /^\d+$/.test(names.at(-1)) ? names.slice(-2).join('.') : names.at(-1);
+};
+
+// What a route's transform shows, as the canvas labels its wire: the one value it takes, or the
+// start of its template with values in braces, in at most `max` characters.
+export function routeSummary(route, { max = 12 } = {}) {
     const show = String(route?.show ?? '');
     if (!show) return 'nothing';
     const single = show.match(/^\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}$/);
-    if (single) return single[1];
-    return show.length > 22 ? `${show.slice(0, 21)}…` : show;
+    if (single) return shortPath(single[1]);
+    const compact = show.replace(PLACEHOLDERS, (match, path) => `{${shortPath(path)}}`).replace(/\s+/g, ' ').trim();
+    return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
 
 export const isDefaultShow = route => String(route?.show ?? '') === (route?.if === 'error' ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok);

@@ -1200,7 +1200,7 @@ app-canvas[data-mode='run'] .app-port {
     position: absolute;
     top: var(--y);
     left: var(--x);
-    max-width: 150px;
+    max-width: 104px;
     height: 20px;
     min-height: 20px;
     padding: 0 8px;
@@ -1444,6 +1444,10 @@ app-inspector .app-route-where {
 app-inspector .app-route-where select {
     flex: 1;
     min-width: 0;
+}
+
+app-inspector .app-route-where [data-route-into] {
+    flex: 2;
 }
 
 .app-connections {

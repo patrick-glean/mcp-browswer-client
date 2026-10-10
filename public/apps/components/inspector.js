@@ -126,7 +126,7 @@ export class AppInspector extends AppElement {
             if (wire.kind === 'trigger') return wire.event === 'open' ? `▶ Starts ${tool(wire)} when the app opens` : `▶ Starts ${tool(wire)} when it ${EVENTS[wire.event]}`;
             if (wire.kind === 'arg') return `→ Fills ${tool(wire)}'s ${wire.arg}`;
             const route = flow.find(rule => rule.id === wire.ruleId).then[wire.index];
-            return `← Shows ${tool(wire)}'s ${wire.kind === 'error' ? 'error' : 'answer'}: ${routeSummary(route)}`;
+            return `← Shows ${tool(wire)}'s ${wire.kind === 'error' ? 'error' : 'answer'}: ${routeSummary(route, { max: 40 })}`;
         };
         return wires.length
             ? `<ul class="app-connections">${wires.map(wire => `<li><button type="button" class="app-connection" data-select-wire="${escapeHtml(wire.id)}" data-rule="${escapeHtml(wire.ruleId)}">${escapeHtml(words(wire))}</button></li>`).join('')}</ul>`

@@ -65,9 +65,10 @@ export class RuleEditor {
     }
 
     // The elements as options, grouped by kind; one that isn't on the screen anymore stays chosen.
+    // The id comes first, as on the canvas's ports, so a narrow menu still tells them apart.
     elementOptions(kinds, chosen, { app = false } = {}) {
         const elements = this.apps.elements();
-        const name = element => (element.label && element.label.toLowerCase() !== element.id.toLowerCase() ? `${element.label} (${element.id})` : element.id);
+        const name = element => (element.label && element.label.toLowerCase() !== element.id.toLowerCase() ? `${element.id} (${element.label})` : element.id);
         const groups = kinds.map(kind => {
             const members = elements.filter(element => element.kind === kind);
             return members.length ? `<optgroup label="${KIND_GROUPS[kind]}">${members.map(element => `<option value="${escapeHtml(element.id)}">${escapeHtml(name(element))}</option>`).join('')}</optgroup>` : '';

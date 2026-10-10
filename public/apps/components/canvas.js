@@ -16,7 +16,8 @@ import { TraceList } from './trace.js';
 
 // The canvas's geometry, which the styles read as custom properties.
 const SCREEN = { x: 24, y: 76, width: 300, bar: 30, gutter: 96 };
-const TOOLS_GAP = 84;
+// Room between the screen's ports and the tools for a transform's label on a wire.
+const TOOLS_GAP = 120;
 const TOOL_WIDTH = 220;
 const ROW = 26;
 const TRANSFORMS = [

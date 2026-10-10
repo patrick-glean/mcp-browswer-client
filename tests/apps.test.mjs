@@ -422,8 +422,11 @@ test('a part keeps its elements through a rename, and its answers can be HTML', 
 
 test("a transform's label is the value it takes, or the start of its template", () => {
     assert.equal(routeSummary({ if: 'ok', show: '{{text}}' }), 'text');
-    assert.equal(routeSummary({ if: 'ok', show: '{{structured.counted}}' }), 'structured.counted');
-    assert.equal(routeSummary({ if: 'ok', show: 'You said {{question}} and more' }), 'You said {{question}}…');
+    assert.equal(routeSummary({ if: 'ok', show: '{{structured.counted}}' }), 'counted');
+    assert.equal(routeSummary({ if: 'ok', show: '{{ json.items.0 }}' }), 'items.0');
+    assert.equal(routeSummary({ if: 'ok', show: '{{structured.counted}} steps' }), '{counted} s…');
+    assert.equal(routeSummary({ if: 'ok', show: '{{structured.counted}} steps' }, { max: 40 }), '{counted} steps');
+    assert.equal(routeSummary({ if: 'ok', show: 'You said {{question}} and more' }), 'You said {q…');
     assert.equal(routeSummary({ if: 'ok', show: '' }), 'nothing');
 });
 
