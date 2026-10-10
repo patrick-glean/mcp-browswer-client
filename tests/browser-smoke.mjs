@@ -973,10 +973,12 @@ async function main() {
                 await page.waitFor(`!!document.querySelector('app-canvas [data-library]:not([hidden]) ${item}')`, 5000);
                 await page.run(`document.querySelector('app-canvas [data-library] ${item}').click()`);
             };
-            // Drags from one port to another as a person would, with both in view.
+            // Drags from one port to another as a person would, with both in view. Each end is a port's
+            // name, or a selector for something else to press or release on.
             const drag = async (from, to) => {
+                const selector = end => (end.includes(' ') ? end : `app-canvas [data-port="${end}"]`);
                 const points = await page.run(`(() => {
-                    const ends = () => [${JSON.stringify(from)}, ${JSON.stringify(to)}].map(name => document.querySelector('app-canvas [data-port="' + name + '"]')?.getBoundingClientRect());
+                    const ends = () => [${JSON.stringify(selector(from))}, ${JSON.stringify(selector(to))}].map(found => document.querySelector(found)?.getBoundingClientRect());
                     const scroller = document.querySelector('app-canvas [data-canvas-scroll]');
                     scroller.scrollIntoView({ block: 'nearest' });
                     let [a, b] = ends();
@@ -1102,9 +1104,13 @@ async function main() {
                 const nodes = document.querySelectorAll('app-canvas [data-node]');
                 return nodes.length === 3 && ${port('el:part.refresh')} ? nodes[2].dataset.node : null;
             })()`, 5000);
-            await drag('el:part.refresh', `run:${ticketRule}`);
+            // From the label beside a port to the words on a tool's row, which wire like the ports do.
+            await drag('app-canvas [data-gutter-row="part.refresh"] .app-gutter-label', `app-canvas [data-node="${ticketRule}"] .app-node-run .app-node-name`);
+            const byLabel = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${ticketRule}:0"]') ? 'wired, ' + (getSelection().toString() ? 'with text selected' : 'nothing selected') : null`, 5000);
             await drag(`ok:${ticketRule}`, 'el:part.details');
             const ticketWired = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${ticketRule}:0"]') && document.querySelector('app-canvas [data-wire="r:${ticketRule}:0"]') ? document.querySelector('app-inspector .app-rule-sentence')?.textContent || null : null`, 5000);
+            check('Apps: a wire also starts from the label beside a port and ends on the words of a tool\'s row, without selecting text',
+                byLabel === 'wired, nothing selected', byLabel);
             await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
             await frameRun(`(document.getElementById('part.refresh').click(), true)`);
             const ticketShown = await frameWaitFor(`(() => {

@@ -775,6 +775,7 @@ app-inspector:empty {
     min-height: 100%;
     background-image: radial-gradient(var(--theme-border-dark) 1px, transparent 1px);
     background-size: 18px 18px;
+    user-select: none;
 }
 
 .app-wires {
@@ -1035,6 +1036,18 @@ app-canvas[data-mode='run'] .app-screen-overlay {
 
 .app-port:hover {
     transform: scale(1.3);
+}
+
+/* A press a few pixels off a port still starts its wire. */
+.app-port::before {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    content: '';
+}
+
+.app-port-element {
+    position: relative;
 }
 
 .app-node .app-port:hover,

@@ -627,7 +627,8 @@ export class AppCanvas extends AppElement {
 
     pointerDown(event) {
         if (event.button !== 0) return;
-        const port = event.target.closest('[data-port]');
+        // A wire starts from a port, or from the label or row it's on.
+        const port = event.target.closest('[data-port]') || event.target.closest('[data-gutter-row], .app-node-row, [data-start]')?.querySelector('[data-port]');
         if (port && this.mode === 'design') return this.startWiring(event, port.dataset.port);
         const head = event.target.closest('[data-drag-node]');
         if (head) return this.startMoving(event, head.closest('[data-node]'));
@@ -664,9 +665,11 @@ export class AppCanvas extends AppElement {
         document.addEventListener('pointerup', end);
     }
 
-    // The port under the pointer, or the nearest one it can connect to within a few pixels.
+    // The port under the pointer (or the port of the label or row under it), or the nearest one it
+    // can connect to within a few pixels.
     portNear(x, y, from) {
-        const under = document.elementFromPoint(x, y)?.closest('[data-port]');
+        const at = document.elementFromPoint(x, y);
+        const under = at?.closest('[data-port]') || at?.closest('[data-gutter-row], .app-node-row, [data-start]')?.querySelector('[data-port]');
         if (under && under.dataset.port !== from) return under.dataset.port;
         let best = null;
         for (const port of this.querySelectorAll('[data-port]')) {
@@ -757,7 +760,11 @@ export class AppCanvas extends AppElement {
         if (wire) return this.apps.select({ kind: 'wire', id: wire.dataset.wire, ruleId: wire.dataset.wire.split(':')[1] });
         const row = target.closest('[data-gutter-row]');
         if (row) return this.apps.select({ kind: 'element', id: row.dataset.gutterRow });
-        if (target.closest('[data-node]')) return;
+        const node = target.closest('[data-node]');
+        if (node) {
+            if (!target.closest('[data-drag-node]')) this.apps.select({ kind: 'rule', id: node.dataset.node });
+            return;
+        }
         if (target.closest('[data-surface]')) this.apps.select(null);
     }
 
