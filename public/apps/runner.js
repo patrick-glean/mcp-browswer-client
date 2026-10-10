@@ -411,7 +411,9 @@ export class AppRunner {
             const limit = allowedCall(this.replyCalls.get(rule.id));
             this.replyCalls.set(rule.id, limit.times);
             if (!limit.allowed) {
-                this.trace({ kind: 'note', text: `Skipped ${call.method}: an answer's tool calls run at most 3 in 10 seconds.` });
+                const skipped = `Skipped ${call.method}: an answer's tool calls run at most 3 in 10 seconds.`;
+                this.trace({ kind: 'note', text: skipped });
+                add(skipped, 'error');
                 continue;
             }
             const found = serverWithTool(this.shell.servers, call.method);
