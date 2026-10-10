@@ -64,8 +64,9 @@ export function triggersOf(rule) {
 export const normalizeRule = rule => ({ ...rule, when: triggersOf(rule), then: rule.then || [] });
 
 // A rule with a trigger, a call and both routes; without an element (and not on open) it waits
-// for nothing yet, and `into: null` leaves the routes out.
-export function newRule({ element = '', event = 'click', serverUrl = '', toolName = '', args = {}, into = '', position = null } = {}) {
+// for nothing yet, and `into: null` leaves the routes out. `prompt` names the call's field that
+// also asks for what the boxes the rule fills need (boxes.js).
+export function newRule({ element = '', event = 'click', serverUrl = '', toolName = '', args = {}, into = '', position = null, prompt = null } = {}) {
     return {
         id: uid('rule'),
         when: element || event === 'open' ? [trigger(element, event)] : [],
@@ -75,6 +76,7 @@ export function newRule({ element = '', event = 'click', serverUrl = '', toolNam
             { if: 'error', show: DEFAULT_SHOW.error, into, how: 'replace' },
         ],
         ...(position ? { position } : {}),
+        ...(prompt ? { prompt } : {}),
     };
 }
 
@@ -90,14 +92,57 @@ export function resultText(result) {
     return content.filter(item => item?.type === 'text' && typeof item.text === 'string').map(item => item.text).join('\n');
 }
 
-function parsedJson(text) {
-    const trimmed = text.trim();
-    if (!/^[[{]/.test(trimmed)) return null;
-    try {
-        return JSON.parse(trimmed);
-    } catch {
-        return null;
+// Models break lines inside JSON strings, which JSON doesn't allow (Glean's chat does, around its
+// citations): escapes the control characters inside strings, so the JSON reads as meant.
+function escapedInStrings(text) {
+    let out = '';
+    let inString = false;
+    let escaped = false;
+    for (const char of text) {
+        if (!inString) {
+            if (char === '"') inString = true;
+            out += char;
+        } else if (escaped) {
+            escaped = false;
+            out += char;
+        } else if (char === '\\') {
+            escaped = true;
+            out += char;
+        } else if (char === '"') {
+            inString = false;
+            out += char;
+        } else if (char < ' ') {
+            out += { '\n': '\\n', '\r': '\\r', '\t': '\\t' }[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+        } else {
+            out += char;
+        }
     }
+    return out;
+}
+
+function parsedJson(text) {
+    const trimmed = String(text ?? '').trim();
+    if (!/^[[{]/.test(trimmed)) return null;
+    for (const candidate of [trimmed, escapedInStrings(trimmed)]) {
+        try {
+            return JSON.parse(candidate);
+        } catch {
+            // Not JSON read this way.
+        }
+    }
+    return null;
+}
+
+// The JSON in a tool's text: all of it, or the first ```json (or bare ```) block that parses, as
+// a model writes it, whatever is around it (Glean's chat adds the conversation's details after).
+export function jsonIn(text) {
+    const whole = parsedJson(text);
+    if (whole !== null) return whole;
+    for (const match of String(text ?? '').matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)```/gi)) {
+        const found = parsedJson(match[1]);
+        if (found !== null) return found;
+    }
+    return null;
 }
 
 // The HTML in a tool's answer: an embedded text/html resource, structuredContent.html, or text that
@@ -127,7 +172,7 @@ export function answerOf(message) {
     else if (result.isError) error = text || 'The tool reported an error.';
     return {
         ok: !error,
-        values: { text, structured: result?.structuredContent ?? null, json: parsedJson(text), html: htmlFromResult(result) ?? '', result, error },
+        values: { text, structured: result?.structuredContent ?? null, json: jsonIn(text), html: htmlFromResult(result) ?? '', result, error },
     };
 }
 
@@ -160,6 +205,13 @@ export function renderTemplate(template, values) {
         return displayValue(value);
     });
     return { text, missing };
+}
+
+// What a route gives a box: the value itself when the template is one {{name}} (a list stays a
+// list), else the template's text.
+export function templateValue(template, values) {
+    const single = String(template ?? '').match(/^\s*\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}\s*$/);
+    return single ? valueAt(values, single[1]) : renderTemplate(template, values).text;
 }
 
 // The arguments a call sends. {{name}} is the screen's value for the element with that id, else a
@@ -228,19 +280,26 @@ function renameInValue(value, from, to) {
     return value;
 }
 
+// The key a box's piece of an answer goes under, {{json.key}}: its id, a part's dots as underscores.
+export const answerKey = id => String(id ?? '').replace(/[^\w-]/g, '_');
+
+const JSON_KEYS = /\{\{\s*json\.([A-Za-z_][\w-]*)\s*\}\}/g;
+
 // The flow after an element's id changed: rules that wait for it, read it or show things in it
-// follow it to its new name, and so do the elements of a part (from.x becomes to.x).
+// follow it to its new name, and so do the elements of a part (from.x becomes to.x) and the key
+// of the answer a box takes ({{json.from}} becomes {{json.to}}).
 export function renameInFlow(flow, from, to) {
     const renamed = id => (id === from ? to : String(id ?? '').startsWith(`${from}.`) ? `${to}${id.slice(from.length)}` : id);
     return (flow || []).map(rule => ({
         ...rule,
         when: triggersOf(rule).map(candidate => ({ ...candidate, element: renamed(candidate.element) })),
         call: { ...rule.call, args: renameInValue(rule.call?.args || {}, from, to) },
-        then: (rule.then || []).map(route => ({
-            ...route,
-            into: renamed(route.into),
-            show: ANSWER_NAMES.includes(from) ? route.show : replaceName(String(route.show ?? ''), from, to),
-        })),
+        then: (rule.then || []).map(route => {
+            const into = renamed(route.into);
+            let show = ANSWER_NAMES.includes(from) ? String(route.show ?? '') : replaceName(String(route.show ?? ''), from, to);
+            if (into !== route.into) show = show.replace(JSON_KEYS, (match, key) => (key === answerKey(route.into) ? `{{json.${answerKey(into)}}}` : match));
+            return { ...route, into, show };
+        }),
     }));
 }
 
@@ -268,6 +327,11 @@ export function flowProblems(flow, { elements = [], servers = {} } = {}) {
         else if (servers[serverUrl]?.tools?.length && !servers[serverUrl].tools.some(tool => tool.name === toolName)) {
             problems.push(`${toolName} isn't one of this server's tools.`);
         }
+        const found = (servers[serverUrl]?.tools || []).find(tool => tool.name === toolName);
+        const schema = found?.inputSchema || found?.input_schema;
+        if (rule.prompt && schema?.properties && !Object.hasOwn(schema.properties, rule.prompt)) {
+            problems.push(`${toolName} has no field ${rule.prompt} to ask for the boxes in.`);
+        }
         for (const route of rule.then || []) {
             if (!route.into) problems.push('Choose where the answer goes.');
             else if (!ids.has(route.into)) problems.push(`${route.into} isn't on the screen.`);
@@ -275,6 +339,9 @@ export function flowProblems(flow, { elements = [], servers = {} } = {}) {
         return [rule.id, [...new Set(problems)]];
     });
 }
+
+// Words in a list: a, b and c.
+export const listed = items => (items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 // Text in a sentence: a lone {{name}} as it is, anything else in quotes.
 const quoted = text => (/^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text) ? text : `“${text}”`);
@@ -284,7 +351,8 @@ export function describeRule(rule, { elementName = id => id, serverName = url =>
     const triggers = triggersOf(rule).map(({ element, event }) => (event === 'open' ? 'the app opens' : `${elementName(element)} ${EVENTS[event] || event}`));
     const when = triggers.length ? `When ${triggers.join(' or ')}` : 'Once something starts it';
     const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? quoted(value) : JSON.stringify(value)}`);
-    const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}`;
+    const asking = rule.prompt ? `, asking in ${rule.prompt} for what its boxes show` : '';
+    const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}${asking}`;
     const routes = (rule.then || []).map(route => `${route.if === 'error' ? 'if it fails' : 'if it works'}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }

@@ -17,11 +17,13 @@
 //     </flow>
 //
 // A <when> names its first trigger, and <or> each other one; x and y are where its tool sits on
-// the canvas.
+// the canvas. A box is an <output> that says what it shows (show="bar") and, as its text, what
+// goes in it; its rule asks for it in the <arg role="prompt">, and takes it as {{json.<id>}}.
 //   </app>
 //
 // It's XML, read and written here without a DOM, so the worker and Node can use it too.
 
+import { BOX_KINDS, WIDTHS } from './boxes.js';
 import { EVENTS, ROUTE_HOW, trigger, triggersOf, uid } from './flow.js';
 import { COMPONENT_TYPES } from './screen.js';
 
@@ -59,22 +61,30 @@ function writeNode([name, attributes = {}, ...children], depth = 0) {
 
 const orUndefined = value => (value === '' || value === null || value === undefined ? undefined : value);
 
-function callNode(name, call) {
-    const args = Object.entries(call?.args || {}).map(([key, value]) => (typeof value === 'string'
-        ? ['arg', { name: key }, value]
-        : ['arg', { name: key, type: 'json' }, JSON.stringify(value)]));
+// A call as markup; `prompt` names the argument that also asks for what the rule's boxes need.
+function callNode(name, call, { prompt = null } = {}) {
+    const args = Object.entries(call?.args || {}).map(([key, value]) => {
+        const role = key === prompt ? 'prompt' : undefined;
+        return typeof value === 'string'
+            ? ['arg', { name: key, role }, value]
+            : ['arg', { name: key, type: 'json', role }, JSON.stringify(value)];
+    });
     return [name, { server: call?.serverUrl || '', tool: call?.toolName || '' }, ...args];
 }
 
 // Where a part's HTML goes in a zip.
 export const partFile = id => `parts/${id}.html`;
 
+const widthOf = component => (WIDTHS[component.width] && component.width !== 'full' ? component.width : undefined);
+
 function componentNode(component, { standalone }) {
     const { id, type } = component;
+    const width = widthOf(component);
     switch (type) {
         case 'title':
+            return ['title', { id }, component.text ?? ''];
         case 'text':
-            return [type, { id }, component.text ?? ''];
+            return ['text', { id, width }, component.text ?? ''];
         case 'textbox':
             return ['textbox', {
                 id,
@@ -82,13 +92,17 @@ function componentNode(component, { standalone }) {
                 placeholder: orUndefined(component.placeholder),
                 lines: Number(component.lines) > 1 ? Number(component.lines) : undefined,
                 value: orUndefined(component.value),
+                width,
             }];
         case 'button':
-            return ['button', { id, label: component.label ?? '' }];
-        case 'output':
-            return ['output', { id, label: component.label ?? '', placeholder: orUndefined(component.placeholder) }];
+            return ['button', { id, label: component.label ?? '', width }];
+        case 'output': {
+            const show = BOX_KINDS[component.show] && component.show !== 'text' ? component.show : undefined;
+            const about = String(component.about ?? '').trim();
+            return ['output', { id, label: component.label ?? '', placeholder: orUndefined(component.placeholder), show, width }, ...(about ? [about] : [])];
+        }
         case 'part':
-            return ['part', { id, label: orUndefined(component.label), src: standalone ? undefined : partFile(id) },
+            return ['part', { id, label: orUndefined(component.label), src: standalone ? undefined : partFile(id), width },
                 ...(component.ask ? [['ask', {}, component.ask]] : []),
                 ...(component.from ? [callNode('from', component.from)] : []),
                 ...(standalone ? [['html', {}, { cdata: component.html || '' }]] : [])];
@@ -114,12 +128,13 @@ const HEADER = `<!-- An app built in MCP Browser Client. <screen> is what people
 export function toDml(app, { standalone = false, serverNames = {} } = {}) {
     const screen = app.screen || {};
     const src = standalone ? undefined : 'index.html';
+    const size = screen.size === 'wide' ? 'wide' : undefined;
     const screenNode = screen.kind === 'html'
-        ? ['screen', { src },
+        ? ['screen', { src, size },
             ...(screen.ask ? [['ask', {}, screen.ask]] : []),
             ...(screen.from ? [callNode('from', screen.from)] : []),
             ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
-        : ['screen', { src, 'built-from': 'components' }, ...(screen.components || []).map(component => componentNode(component, { standalone }))];
+        : ['screen', { src, 'built-from': 'components', size }, ...(screen.components || []).map(component => componentNode(component, { standalone }))];
     const servers = serversOf(app);
     const triggerAttributes = candidate => (candidate
         ? { element: candidate.event === 'open' ? undefined : candidate.element, event: candidate.event }
@@ -132,7 +147,7 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
             y: rule.position ? Math.round(rule.position.y) : undefined,
         },
         ...triggersOf(rule).slice(1).map(candidate => ['or', triggerAttributes(candidate)]),
-        callNode('call', rule.call),
+        callNode('call', rule.call, { prompt: rule.prompt }),
         ...(rule.then || []).map(route => ['then', {
             if: route.if === 'error' ? 'error' : 'ok',
             into: route.into || '',
@@ -330,10 +345,21 @@ export function fromDml(source, { files = {} } = {}) {
             ids.add(id);
             const attr = name => node.attrs[name] ?? '';
             const component = { id, type: node.name };
+            if (node.attrs.width !== undefined) {
+                if (!Object.hasOwn(WIDTHS, node.attrs.width)) fail(node, `width="${node.attrs.width}" isn't one of ${Object.keys(WIDTHS).join(', ')}.`);
+                component.width = node.attrs.width;
+            }
             if (node.name === 'title' || node.name === 'text') component.text = textIn(node);
             if (node.name === 'textbox') Object.assign(component, { label: attr('label'), placeholder: attr('placeholder'), lines: Math.max(1, Number(node.attrs.lines) || 1), value: attr('value') });
             if (node.name === 'button') component.label = attr('label');
-            if (node.name === 'output') Object.assign(component, { label: attr('label'), placeholder: attr('placeholder') });
+            if (node.name === 'output') {
+                Object.assign(component, { label: attr('label'), placeholder: attr('placeholder') });
+                const { show } = node.attrs;
+                if (show !== undefined && !Object.hasOwn(BOX_KINDS, show)) fail(node, `show="${show}" isn't one of ${Object.keys(BOX_KINDS).join(', ')}.`);
+                if (show !== undefined) component.show = show;
+                const about = textIn(node).trim();
+                if (about) component.about = about;
+            }
             if (node.name === 'part') {
                 const inline = one(node, 'html', { required: false });
                 const src = node.attrs.src;
@@ -363,6 +389,9 @@ export function fromDml(source, { files = {} } = {}) {
         const ask = one(screenNode, 'ask', { required: false });
         screen = { kind: 'html', html, from: from ? readCall(from) : null, ask: ask ? textIn(ask) : '' };
     }
+    const size = screenNode.attrs.size;
+    if (size !== undefined && size !== 'narrow' && size !== 'wide') fail(screenNode, `size="${size}" is narrow or wide.`);
+    if (size) screen.size = size;
 
     // A trigger's attributes. A <when> may have none yet: nothing starts its rule.
     const readTrigger = (node, { optional = false } = {}) => {
@@ -387,7 +416,13 @@ export function fromDml(source, { files = {} } = {}) {
             if (!route.attrs.into) fail(route, '<then> needs into="…", the id of where the answer goes.');
             return { if: route.attrs.if === 'error' ? 'error' : 'ok', show: textIn(route), into: route.attrs.into, how };
         });
-        flow.push({ id: uid('rule'), when, call: readCall(one(node, 'call')), then, ...(position ? { position } : {}) });
+        const callNode = one(node, 'call');
+        // The argument that also asks for what the rule's boxes need.
+        const prompts = elementsIn(callNode, 'arg').filter(arg => arg.attrs.role !== undefined);
+        for (const arg of prompts) if (arg.attrs.role !== 'prompt') fail(arg, `role="${arg.attrs.role}" isn't one an <arg> has; the one there is is role="prompt".`);
+        if (prompts.length > 1) fail(prompts[1], 'Only one <arg> of a call is its prompt.');
+        const prompt = prompts[0]?.attrs.name;
+        flow.push({ id: uid('rule'), when, call: readCall(callNode), then, ...(position ? { position } : {}), ...(prompt ? { prompt } : {}) });
     }
 
     const servers = elementsIn(one(root, 'servers', { required: false }) || { children: [] }, 'server')

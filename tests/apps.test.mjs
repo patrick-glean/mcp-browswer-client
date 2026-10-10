@@ -6,11 +6,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
+import { dashboardApp } from '../public/apps/apps.js';
 import { askPrompt, modelCall } from '../public/apps/ask.js';
+import { asksOf, formatRequest, isBox, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
 import {
-    answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, newRule, normalizeRule, renameInFlow,
-    renderTemplate, routeSummary, rulesFor, triggerIndex, triggersOf,
+    answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, jsonIn, newRule, normalizeRule, renameInFlow,
+    renderTemplate, routeSummary, rulesFor, templateValue, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
 import { canConnect, connect, disconnect, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
 import { componentsHtml, elementsOfComponents, freeId, htmlFromResult, newComponent, partElements, prefixIds, scopeCss } from '../public/apps/screen.js';
@@ -444,4 +446,173 @@ test("asking a model sends the Chat app's model what to make, with the rules a s
     assert.deepEqual(modelCall({ ...model, args: {} }, 'make it').args.message, 'make it');
     assert.throws(() => modelCall(null, 'x'), /In Apps, open Chat, and under Model choose the tool that answers/);
     assert.throws(() => modelCall({ ...model, messageField: null }, 'x'), /tick "Your message goes here"/);
+});
+
+// A dashboard's screen: boxes that say what they show, and one rule that asks for all of them.
+function dashboard() {
+    // Text and full width are what an output is when it doesn't say, so DML leaves them out.
+    const box = (id, show, about, width) => ({ id, type: 'output', label: id[0].toUpperCase() + id.slice(1), placeholder: '', ...(show !== 'text' ? { show } : {}), about, ...(width ? { width } : {}) });
+    return {
+        id: 'app-dash',
+        name: 'Pulse',
+        description: '',
+        version: 0,
+        screen: {
+            kind: 'components',
+            size: 'wide',
+            components: [
+                { id: 'project', type: 'textbox', label: 'Project', placeholder: '', lines: 1, value: 'Atlas', width: 'two-thirds' },
+                { id: 'refresh', type: 'button', label: 'Refresh', width: 'third' },
+                box('summary', 'text', 'Where it stands, in 2 sentences'),
+                box('health', 'number', 'On track, At risk or Off track', 'third'),
+                box('activity', 'bar', 'Updates per week, the last 6 weeks', 'two-thirds'),
+                box('docs', 'list', 'The 3 most useful documents', 'half'),
+                box('banner', 'html', 'A status banner', 'half'),
+                { id: 'plain', type: 'output', label: 'Plain', placeholder: '' },
+            ],
+        },
+        flow: [{
+            id: 'rule-pulse',
+            when: [{ element: '', event: 'open' }, { element: 'refresh', event: 'click' }],
+            call: { serverUrl: 'https://acme-be.glean.com/mcp/default', toolName: 'chat', args: { message: "What's the latest on {{project}}?", _user_goal: "What's the latest on {{project}}?" } },
+            prompt: 'message',
+            then: [
+                ...['summary', 'health', 'activity', 'docs', 'banner'].map(id => ({ if: 'ok', show: `{{json.${id}}}`, into: id, how: 'replace' })),
+                { if: 'ok', show: '{{text}}', into: 'plain', how: 'replace' },
+                { if: 'error', show: '{{json.summary}}', into: 'summary', how: 'replace' },
+            ],
+        }],
+    };
+}
+
+test("the JSON in a model's answer is read from its ```json block, whatever comes after it", () => {
+    const glean = '```json\n{\n  "summary": "Going well.",\n  "activity": {"labels": ["Jul", "Aug"], "values": [1, 3]}\n}\n```\n\n---\nchatId: 1d85be3c\nmessages[3]:\n  -\n    ts: "2026-10-10"';
+    assert.deepEqual(jsonIn(glean), { summary: 'Going well.', activity: { labels: ['Jul', 'Aug'], values: [1, 3] } });
+    assert.deepEqual(jsonIn('{"a": 1}'), { a: 1 });
+    assert.deepEqual(jsonIn('Here:\n```\n[1, 2]\n```'), [1, 2]);
+    // Glean's chat breaks lines inside a string around a citation, which JSON doesn't allow.
+    const cited = '```json\n{\n  "summary": "It works.  [^1]\n\n",\n  "note": "tab\there, \\"quoted\\""\n}\n```\n\n[^1]: [Notes](https://example.com/n)\n';
+    assert.deepEqual(jsonIn(cited), { summary: 'It works.  [^1]\n\n', note: 'tab\there, "quoted"' });
+    assert.equal(renderBox('text', jsonIn(cited).summary).html, '<p class="box-text">It works.</p>');
+    assert.match(renderBox('bar', { labels: ['2026-08-31', '2026-09-07'], values: [0, 1] }).html, /<span title="Aug 31">Aug 31<\/span><span title="Sep 7">Sep 7<\/span>/);
+    assert.equal(jsonIn('```json\n{not json}\n```'), null);
+    assert.equal(jsonIn('No JSON here.'), null);
+    assert.equal(answerOf({ result: { content: [{ type: 'text', text: glean }] } }).values.json.summary, 'Going well.');
+    const values = { json: { docs: [{ title: 'A' }] }, project: 'Atlas' };
+    assert.deepEqual(templateValue('{{json.docs}}', values), [{ title: 'A' }]);
+    assert.equal(templateValue('On {{project}}', values), 'On Atlas');
+    assert.equal(templateValue('{{json.nothing}}', values), undefined);
+});
+
+test("a rule's boxes ask for one JSON object, a key for each, in the shapes they show", () => {
+    const app = dashboard();
+    const elements = elementsOfComponents(app.screen.components);
+    assert.deepEqual(elements.filter(isBox).map(element => element.id), ['summary', 'health', 'activity', 'docs', 'banner']);
+    const asks = asksOf(app.flow[0], elements);
+    assert.deepEqual(asks.map(({ key, kind, width }) => `${key} ${kind} ${width}`), ['summary text full', 'health number third', 'activity bar two-thirds', 'docs list half', 'banner html half']);
+    const request = formatRequest(asks, { size: 'wide' });
+    assert.equal(request.split('\n')[0], "This answer fills the boxes on an app's screen. Answer with one JSON object in a ```json block, and nothing else, with exactly these keys:");
+    assert.match(request, /^- "summary" \(text\): Where it stands, in 2 sentences\. As a string\.$/m);
+    assert.match(request, /^- "health" \(number\): On track, At risk or Off track\. As \{"value": number or short text, "note": string\}\.$/m);
+    assert.match(request, /^- "activity" \(bar chart\): Updates per week, the last 6 weeks\. As \{"labels": \[string\], "values": \[number\]\}\.$/m);
+    assert.match(request, /^- "banner" \(HTML\): A status banner\. As a string of HTML for a box about 520 px wide: no scripts, nothing from the network, inline styles only\.$/m);
+    assert.match(request, /\nUse null for a key you have nothing for\.$/);
+    assert.match(formatRequest(asks), /about 300 px wide/, 'a narrow screen has narrower boxes');
+    assert.doesNotMatch(request, /"plain"/, "an answer's text isn't a key");
+    assert.equal(promptFieldOf({ properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array' } }, required: ['message', '_user_goal'] }), 'message');
+    assert.equal(promptFieldOf({ properties: { topic: { type: 'string' }, n: { type: 'integer' } }, required: ['topic'] }), 'topic');
+    assert.equal(promptFieldOf({ properties: { n: { type: 'integer' } } }), null);
+    assert.match(describeRule(app.flow[0]), /, asking in message for what its boxes show; if it works, put \{\{json\.summary\}\} into summary;/);
+    const [problems] = flowProblems(app.flow, {
+        elements,
+        servers: { 'https://acme-be.glean.com/mcp/default': { tools: [{ name: 'chat', inputSchema: { type: 'object', properties: { question: { type: 'string' } } } }] } },
+    });
+    assert.deepEqual(problems[1], ['chat has no field message to ask for the boxes in.']);
+});
+
+test('each box draws its piece of the answer, and says when it doesn\'t fit', () => {
+    assert.equal(renderBox('text', 'On track <now>').html, '<p class="box-text">On track &lt;now&gt;</p>');
+    assert.equal(renderBox('number', { value: 'At risk', note: 'Two blockers' }).html, '<div class="kpi"><span class="kpi-value">At risk</span><span class="kpi-note">Two blockers</span></div>');
+    assert.equal(renderBox('number', 12.345).html, '<div class="kpi"><span class="kpi-value">12.35</span></div>');
+    const list = renderBox('list', [{ title: 'Design', url: 'https://example.com/d', detail: 'Why' }, { name: 'Notes', link: 'javascript:alert(1)' }, 'Just text']).html;
+    assert.equal(list, '<ul class="items"><li><a class="item-title" href="https://example.com/d">Design</a><span class="item-detail">Why</span></li><li><span class="item-title">Notes</span></li><li><span class="item-title">Just text</span></li></ul>');
+    assert.equal(renderBox('table', { columns: ['A', 'B'], rows: [[1, 'x']] }).html, '<table class="table"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>x</td></tr></tbody></table>');
+    assert.match(renderBox('table', [{ who: 'Ada', status: 'done' }, { who: 'Alan' }]).html, /<thead><tr><th>who<\/th><th>status<\/th><\/tr><\/thead><tbody><tr><td>Ada<\/td><td>done<\/td><\/tr><tr><td>Alan<\/td><td><\/td><\/tr>/);
+    const bars = renderBox('bar', { labels: ['Jul', 'Aug', 'Sep'], values: [2, '4', 1] }).html;
+    assert.deepEqual([...bars.matchAll(/height: ([\d.]+)%/g)].map(match => Number(match[1])), [42.5, 85, 21.3]);
+    assert.match(bars, /aria-label="Jul: 2, Aug: 4, Sep: 1"/);
+    assert.match(renderBox('bar', [{ label: 'a', value: 1 }, { label: 'b', value: 3 }]).html, /<span title="b">b<\/span>/);
+    assert.match(renderBox('bar', { Mon: 1, Tue: 2 }).html, /<span title="Tue">Tue<\/span>/);
+    assert.match(renderBox('line', { labels: ['a', 'b', 'c'], values: [1, 3, 2] }).html, /<polyline points="0,95 50,5 100,50"\/>/);
+    assert.equal(renderBox('html', '<b>hi</b>').html, '<b>hi</b>');
+    for (const [kind, value, problem] of [
+        ['bar', 'twelve', 'A chart takes {"labels": [...], "values": [...]}.'],
+        ['bar', { labels: ['a'], values: ['many'] }, 'A chart takes numbers in "values".'],
+        ['list', { text: 'no items' }, 'A list takes [{"title": ..., "detail": ..., "url": ...}].'],
+        ['number', { note: 'no value' }, 'A number takes {"value": ..., "note": ...}, or a number.'],
+        ['table', 'rows?', 'A table takes {"columns": [...], "rows": [[...]]}.'],
+        ['html', { html: 'x' }, 'An HTML box takes a string of HTML.'],
+    ]) {
+        assert.deepEqual(renderBox(kind, value), { html: `<p class="box-problem">${problem.replace(/"/g, '&quot;')}</p>`, problem }, `${kind}: ${JSON.stringify(value)}`);
+    }
+    assert.deepEqual(renderBox('list', null), { html: '<p class="box-none">Nothing for this.</p>', problem: null });
+    assert.equal(renderBox('list', []).html, '<p class="box-none">Nothing for this.</p>');
+});
+
+test('a dashboard comes back the same from its DML, and its boxes ask in the prompt argument', () => {
+    const app = dashboard();
+    const dml = toDml(app);
+    assert.match(dml, /<screen src="index.html" built-from="components" size="wide">/);
+    assert.match(dml, /<output id="activity" label="Activity" show="bar" width="two-thirds">Updates per week, the last 6 weeks<\/output>/);
+    assert.match(dml, /<output id="plain" label="Plain"\/>/);
+    assert.match(dml, /<arg name="message" role="prompt">What's the latest on \{\{project\}\}\?<\/arg>/);
+    assert.match(dml, /<button id="refresh" label="Refresh" width="third"\/>/);
+    const back = fromDml(dml).app;
+    assert.deepEqual(withoutRuleIds(back), withoutRuleIds(app));
+    const html = componentsHtml(app.screen.components, { title: app.name, size: 'wide' });
+    assert.match(html, /<main class="app app-wide">/);
+    assert.match(html, /<div class="field w-two-thirds">/);
+    assert.match(html, /<button id="refresh" type="button" class="w-third">Refresh<\/button>/);
+    assert.match(html, /<div id="activity" class="output box box-bar"/);
+    assert.match(html, /<div id="plain" class="output" /);
+    const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
+    assert.throws(broken('show="bar"', 'show="pie"'), /show="pie" isn't one of text, number, list, table, bar, line, html\./);
+    assert.throws(broken('width="third"', 'width="quarter"'), /width="quarter" isn't one of full, two-thirds, half, third\./);
+    assert.throws(broken('size="wide"', 'size="huge"'), /size="huge" is narrow or wide\./);
+    assert.throws(broken('role="prompt"', 'role="question"'), /role="question" isn't one an <arg> has/);
+    assert.throws(broken('<arg name="_user_goal">', '<arg name="_user_goal" role="prompt">'), /Only one <arg> of a call is its prompt\./);
+});
+
+test('wiring an answer to a box gives it its key, and renaming the box takes the key along', () => {
+    const app = dashboard();
+    const rule = { ...app.flow[0], then: [] };
+    const asked = ({ element, failing, rule: wired }) => (!failing && wired.prompt ? `{{json.${element.replace(/\./g, '_')}}}` : null);
+    const { flow } = connect([rule], 'ok:rule-pulse', 'el:docs', { defaultShow: asked });
+    assert.deepEqual(flow[0].then, [{ if: 'ok', show: '{{json.docs}}', into: 'docs', how: 'replace' }]);
+    assert.equal(connect([rule], 'err:rule-pulse', 'el:docs', { defaultShow: asked }).flow[0].then[0].show, '{{error}}');
+    assert.equal(connect([{ ...rule, prompt: undefined }], 'ok:rule-pulse', 'el:docs', { defaultShow: asked }).flow[0].then[0].show, '{{text}}');
+    const [renamed] = renameInFlow(app.flow, 'docs', 'reading');
+    assert.deepEqual(renamed.then.find(route => route.into === 'reading'), { if: 'ok', show: '{{json.reading}}', into: 'reading', how: 'replace' });
+    assert.equal(renamed.then.find(route => route.into === 'summary').show, '{{json.summary}}');
+});
+
+test('the dashboard starter asks Glean when you have it, else the Chat app\'s model', () => {
+    const chat = { name: 'chat', inputSchema: { type: 'object', properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array' } }, required: ['message', '_user_goal'] } };
+    const workbench = { testDataFor: () => ({ args: { _user_goal: 'test', message: 'test' } }) };
+    const glean = 'https://acme-be.glean.com/mcp/default';
+    const fromGlean = dashboardApp({ shell: { servers: { [MOCK]: { url: MOCK, tools: [chat] }, [glean]: { url: glean, tools: [chat] } } }, workbench, chatModel: null, name: 'Project pulse' });
+    const [rule] = fromGlean.flow;
+    assert.equal(fromGlean.screen.size, 'wide');
+    assert.deepEqual({ serverUrl: rule.call.serverUrl, toolName: rule.call.toolName, prompt: rule.prompt }, { serverUrl: glean, toolName: 'chat', prompt: 'message' });
+    assert.deepEqual(rule.call.args, { _user_goal: "What's the latest on {{project}}?", message: "What's the latest on {{project}}? Use what you find in our documents, messages and tickets." });
+    assert.deepEqual(rule.when.map(trigger => trigger.event), ['open', 'click', 'enter']);
+    const elements = elementsOfComponents(fromGlean.screen.components);
+    assert.deepEqual(asksOf(rule, elements).map(ask => `${ask.key}:${ask.kind}`), ['summary:text', 'health:number', 'activity:bar', 'risks:list', 'docs:list']);
+    assert.match(fromGlean.screen.components.find(component => component.id === 'intro').text, /from one question to Glean:/);
+    const model = { serverUrl: MOCK, toolName: 'chat', args: { message: '{{message}}' }, messageField: 'message', conversationField: '' };
+    const fromModel = dashboardApp({ shell: { servers: { [MOCK]: { url: MOCK, label: 'Mock', tools: [chat] } } }, workbench, chatModel: model, name: 'Project pulse' });
+    assert.equal(fromModel.flow[0].call.serverUrl, MOCK);
+    assert.equal(fromModel.flow[0].call.args._user_goal, "What's the latest on {{project}}?");
+    const nothing = dashboardApp({ shell: { servers: {} }, workbench, chatModel: null, name: 'Project pulse' });
+    assert.deepEqual([nothing.flow[0].call.toolName, nothing.flow[0].prompt], ['', undefined]);
 });

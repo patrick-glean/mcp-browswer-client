@@ -15,8 +15,9 @@
 
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
 import { askPrompt, modelCall } from './ask.js';
+import { BOX_KINDS, isBox, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
-import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult } from './flow.js';
+import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
 import { componentsHtml, elementsOf, htmlFromResult, newComponent, sanitizePart, screenHtml } from './screen.js';
 import * as store from './store.js';
@@ -76,6 +77,75 @@ export function starterApp({ shell, workbench, name }) {
     };
 }
 
+const PULSE_QUESTION = "What's the latest on {{project}}? Use what you find in our documents, messages and tickets.";
+const PULSE_GOAL = "What's the latest on {{project}}?";
+
+const isGlean = server => {
+    try {
+        return /(^|\.)glean\.com$/i.test(new URL(server.url).hostname);
+    } catch {
+        return false;
+    }
+};
+
+// The call that fills the dashboard, and the field its question (the prompt) goes in: Glean's
+// chat if one of your servers is Glean, else the Chat app's model, else any server's chat tool.
+// The tool's other required text fields (such as Glean's _user_goal) get the question too.
+function pulseCall({ shell, workbench, chatModel }) {
+    const servers = Object.values(shell.servers);
+    const chatOf = server => (server.tools || []).find(tool => tool.name === 'chat');
+    const glean = servers.find(server => isGlean(server) && chatOf(server));
+    const model = !glean && chatModel?.toolName && chatModel.messageField && shell.servers[chatModel.serverUrl] ? chatModel : null;
+    const server = glean || (model ? shell.servers[model.serverUrl] : servers.find(chatOf));
+    const tool = model ? (server.tools || []).find(candidate => candidate.name === model.toolName) : server && chatOf(server);
+    if (!tool) return { call: { serverUrl: servers[0]?.url || '', toolName: '', args: {} }, prompt: null, source: null };
+    const schema = schemaOf(tool);
+    const prompt = model?.messageField || promptFieldOf(schema) || 'message';
+    const args = { ...(workbench?.testDataFor(schema).args || {}) };
+    for (const key of schema?.required || []) if (schema.properties?.[key]?.type === 'string') args[key] = PULSE_GOAL;
+    Object.assign(args, model ? modelCall(model, PULSE_QUESTION).args : {}, { [prompt]: PULSE_QUESTION });
+    return { call: { serverUrl: server.url, toolName: tool.name, args }, prompt, source: glean ? 'Glean' : `${tool.name} on ${serverLabel(server)}` };
+}
+
+// A dashboard to start from: what's happening with a project, from one question whose boxes each
+// ask for their piece of the answer. It fills when it opens, on Refresh and on Enter.
+export function dashboardApp({ shell, workbench, chatModel, name }) {
+    const { call, prompt, source } = pulseCall({ shell, workbench, chatModel });
+    const box = (id, label, show, about, width) => newComponent('output', [], { id, label, show, about, width, placeholder: 'Filled in when the app opens.' });
+    const components = [
+        newComponent('title', [], { id: 'title', text: name }),
+        newComponent('text', [], { id: 'intro', text: `What's happening with a project, from one question to ${source || 'a tool'}: each box below asks for its piece of the answer. Change the project and choose Refresh.` }),
+        newComponent('textbox', [], { id: 'project', label: 'Project', value: 'MCP Browser Client', placeholder: 'A project, a team or a launch', width: 'two-thirds' }),
+        newComponent('button', [], { id: 'refresh', label: 'Refresh', width: 'third' }),
+        box('summary', 'Where it stands', 'text', 'Where the project stands, in at most 3 sentences', 'full'),
+        box('health', 'Health', 'number', "The project's health: On track, At risk or Off track, with why in a few words", 'third'),
+        box('activity', 'Activity', 'bar', 'Updates about the project per week, the last 6 weeks, oldest first, each labeled by the day its week starts', 'two-thirds'),
+        box('risks', 'Risks', 'list', 'Open risks or blockers, at most 4, each with who raised it', 'half'),
+        box('docs', 'Read next', 'list', 'The most useful documents, at most 5, each with a one-line note', 'half'),
+    ];
+    const boxes = ['summary', 'health', 'activity', 'risks', 'docs'];
+    const rule = {
+        ...newRule({ event: 'open', ...call, into: null, prompt }),
+        when: [trigger('', 'open'), trigger('refresh', 'click'), trigger('project', 'enter')],
+        then: [
+            ...boxes.map(id => ({ if: 'ok', show: `{{json.${id}}}`, into: id, how: 'replace' })),
+            { if: 'error', show: '{{error}}', into: 'summary', how: 'replace' },
+        ],
+    };
+    const now = Date.now();
+    return {
+        id: crypto.randomUUID(),
+        name,
+        description: '',
+        version: 0,
+        createdAt: now,
+        updatedAt: now,
+        downloadedAt: null,
+        screen: { kind: 'components', size: 'wide', components },
+        flow: [rule],
+    };
+}
+
 // The README that travels in an app's zip: what's in it, the flow in words, and how to run it.
 export function readmeFor(app, { serverName = url => url } = {}) {
     const elements = new Map(elementsOf(app.screen).map(element => [element.id, element]));
@@ -87,6 +157,7 @@ export function readmeFor(app, { serverName = url => url } = {}) {
     const rules = (app.flow || []).map((rule, index) => `${index + 1}. ${describeRule(rule, { elementName, serverName })}`);
     const parts = (app.screen?.components || []).filter(component => component.type === 'part');
     const made = part => (part.ask ? `made by a model asked for "${part.ask}"` : part.from ? `made by a call to \`${part.from.toolName}\` on ${serverName(part.from.serverUrl)}` : 'written as HTML');
+    const boxes = [...elements.values()].filter(isBox).map(box => `- \`${box.id}\`, ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}: ${box.about || box.label}`);
     return `# ${app.name}
 
 An app built in MCP Browser Client${app.version ? `, version ${app.version}` : ''}.${app.description ? `\n\n${app.description}` : ''}
@@ -101,6 +172,13 @@ An app built in MCP Browser Client${app.version ? `, version ${app.version}` : '
 ${rules.length ? rules.join('\n') : 'No rules yet.'}
 
 In a call, \`{{name}}\` is what the screen's element with that id holds when the rule runs (or a variable from the environment). In what a rule puts on the screen, \`{{text}}\` is the text the tool returned, \`{{structured.…}}\` its structured content, \`{{json.…}}\` its text read as JSON, and \`{{error}}\` why it failed.
+${boxes.length ? `
+## The boxes
+
+A rule that fills these asks its tool, in its prompt, for one JSON object with a key for each, saying what goes in it and in what shape; each box draws its piece:
+
+${boxes.join('\n')}
+` : ''}
 
 ## Run it
 
@@ -259,10 +337,16 @@ export class Apps {
         this.change(app => {
             const screen = app.screen;
             screen.kind = kind;
-            if (kind === 'html' && !screen.html?.trim()) screen.html = componentsHtml(screen.components, { title: app.name });
+            if (kind === 'html' && !screen.html?.trim()) screen.html = componentsHtml(screen.components, { title: app.name, size: screen.size });
             if (kind === 'html' && !screen.from) screen.from = { serverUrl: '', toolName: '', args: {} };
             screen.components ??= [];
         }, { part: 'screen' });
+    }
+
+    // A narrow screen is one column; a wide one has room for boxes side by side, as a dashboard.
+    setScreenSize(size) {
+        if (!this.app || (size !== 'narrow' && size !== 'wide') || (this.app.screen.size || 'narrow') === size) return;
+        this.change(app => { app.screen.size = size; }, { part: 'screen' });
     }
 
     // Takes a wire's part out of its rule (graph.js). Returns the wire, or null when there's none.
@@ -288,11 +372,15 @@ export class Apps {
 
     // --- The list ---
 
-    async create() {
+    // A new app from a starter: `blank` (a text box, a button and an output) or `dashboard`.
+    async create(starter = 'blank') {
+        const base = starter === 'dashboard' ? 'Project pulse' : 'New app';
         const taken = new Set(this.list.map(app => app.name));
-        let name = 'New app';
-        for (let n = 2; taken.has(name); n++) name = `New app ${n}`;
-        const app = starterApp({ shell: this.shell, workbench: this.workbench, name });
+        let name = base;
+        for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+        const app = starter === 'dashboard'
+            ? dashboardApp({ shell: this.shell, workbench: this.workbench, chatModel: this.chatModel(), name })
+            : starterApp({ shell: this.shell, workbench: this.workbench, name });
         await store.saveApp(app);
         this.list.push(app);
         this.emit('list');

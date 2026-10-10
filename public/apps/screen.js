@@ -12,6 +12,7 @@
 // the flow takes over its buttons and fields by those ids.
 
 import { escapeHtml } from '../workbench/util.js';
+import { BOX_KINDS, WIDTHS } from './boxes.js';
 import { elementIdProblem, htmlFromResult } from './flow.js';
 
 export { htmlFromResult };
@@ -27,14 +28,18 @@ export const COMPONENT_TYPES = {
 
 export const ELEMENT_KINDS = { button: 'Button', input: 'Field', output: 'Output', static: 'Text' };
 
-// What each component lets you set, in order: [prop, label, kind of field].
+const WIDTH_PROP = ['width', 'Width', 'select', WIDTHS];
+const SHOW_OPTIONS = Object.fromEntries(Object.entries(BOX_KINDS).map(([kind, { label }]) => [kind, label]));
+
+// What each component lets you set, in order: [prop, label, kind of field, options of a select].
+// An output's `show` and `about` make it a box: what it shows, and what goes in it, in words.
 export const COMPONENT_PROPS = {
     title: [['text', 'Text', 'text']],
-    text: [['text', 'Text', 'lines']],
-    textbox: [['label', 'Label', 'text'], ['placeholder', 'Placeholder', 'text'], ['lines', 'Lines', 'number']],
-    button: [['label', 'Label', 'text']],
-    output: [['label', 'Label', 'text'], ['placeholder', 'When empty', 'text']],
-    part: [['label', 'Label', 'text']],
+    text: [['text', 'Text', 'lines'], WIDTH_PROP],
+    textbox: [['label', 'Label', 'text'], ['placeholder', 'Placeholder', 'text'], ['lines', 'Lines', 'number'], WIDTH_PROP],
+    button: [['label', 'Label', 'text'], WIDTH_PROP],
+    output: [['label', 'Label', 'text'], ['show', 'Shows', 'select', SHOW_OPTIONS], ['about', 'What goes here', 'lines'], ['placeholder', 'When empty', 'text'], WIDTH_PROP],
+    part: [['label', 'Label', 'text'], WIDTH_PROP],
 };
 
 const DEFAULTS = {
@@ -42,7 +47,7 @@ const DEFAULTS = {
     text: { text: 'Some text.' },
     textbox: { label: 'Text box', placeholder: '', lines: 1, value: '' },
     button: { label: 'Button' },
-    output: { label: 'Output', placeholder: 'What the tool returns shows here.' },
+    output: { label: 'Output', placeholder: 'What the tool returns shows here.', show: 'text', about: '' },
     part: { label: 'Part', html: '', from: null, ask: '' },
 };
 
@@ -75,6 +80,8 @@ export function elementsOfComponents(components = []) {
         kind: COMPONENT_TYPES[component.type]?.kind || 'static',
         type: component.type,
         label: componentName(component),
+        width: WIDTHS[component.width] ? component.width : 'full',
+        ...(component.type === 'output' ? { show: BOX_KINDS[component.show] ? component.show : 'text', about: component.about || '' } : {}),
     }, ...(component.type === 'part' ? partElements(component) : [])]);
 }
 
@@ -212,31 +219,72 @@ export const SCREEN_CSS = `
 :root {
   color-scheme: light dark;
   --bg: #ffffff; --fg: #1b1b1b; --muted: #727272; --line: #dedede; --soft: #f6f6f6;
-  --accent: #1b1b1b; --on-accent: #ffffff; --error: #c22f30;
+  --accent: #1b1b1b; --on-accent: #ffffff; --error: #c22f30; --chart: #4b63d8;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #1a1a1a; --fg: #ffffff; --muted: #999999; --line: #404040; --soft: #242424;
-    --accent: #ffffff; --on-accent: #1a1a1a; --error: #f39a9a; }
+    --accent: #ffffff; --on-accent: #1a1a1a; --error: #f39a9a; --chart: #8da0ff; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
-.app { display: flex; flex-direction: column; gap: 16px; max-width: 640px; margin: 0 auto; padding: 28px 24px 40px; }
+.app { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: start; max-width: 640px; margin: 0 auto; padding: 28px 24px 40px; }
+.app-wide { max-width: 1080px; }
+.app > * { grid-column: span 6; min-width: 0; }
+.app > .w-two-thirds { grid-column: span 4; }
+.app > .w-half { grid-column: span 3; }
+.app > .w-third { grid-column: span 2; }
+@media (max-width: 520px) { .app > * { grid-column: 1 / -1; } }
 h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
 .text { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .label { font-size: 0.8125rem; font-weight: 600; }
 input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: inherit; font: inherit; }
 input:focus, textarea:focus, select:focus { border-color: var(--accent); outline: none; }
-button { align-self: flex-start; padding: 9px 20px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
+button { justify-self: start; align-self: end; padding: 9px 20px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
 button:disabled { cursor: progress; opacity: 0.55; }
 .output { min-height: 46px; padding: 12px 14px; border-radius: 10px; background: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; }
 .output:empty::before { content: attr(data-placeholder); color: var(--muted); }
-.output[aria-busy='true'] { opacity: 0.6; }
+.output[aria-busy='true'] { opacity: 0.7; background-image: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--fg) 8%, transparent) 50%, transparent 70%); background-size: 200% 100%; animation: busy 1.2s linear infinite; }
+@keyframes busy { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 .output[data-state='error'] { color: var(--error); }
 .output > .entry + .entry { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.box { white-space: normal; }
+.box-text, .box-none, .box-problem { margin: 0; white-space: pre-wrap; }
+.box-none { color: var(--muted); }
+.box-problem { color: var(--error); }
+.kpi { display: flex; flex-direction: column; gap: 2px; }
+.kpi-value { font-size: 1.75rem; font-weight: 650; line-height: 1.15; letter-spacing: -0.02em; }
+.kpi-note { color: var(--muted); font-size: 0.8125rem; }
+.items { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.items li { display: flex; flex-direction: column; gap: 1px; }
+.item-title { font-weight: 600; }
+a.item-title { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+a.item-title:hover { text-decoration-color: currentColor; }
+.item-detail { color: var(--muted); font-size: 0.875rem; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.table th, .table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.table th { color: var(--muted); font-weight: 600; }
+.chart-bars { display: flex; gap: 6px; height: 150px; }
+.chart-col { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.chart-value { color: var(--muted); font-size: 0.75rem; text-align: center; }
+.chart-fill { min-height: 2px; border-radius: 4px 4px 0 0; background: var(--chart); }
+.chart-axis { display: flex; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 0.75rem; }
+.chart-axis span { flex: 1; min-width: 0; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.chart-line .chart-axis { justify-content: space-between; }
+.chart-line .chart-axis span { flex: 0 1 auto; }
+.chart-plot { position: relative; height: 150px; }
+.chart-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart-plot polyline { fill: none; stroke: var(--chart); stroke-width: 2.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.chart-high, .chart-low { position: absolute; left: 0; color: var(--muted); font-size: 0.6875rem; }
+.chart-high { top: -2px; }
+.chart-low { bottom: -2px; }
 .part { display: block; min-width: 0; }
 .part-empty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); text-align: center; }
 `.trim();
+
+// The class that sets how much of a row a component takes.
+const widthClass = component => (WIDTHS[component.width] && component.width !== 'full' ? `w-${component.width}` : '');
+const classes = (...names) => names.filter(Boolean).join(' ');
 
 function componentHtml(component) {
     const id = escapeHtml(component.id);
@@ -244,33 +292,38 @@ function componentHtml(component) {
         case 'title':
             return `<h1 id="${id}">${escapeHtml(component.text)}</h1>`;
         case 'text':
-            return `<p id="${id}" class="text">${escapeHtml(component.text)}</p>`;
+            return `<p id="${id}" class="${classes('text', widthClass(component))}">${escapeHtml(component.text)}</p>`;
         case 'textbox': {
             const placeholder = component.placeholder ? ` placeholder="${escapeHtml(component.placeholder)}"` : '';
             const lines = Math.max(1, Math.min(20, Number(component.lines) || 1));
             const field = lines > 1
                 ? `<textarea id="${id}" rows="${lines}"${placeholder}>${escapeHtml(component.value || '')}</textarea>`
                 : `<input id="${id}" type="text"${placeholder}${component.value ? ` value="${escapeHtml(component.value)}"` : ''} autocomplete="off">`;
-            return `<div class="field">\n      <label class="label" for="${id}">${escapeHtml(component.label)}</label>\n      ${field}\n    </div>`;
+            return `<div class="${classes('field', widthClass(component))}">\n      <label class="label" for="${id}">${escapeHtml(component.label)}</label>\n      ${field}\n    </div>`;
         }
-        case 'button':
-            return `<button id="${id}" type="button">${escapeHtml(component.label)}</button>`;
-        case 'output':
-            return `<section class="field">\n      <h2 class="label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="output" aria-label="${escapeHtml(component.label)}" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
+        case 'button': {
+            const width = widthClass(component);
+            return `<button id="${id}" type="button"${width ? ` class="${width}"` : ''}>${escapeHtml(component.label)}</button>`;
+        }
+        case 'output': {
+            const show = BOX_KINDS[component.show] && component.show !== 'text' ? component.show : '';
+            return `<section class="${classes('field', widthClass(component))}">\n      <h2 class="label">${escapeHtml(component.label)}</h2>\n      <div id="${id}" class="${classes('output', show && `box box-${show}`)}" aria-label="${escapeHtml(component.label)}" aria-live="polite" data-placeholder="${escapeHtml(component.placeholder || '')}"></div>\n    </section>`;
+        }
         case 'part': {
             const { html, css } = splitStyles(component.html);
             const ids = partElements(component).map(element => element.id.slice(component.id.length + 1));
             const style = css ? `\n      <style>\n${scopeCss(css, component.id, ids)}\n      </style>` : '';
             const body = html ? prefixIds(html, component.id) : `<p class="part-empty">${escapeHtml(component.label || component.id)}: nothing here yet. Ask a model for it, or get it from a tool.</p>`;
-            return `<section id="${id}" class="part" data-part="${id}" aria-label="${escapeHtml(component.label || component.id)}">${style}\n${body}\n    </section>`;
+            return `<section id="${id}" class="${classes('part', widthClass(component))}" data-part="${id}" aria-label="${escapeHtml(component.label || component.id)}">${style}\n${body}\n    </section>`;
         }
         default:
             return '';
     }
 }
 
-// The HTML document a screen built from components is: what the preview runs and the zip's index.html.
-export function componentsHtml(components = [], { title = 'App' } = {}) {
+// The HTML document a screen built from components is: what the preview runs and the zip's
+// index.html. A wide screen (`size`) is a dashboard's, with room for boxes side by side.
+export function componentsHtml(components = [], { title = 'App', size = 'narrow' } = {}) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -282,7 +335,7 @@ ${SCREEN_CSS.split('\n').map(line => `    ${line}`).join('\n')}
   </style>
 </head>
 <body>
-  <main class="app">
+  <main class="${classes('app', size === 'wide' && 'app-wide')}">
 ${components.map(component => `    ${componentHtml(component)}`).join('\n')}
   </main>
 </body>
@@ -291,5 +344,5 @@ ${components.map(component => `    ${componentHtml(component)}`).join('\n')}
 }
 
 export function screenHtml(app) {
-    return app?.screen?.kind === 'html' ? app.screen.html || '' : componentsHtml(app?.screen?.components, { title: app?.name });
+    return app?.screen?.kind === 'html' ? app.screen.html || '' : componentsHtml(app?.screen?.components, { title: app?.name, size: app?.screen?.size });
 }

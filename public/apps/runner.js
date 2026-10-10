@@ -4,14 +4,16 @@
 // a Workbench call, and is recorded as a run from the app.
 //
 // Frame -> page: ready { values }, event { element, event, values },
-//                layout { height, rects: { id: { top, left, width, height } } }
+//                layout { height, rects: { id: { top, left, width, height } } }, open { url }
 // Page -> frame: config { config }, show { element, value, how, failed }, busy { elements, busy },
 //                highlight { elements }
 // Every message carries the token this load of the frame was given. `layout` says where each
-// element the config tracks is, so the canvas can put its ports on the running screen.
+// element the config tracks is, so the canvas can put its ports on the running screen. `open`
+// asks the page to open a link's http(s) address in a new tab, which the sandbox can't.
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
-import { answerOf, callArguments, frameConfig, renderTemplate, rulesFor, triggerIndex, triggersOf } from './flow.js';
+import { asksOf, BOX_KINDS, formatRequest, isBox, renderBox } from './boxes.js';
+import { answerOf, callArguments, displayValue, frameConfig, listed, renderTemplate, rulesFor, templateValue, triggerIndex, triggersOf } from './flow.js';
 import { elementsOf, screenHtml } from './screen.js';
 
 // The screen's runtime. It's injected into the frame as source, so it may use nothing from outside.
@@ -46,6 +48,7 @@ export function frameRuntime({ config, token }) {
                 return;
             }
         }
+        if (link && /^https?:$/.test(link.protocol)) send({ type: 'open', url: link.href });
     }, true);
     document.addEventListener('keydown', event => {
         const element = event.target;
@@ -273,7 +276,22 @@ export class AppRunner {
             this.fire(message.element, message.event, message.values || {});
         } else if (message.type === 'layout' && Number.isFinite(message.height)) {
             this.onLayout({ height: message.height, rects: message.rects && typeof message.rects === 'object' ? message.rects : {} });
+        } else if (message.type === 'open' && typeof message.url === 'string') {
+            this.open(message.url);
         }
+    }
+
+    // A link on the screen, in a tab of its own: only web addresses, and without this page as its opener.
+    open(url) {
+        let address;
+        try {
+            address = new URL(url);
+        } catch {
+            return;
+        }
+        if (address.protocol !== 'https:' && address.protocol !== 'http:') return;
+        window.open(address.href, '_blank', 'noopener,noreferrer');
+        this.trace({ kind: 'note', text: `Opened ${address.href}` });
     }
 
     trace(entry) {
@@ -319,7 +337,16 @@ export class AppRunner {
             return fail(`Didn't call ${toolName}: ${error.message}`);
         }
         const where = serverLabel(server, serverUrl);
+        // The boxes the rule fills ask for what they show, in its prompt field.
+        const app = this.getApp();
+        const asks = rule.prompt ? asksOf(rule, elementsOf(app?.screen)) : [];
+        if (asks.length) {
+            const prompt = prepared.sentArgs[rule.prompt];
+            const request = formatRequest(asks, { size: app?.screen?.size });
+            prepared.sentArgs[rule.prompt] = typeof prompt === 'string' && prompt.trim() ? `${prompt}\n\n${request}` : request;
+        }
         this.trace({ kind: 'call', text: `Calling ${toolName} on ${where} with ${shortText(JSON.stringify(prepared.sentArgs), 120)}` });
+        if (asks.length) this.trace({ kind: 'note', text: `Asked in ${rule.prompt} for ${listed(asks.map(ask => `${ask.key} (${BOX_KINDS[ask.kind].noun})`))}.` });
         this.onActivity({ ruleId: rule.id, phase: 'call', trigger });
         const triggerElement = triggersOf(rule)[trigger]?.element || '';
         const busy = [...new Set([triggerElement, ...(rule.then || []).map(route => route.into)].filter(Boolean))];
@@ -351,12 +378,32 @@ export class AppRunner {
             this.trace({ kind: 'note', text: `This rule doesn't say what to do when it ${answer.ok ? 'works' : 'fails'}.` });
             return [];
         }
+        const elements = new Map(elementsOf(this.getApp()?.screen).map(element => [element.id, element]));
+        let notJson = false;
         for (const [route] of taken) {
             if (!this.elementIds.includes(route.into)) {
                 this.trace({ kind: 'error', text: `${route.into || 'Where the answer goes'} isn't on the screen.` });
                 continue;
             }
-            const { text, missing } = renderTemplate(route.show, { ...screen, ...answer.values });
+            const values = { ...screen, ...answer.values };
+            if (answer.ok && answer.values.json === null && /^\s*\{\{\s*json\./.test(String(route.show ?? ''))) {
+                this.post({ type: 'show', element: route.into, value: "The answer wasn't JSON, so it has nothing for this.", how: 'replace', failed: true });
+                if (!notJson) this.trace({ kind: 'error', text: `The answer wasn't JSON, so ${route.into} and the others that take a piece of it got nothing.` });
+                notJson = true;
+                continue;
+            }
+            const box = elements.get(route.into);
+            if (answer.ok && isBox(box) && route.how !== 'append') {
+                const value = templateValue(route.show, values);
+                const { html, problem } = renderBox(box.show, value);
+                this.post({ type: 'show', element: route.into, value: html, how: 'html', failed: !!problem });
+                screen[route.into] = displayValue(value);
+                this.trace(problem ? { kind: 'error', text: `${route.into}: ${problem}` }
+                    : value === null || value === undefined ? { kind: 'note', text: `The answer has nothing for ${route.into}.` }
+                    : { kind: 'route', text: box.show === 'text' ? `Put “${shortText(displayValue(value))}” into ${route.into}` : `Put ${box.show === 'html' ? 'HTML' : `a ${BOX_KINDS[box.show].noun}`} into ${route.into}` });
+                continue;
+            }
+            const { text, missing } = renderTemplate(route.show, values);
             this.post({ type: 'show', element: route.into, value: text, how: route.how || 'replace', failed: !answer.ok });
             screen[route.into] = route.how === 'append' && screen[route.into] ? `${screen[route.into]}\n${text}` : text;
             const empty = missing.length ? ` ({{${missing[0]}}} had no value)` : '';

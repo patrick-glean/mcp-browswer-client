@@ -67,9 +67,10 @@ export function wiresOf(flow, elementIds = []) {
 
 // The flow with a wire between two ports: { flow, made }, where `made` says which part of which
 // rule the wire is ({ kind: 'trigger' | 'arg' | 'route', ruleId, index | arg }), or that the rule
-// already had it ({ kind: 'already' }). `kindOf(id)` is an element's kind, for its trigger's event.
+// already had it ({ kind: 'already' }). `kindOf(id)` is an element's kind, for its trigger's event,
+// and `defaultShow({ element, failing, rule })` what a new route shows (else {{text}} or {{error}}).
 // Throws a FlowError saying why when the ports don't join.
-export function connect(flow, a, b, { kindOf = () => 'static' } = {}) {
+export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () => null } = {}) {
     const pair = pairOf(a, b);
     if (a === b || !PAIRS.has(pair)) throw new FlowError(whyNot(pair));
     const ports = [parsePort(a), parsePort(b)];
@@ -95,7 +96,8 @@ export function connect(flow, a, b, { kindOf = () => 'static' } = {}) {
         const then = rule.then || [];
         const index = then.findIndex(route => (route.if === 'error') === failing && route.into === element);
         made = index >= 0 ? { kind: 'already', ruleId } : { kind: 'route', ruleId, index: then.length };
-        const route = { if: failing ? 'error' : 'ok', show: failing ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok, into: element, how: 'replace' };
+        const show = defaultShow({ element, failing, rule }) ?? (failing ? DEFAULT_SHOW.error : DEFAULT_SHOW.ok);
+        const route = { if: failing ? 'error' : 'ok', show, into: element, how: 'replace' };
         return index >= 0 ? rule : { ...rule, then: [...then, route] };
     });
     if (!made) throw new FlowError("That tool isn't in the flow anymore.");
