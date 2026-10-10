@@ -257,8 +257,9 @@ BOX_LINE = re.compile(r'^- "([^"]+)" \(([^)]+)\): (.*)$', re.M)
 WEEKS = ["Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28", "Oct 5"]
 
 
-def box_value(key, kind, about):
-    """A made-up piece of an answer for one box, in the shape its kind asks for."""
+def box_value(key, kind, about, subject=None):
+    """A made-up piece of an answer for one box, in the shape its kind asks for, about `subject`
+    (what the question asks about) when there is one."""
     words = f"{key} {about}".lower()
     if kind == "number":
         if "health" in words or "track" in words:
@@ -291,12 +292,16 @@ def box_value(key, kind, about):
     if kind == "html":
         return ('<div class="banner" style="padding:12px 14px;border-radius:10px;background:#e7f6ec;color:#14532d">'
                 "<strong>On track.</strong> The beta starts once the API review is done.</div>")
+    if subject:
+        return f"On track: {subject} closed its design review last week, and the beta starts once the API review is done. Two risks are open, neither blocking."
     return "On track: the design review closed last week, and the beta starts once the API review is done. Two risks are open, neither blocking."
 
 
 def boxes_reply(message):
     """Answers a prompt an app's boxes added to: one JSON object, with a key for each box."""
-    answer = {key: box_value(key, kind.lower(), about) for key, kind, about in BOX_LINE.findall(message)}
+    asked = re.search(r"\blatest on (.+?)\?", message)
+    subject = asked.group(1).strip() if asked else None
+    answer = {key: box_value(key, kind.lower(), about, subject) for key, kind, about in BOX_LINE.findall(message)}
     return f"```json\n{json.dumps(answer, indent=2)}\n```"
 
 

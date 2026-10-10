@@ -1049,8 +1049,13 @@ async function main() {
                 used?.join(' | ') === 'you: hello from the preview | reply: You said: hello from the preview' && /^chat answered in \d+ ms$/.test(told || ''),
                 `${used?.join(' | ')}; ${told}`);
             await page.run(`document.querySelector('app-preview [data-device="phone"]').click()`);
-            const phone = await frameWaitFor(`window.innerWidth === 390 ? document.querySelectorAll('#conversation .entry').length + ' entries at ' + window.innerWidth + ' px' : null`);
-            check("Apps: Preview at a phone's width gives the app 390 pixels, and keeps what it shows", phone === '2 entries at 390 px', phone);
+            const phone = await frameWaitFor(`(() => {
+                if (window.innerWidth !== 390) return null;
+                const stacked = document.getElementById('send').getBoundingClientRect().top >= document.getElementById('message').getBoundingClientRect().bottom;
+                return document.querySelectorAll('#conversation .entry').length + ' entries at ' + window.innerWidth + ' px, ' + (stacked ? 'Send under the message' : 'Send beside the message');
+            })()`);
+            check("Apps: Preview at a phone's width gives the app 390 pixels, where what shares a row stacks, and keeps what it shows",
+                phone === '2 entries at 390 px, Send under the message', phone);
             await frameRun(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
             const backFromScreen = await page.waitFor(`document.querySelector('app-preview').hidden && ${builderFrame} && document.activeElement?.id === 'previewAppBtn' ? 'back, Preview focused' : null`, 5000);
             await page.run(`document.getElementById('previewAppBtn').click()`);
