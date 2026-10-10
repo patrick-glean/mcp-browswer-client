@@ -281,7 +281,7 @@
         <section class="guide-section">
             <h3>2. Check the connection</h3>
             <p>The bar above the tools shows the server's status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake. Info has everything the server said about itself.</p>
-            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code>, <code>search_notes</code> and <code>make_screen</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code>, <code>search_notes</code>, <code>make_screen</code> and <code>chat</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
         </section>
 
         <section class="guide-section">
@@ -298,8 +298,8 @@
 
         <section class="guide-section">
             <h3>5. Build an app</h3>
-            <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, and a rule that sends the text box to a tool and puts its answer in the output. It runs beside the builder, and What happened shows each step.</p>
-            <p>Each part of the screen has an id. In a call, <code>{{input}}</code> is what the text box holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock, choose HTML from a tool and <code>make_screen</code> for a screen a tool made.</p>
+            <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, wired to a tool. It opens on the canvas, the screen running beside its tools: drag from a ● to another to wire them, from a button to a tool's Run and from the tool's Answer back to the screen. The label on a wire says what of the answer shows; pick it to change it in the Inspector. Choose Run to use the app, and What happened shows each step.</p>
+            <p>The Library adds components, tools, and HTML parts that a model writes or a tool returns, such as a dashboard; their buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock, <code>chat</code> as the Chat app's model writes a ticket dashboard when you ask for one.</p>
         </section>
 
         <section class="guide-section">

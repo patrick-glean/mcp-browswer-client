@@ -49,8 +49,10 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 
 ### Apps you build
 - An app is a screen and a flow (`public/apps/`). The flow runs in the page and calls tools only through `AppShell.runTool` with `source: 'app'` and the arguments it filled in (`sentArgs`), so each call is a run and the worker has no app logic.
-- The screen runs in a `sandbox="allow-scripts"` frame under `frameDocument`'s policy: no network, no scripts but the runtime, an opaque origin. It reports events and shows values; it never calls tools. Messages both ways carry the load's token, and a frame that navigates stops the app.
-- A rule's `{{name}}` is an element's value, then an environment variable; a whole `{{name}}` takes the field's type. What a route shows is a template over the answer (`text`, `structured`, `json`, `result`, `error`) and the screen. Element ids can't be those answer names.
+- The screen runs in a `sandbox="allow-scripts"` frame under `frameDocument`'s policy: no network, no scripts but the runtime, an opaque origin (never same-origin, even for HTML our own tool calls return). It reports events and shows values; it never calls tools. Messages both ways carry the load's token, and a frame that navigates stops the app.
+- A part is HTML a model or a tool made, kept without scripts, handlers or forms (`sanitizePart`), its ids prefixed with the part's id and its styles in `@scope`. Ask a model calls the Chat app's model (`ask.js`), a run from the app like any other call.
+- A rule's `when` is a list of triggers; `{{name}}` is an element's value, then an environment variable; a whole `{{name}}` takes the field's type. What a route shows is a template over the answer (`text`, `structured`, `json`, `html`, `result`, `error`) and the screen. Element ids can't be those answer names.
+- The canvas draws the flow (`graph.js`): every wire is one part of a rule, and the canvas keeps only where each tool sits (`rule.position`). Change the flow's shape and the graph together.
 - DML (`dml.js`) is the portable form. Its reader and writer change together and stay DOM-free; old files must stay readable, and a change older readers can't read raises `DML_VERSION`. Apps live in IndexedDB `mcp_apps`, separate from `mcp_sandbox`.
 - Only edits may change an app: AppShell's `fillToolForm` fires `input` when it fills a form, which the call editor ignores.
 
@@ -102,8 +104,15 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] Download as a zip (`app.dml`, `index.html`, `README.md`) or DML alone, with versions; Import back
 - [x] The mock's `make_screen` (an HTML screen), unit tests for DML, zips and the flow, and the smoke test building an app on both libraries
 
+### Done (app builder milestone 2, second step: the canvas)
+- [x] The canvas: the screen running with a port beside each element, Start, a node for each rule's tool, wires dragged between ports (triggers, fields, answers and errors), transforms on the wires, Design and Run with wires lighting up, Tidy up
+- [x] The Library (components, tools, transforms; click or drag) and the Inspector (an element, a tool's rule, a wire, Start, or the screen), with values picked from a rule's last answer
+- [x] Rules with several triggers and a position, in DML as `<or>` and `x`/`y`; the Outline keeps the cards
+- [x] HTML parts a model or a tool makes, among the components: sanitized, ids named after the part, styles scoped, wired like any element; Ask a model (Make it, Change it) with the Chat app's model; `parts/<id>.html` in the zip
+- [x] The mock's `chat`, a stand-in model that writes a ticket dashboard, and the smoke test wiring the canvas with real mouse drags on both libraries
+
 ### Next
-- [ ] App builder milestone 2, next steps: rules that chain (waiting for another rule's answer), the Chat app's model, instructions and conversation as parts of a flow, allowed tools and output checks
+- [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool), the Chat app's model, instructions and conversation as parts of a flow, allowed tools and output checks
 - [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server
 - [ ] Client ID metadata documents (the spec's preferred registration), step-up authorization, token revocation on sign-out
 - [ ] Durable state in IndexedDB (server config, era cache, conversations)

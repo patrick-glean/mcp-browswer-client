@@ -62,26 +62,52 @@ The loop is in `public/sw.js` (`handleToolCall`, `modelArguments` and `runReplyT
 
 An app is a **screen** and a **flow**. The screen is what people see. The flow is a list of rules, each of which says *when* something happens on the screen, which tool to *call* with what, and *then* where on the screen its answer goes. Open Apps, then New app: it starts with a title, a text box, a button and an output, and one rule that sends the text box to the first tool on your servers that takes text and puts its answer in the output. It works at once, so you can change it one step at a time and watch what happens.
 
-The builder has three parts:
+### The canvas
 
-1. **Screen.** Build it from components (Title, Text, Text box, Button, Output), each with an id, or choose HTML from a tool: pick a tool that returns a page (an embedded `text/html` resource, `structuredContent.html`, or HTML in its text, as a model writes it in a ```` ```html ```` block), choose Get the HTML, or paste HTML in. The flow names elements by id either way, and the builder lists the ones it found.
-2. **Flow.** Each rule reads as a sentence, and says what keeps it from running (an element that's gone from the screen, a server you haven't added):
-   - **When**: a button is clicked, a text box gets Enter (⌘↵ or Ctrl+Enter in a text box with several lines) or changes, or the app opens.
-   - **Call**: a server and a tool, with the tool's own fields, as in the Workbench. In a field, `{{question}}` is what the screen's `question` element holds when the rule runs; a name that isn't on the screen is a variable from the active environment. A field that is exactly one `{{name}}` gets the value in the field's type, so `{{count}}` fills a number field with a number.
-   - **Then**: if it works, and if it fails, put something into an element, replacing what it shows, after what it shows, or as HTML. What to put is a template: `{{text}}` is the text the tool returned, `{{structured.name}}` a value from its structured content, `{{json.items.0.title}}` a value from its text read as JSON, `{{result}}` the whole result, `{{error}}` why it failed, and `{{question}}` what the screen held. A result the tool marks `isError` counts as failing.
-3. **Try it.** The app runs beside the builder, as people will use it, and What happened lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App, and Open in the Workbench shows it there. Point at a rule or a component to see its elements outlined on the screen. Restart runs the app from the start, with its "when the app opens" rules.
+An app opens on the canvas, where you wire the screen to tools much as you'd wire an interface to code in Xcode:
+
+- **The screen** runs as people will see it, with a ● beside each of its elements (buttons, fields and outputs, by id).
+- **Start**, above it, is where the app begins. Wire it to a tool to call that tool when the app opens, such as one that fills a dashboard.
+- **Each rule is a tool** to the right: ▶ Run (what starts it), a row for each of its fields, ✓ Answer and ! Error.
+- **Wires** join them. Drag from a ● to another: from a button to a tool's Run to call the tool when the button is clicked, from a field to one of the tool's fields to fill it with what the field holds, and from a tool's Answer or Error back to an element to show it there. The ●s a wire can reach light up while you drag, and a drop that can't connect says why. Each wire is one part of its rule, so removing it (Delete, or Remove in the Inspector) takes that part away.
+- **Transforms** sit on the wires from a tool, labeled with what of the answer shows (`text` at first). Pick one to change it: one value from the answer (the Inspector lists the last answer's values, a click each), your own words around values, the whole result as JSON, or the HTML in the answer, shown as HTML.
+- **The Library** adds components, your servers' tools and transforms: click one, or drag it onto the canvas.
+- **The Inspector** changes what's picked: an element's id and label, a tool's rule as a sentence with its fields, a wire, or Start. With nothing picked, it's the screen.
+- **Design and Run.** In Design, clicks on the screen pick its elements. In Run, the screen takes them, and wires light up as their rules run. What happened, below, lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App, and Open in the Workbench shows it there. Restart runs the app from the start; Tidy up puts every tool beside what it's wired to.
+
+**Outline**, beside Canvas at the top, shows the same app as cards: the screen's components, the rules as sentences to edit in place, and Try it, the app running beside them.
+
+### Rules
+
+Each rule reads as a sentence, and says what keeps it from running (an element that's gone from the screen, a server you haven't added):
+
+- **When**: a button is clicked, a text box gets Enter (⌘↵ or Ctrl+Enter in a text box with several lines) or changes, or the app opens. A rule can wait for several of these, and any of them starts it.
+- **Call**: a server and a tool, with the tool's own fields, as in the Workbench. In a field, `{{question}}` is what the screen's `question` element holds when the rule runs; a name that isn't on the screen is a variable from the active environment. A field that is exactly one `{{name}}` gets the value in the field's type, so `{{count}}` fills a number field with a number.
+- **Then**: if it works, and if it fails, put something into an element, replacing what it shows, after what it shows, or as HTML. What to put is a template: `{{text}}` is the text the tool returned, `{{structured.name}}` a value from its structured content, `{{json.items.0.title}}` a value from its text read as JSON, `{{html}}` the HTML in the answer, `{{result}}` the whole result, `{{error}}` why it failed, and `{{question}}` what the screen held. A result the tool marks `isError` counts as failing.
 
 Rules that wait for the same thing run top to bottom, and each sees what the ones before it put on the screen. A rule whose call is still out doesn't start again. Renaming a component takes the flow with it.
 
-**The screen runs on its own.** It's in a sandboxed frame with an origin of its own, so it can't read this page, its storage or your sign-ins. A policy keeps it off the network and keeps its own scripts (and `on…` attributes) from running: the flow is what makes it do things, and only the calls the flow names are made. HTML put on the screen as HTML loses its scripts, frames and forms first.
+### Parts a model or a tool makes
+
+A screen built from components can hold **HTML parts**: a dashboard, a card or a form that a model writes or a tool returns, among the other components. Add one from the Library, then in the Inspector:
+
+- **Ask a model.** Say what to make, such as "a ticket dashboard with a search field, a Refresh button and a list", and choose Make it. The model is the Chat app's, whichever tool you chose under Model in Chat. It's asked for HTML whose buttons, fields and outputs have ids, and the builder takes the HTML from its answer. Change it sends the HTML there is now with what to change, so you can work on a part the way you'd talk it through.
+- **Call a tool** that returns HTML (an embedded `text/html` resource, `structuredContent.html`, or HTML in its text, as a model writes it in a ```` ```html ```` block) and choose Get the HTML.
+
+Either way, or with HTML pasted in, the part keeps the HTML without its scripts, `on…` handlers, frames and forms. Its ids get the part's id in front, so `refresh` in the part `dashboard` is `dashboard.refresh` and two parts can't clash, and its styles reach only inside it. Its elements get ●s like the rest, so the flow takes over the part's buttons and fields: wire `dashboard.refresh` to a tool's Run, and the tool's Answer to `dashboard.details`. A whole screen can be HTML too: choose HTML for the screen in the Inspector, then ask a model, call a tool or paste it in.
+
+**The screen runs on its own.** It's in a sandboxed frame with an origin of its own, so it can't read this page, its storage or your sign-ins. A policy keeps it off the network and keeps its own scripts (and `on…` attributes) from running. A small runtime the builder puts in the frame listens for clicks, Enter and changes on the whole document and reports the ones the flow waits for, so the flow is what makes the screen do things, and only the calls the flow names are made. HTML put on the screen as HTML loses its scripts, frames and forms first.
+
+### Download and DML
 
 **Download** saves the app as a zip, and each download is a version: the first is 1, and a download after any change is the next number.
 
-- `app.dml`: the app as markup, its components (or, for HTML, which call made it) and its flow
-- `index.html`: the screen, the base artifact people see
+- `app.dml`: the app as markup: its components (or, for an HTML screen, what made it), its flow, and where each tool sits on the canvas
+- `index.html`: the screen, the base artifact people see, parts included
+- `parts/<id>.html`: each part's HTML, with what made it in `app.dml`
 - `README.md`: the flow in words, and the servers it calls
 
-Download's menu has `app.dml` alone, with an HTML screen inside it. Import, in the rail, takes either back; an app with the same id is replaced, so importing a download restores it, and a rule whose server you haven't added offers to add it. Apps are kept in this browser's IndexedDB (`mcp_apps`).
+Download's menu has `app.dml` alone, with the HTML of the screen or its parts inside it. Import, in the rail, takes either back; an app with the same id is replaced, so importing a download restores it, and a rule whose server you haven't added offers to add it. Apps are kept in this browser's IndexedDB (`mcp_apps`).
 
 A DML file reads like the flow it describes:
 
@@ -97,7 +123,8 @@ A DML file reads like the flow it describes:
     <server url="https://learn.microsoft.com/api/mcp" name="Microsoft Learn"/>
   </servers>
   <flow>
-    <when element="ask" event="click">
+    <when element="ask" event="click" x="660" y="96">
+      <or element="question" event="enter"/>
       <call server="https://learn.microsoft.com/api/mcp" tool="microsoft_docs_search">
         <arg name="query">{{question}}</arg>
       </call>
@@ -108,7 +135,9 @@ A DML file reads like the flow it describes:
 </app>
 ```
 
-This is the first step. Next, apps get steps that chain (a rule waiting for another's answer), the Chat app's agent loop as a part of the flow (a model, its instructions and the conversation), and MCP Apps' UI resources as screens; after that, a download that runs on its own as a static site.
+A `<when>` names its first trigger and an `<or>` each other one (`event="open"` is Start); `x` and `y` are where its tool sits on the canvas. A part is `<part id="dashboard" src="parts/dashboard.html">`, with `<ask>` holding what the model was asked and `<from>` the call that made it.
+
+Next, apps get steps that chain (a tool's Answer wired to another tool), the Chat app's agent loop as a part of the flow (a model, its instructions and the conversation), and MCP Apps' UI resources as parts; after that, a download that runs on its own as a static site.
 
 ## Workbench
 
@@ -310,7 +339,7 @@ The Workbench is built from components (custom elements in `public/workbench/com
 
 The layout is CSS: each component sits in a named grid area, set by the `data-layout` block for `#workbench` in `workbench.css`. To try another arrangement, add a layout there and set `data-layout` on `#workbench`; the components don't change. Components can share an area and take turns: the request area holds the tool, resource and prompt panes, and the response area the response and contents panes, each showing itself only for its tab. The splitters sit in zero-width grid tracks of their own and set `--rail-width`, `--tools-width`, `--request-fr` and `--response-fr`, which the layout uses with limits, so a size kept from a wider window can't squeeze the others.
 
-The app builder (`public/apps/`) is built the same way: components for the Apps page's rail, the app's header, its screen, its flow and Try it, which share the Apps state (`apps.js`) besides AppShell and the Workbench's. [DEVELOPMENT.md](DEVELOPMENT.md#apps-you-build) has how an app runs and the DML it's written in.
+The app builder (`public/apps/`) is built the same way: components for the Apps page's rail, the app's header, the canvas and its Inspector, and the Outline's screen, flow and Try it, which share the Apps state (`apps.js`) besides AppShell and the Workbench's. [DEVELOPMENT.md](DEVELOPMENT.md#apps-you-build) has how an app runs and the DML it's written in.
 
 ### Project Structure
 
@@ -337,9 +366,12 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   ├── index.js       # Starts the Apps page: loads the apps, defines the builder's components
 │   │   ├── apps.js        # Shared state: the shown app, edits, downloads, imports, the starter app
 │   │   ├── apps.css       # The rail and the builder's styles
-│   │   ├── components/    # Rail, header, Screen, Flow and Try it, and the call editor they share
-│   │   ├── flow.js        # Rules: templates, call arguments, renaming, problems, sentences
-│   │   ├── screen.js      # Components to HTML, the elements of HTML, the HTML in a tool's answer
+│   │   ├── components/    # Rail, header, the canvas and its Inspector, the Outline's Screen, Flow and
+│   │   │                  #   Try it, and the editors they share (rule, HTML source, call, trace)
+│   │   ├── flow.js        # Rules: triggers, templates, call arguments, renaming, problems, sentences
+│   │   ├── graph.js       # The flow as the canvas draws it: ports, wires, connecting, placing tools
+│   │   ├── screen.js      # Components to HTML, parts (ids, scoped styles, sanitizing), the elements of HTML
+│   │   ├── ask.js         # Asking the Chat app's model for a screen or a part
 │   │   ├── runner.js      # Runs an app: the sandboxed frame's runtime and the flow in the page
 │   │   ├── dml.js         # An app as DML (XML), read and written without a DOM
 │   │   ├── zip.js         # The download's zip: written stored, read stored or deflated
@@ -395,7 +427,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 
 With `npm start` and `npm run start:mock-mcp` running, open http://localhost:8080:
 
-1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket`, `search_notes` and `make_screen`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
+1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket`, `search_notes`, `make_screen` and `chat`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
 2. **Run a tool.** Choose `echo`: `text` starts with `hello`, the schema's example. Type `hi` into it and choose Run. The result reads `Echo: hi`.
 3. **Header parameters.** Run `echo_region` with region `Zürich`. The result reads `Echo from Zürich: …`; the mock checks that the `Mcp-Param-Region` header carried the same value, base64-encoded because it isn't ASCII.
 4. **Test data.** Choose `search_notes`, which has 20 fields, 5 of them required. Those 5 start with test data the mock accepts: `test`, a week ago to today, `test@example.com` and `5`. The other 15 are folded away under "15 optional fields". Open them, choose Fill beside `owner` (it becomes `me`, a value its description lists), type `eu-central-1` into `region` and choose Run: the result shows the 7 arguments that went out. `cursor` has no Fill, since a pagination cursor only comes from an earlier response.
@@ -406,11 +438,12 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 9. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
 10. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
 11. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
-12. **Build an app.** In Apps, choose New app. Its rule reads `When run is clicked, call echo on Mock server with text = {{input}}; …`. Under Try it, type `hi` into the app's Input and choose Run: the Output shows `Echo: hi`, and What happened lists the click, the call, the answer and where it went. Change the rule's "If it works" text to `You said {{input}}: {{text}}` and run it again. Then choose HTML from a tool in Screen, pick `make_screen` and Get the HTML: the screen becomes the mock's page, its `question`, `ask` and `answer` are listed, and the rule says what it can't find any more. Choose `ask` under When and `answer` under Then, and the new screen works the same way. Download saves `new-app-v1.zip`.
+12. **Build an app.** In Apps, choose New app. It opens on the canvas: the app's screen, running, wired to `echo`. Choose Run above the canvas, type `hi` into the app's Input and choose its Run button: the wires light up, the Output shows `Echo: hi`, and What happened lists the click, the call, the answer and where it went. Choose Design, add an Output and the `count` tool from the Library, then drag from the ● beside `run` to count's ▶ Run, and from count's ✓ Answer to the ● beside `output2`. Run the app again and `output2` shows `Counted to 3`. Pick the `text` label on that wire, choose `structured.counted` among the last answer's values in the Inspector and type ` steps` after it: `output2` shows `3 steps`. Download saves `new-app-v1.zip`.
+13. **A part a model makes.** In Chat, choose `chat` under Model and tick "Your message goes here" on `message`: it's the mock's stand-in for a model. Back in the app, add an HTML part from the Library, and in the Inspector ask for `a ticket dashboard` and choose Make it. The dashboard appears on the screen without its script (its details box stays empty), and its elements get ●s named after the part, such as `part.refresh`. Add `ticket`, wire `part.refresh` to its Run and its Answer to `part.details`, and in Run, Refresh shows the next ticket number. Outline, at the top, shows the same app as cards; there, choose HTML for the screen and Call a tool with `make_screen` for a whole screen a tool made.
 
 ### More server behaviors
 
-`test_mcp_server.py` needs only Python's standard library. Besides its tools (one of which, `make_screen`, returns an app's screen as an HTML resource), it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
+`test_mcp_server.py` needs only Python's standard library. Besides its tools (among them `make_screen`, which returns an app's screen as an HTML resource, and `chat`, a stand-in for a model that writes a page when you ask for HTML, a ticket dashboard if you ask for one), it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
 
 | Flag | What the mock does |
 | --- | --- |
@@ -484,7 +517,7 @@ npm run test:public                  # plus the public servers above (needs inte
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); the canvas (wiring by dragging between ports, a drop that can't connect, Run with both tools answering, a transform picked from the last answer, Start calling a tool when the app opens, a dashboard part the stand-in model writes, wired to a tool, and the zip with the part and where each tool sits); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 
