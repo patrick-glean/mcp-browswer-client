@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
-import { chatApp, dashboardApp, foundModel } from '../public/apps/apps.js';
+import { chatApp, dashboardApp, foundModel, readmeFor } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -668,6 +668,7 @@ test('the Chat example is an app like any other: a conversation, a message and S
         'error err el:conversation',
     ]);
     assert.match(componentsHtml(app.screen.components), /<div id="conversation" class="output box box-conversation" aria-label="Conversation" aria-live="polite" data-placeholder="Say something to start\."><\/div>/);
+    assert.match(readmeFor(app), /\n## The conversation\n\n`conversation` keeps each message, answer and tool result as an entry, with who it's from; in a call, `\{\{conversation\}\}` is the list of them\. A rule that lets its model call your servers' tools tells it which there are/);
 
     const glean = 'https://acme-be.glean.com/mcp/default';
     const gleanChat = { name: 'chat', inputSchema: { type: 'object', properties: { _user_goal: { type: 'string' }, message: { type: 'string' }, context: { type: 'array', items: { type: 'string' } } }, required: ['message', '_user_goal'] } };

@@ -18,7 +18,7 @@
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
 import { conversationFieldOf } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
-import { BOX_KINDS, isBox, promptFieldOf } from './boxes.js';
+import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
 import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
@@ -197,6 +197,11 @@ export function readmeFor(app, { serverName = url => url } = {}) {
     const parts = (app.screen?.components || []).filter(component => component.type === 'part');
     const made = part => (part.ask ? `made by a model asked for "${part.ask}"` : part.from ? `made by a call to \`${part.from.toolName}\` on ${serverName(part.from.serverUrl)}` : 'written as HTML');
     const boxes = [...elements.values()].filter(isBox).map(box => `- \`${box.id}\`, ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}: ${box.about || box.label}`);
+    const conversations = [...elements.values()].filter(isConversation).map(element => element.id);
+    const agent = [
+        ...conversations.map(id => `\`${id}\` keeps each message, answer and tool result as an entry, with who it's from; in a call, \`{{${id}}}\` is the list of them.`),
+        (app.flow || []).some(rule => rule.tools) && "A rule that lets its model call your servers' tools tells it which there are, and runs the JSON-RPC calls in its answers, at most three in 10 seconds. Their results join the conversation, which the model gets with the next message.",
+    ].filter(Boolean);
     return `# ${app.name}
 
 An app built in MCP Browser Client${app.version ? `, version ${app.version}` : ''}.${app.description ? `\n\n${app.description}` : ''}
@@ -217,6 +222,10 @@ ${boxes.length ? `
 A rule that fills these asks its tool, in its prompt, for one JSON object with a key for each, saying what goes in it and in what shape; each box draws its piece:
 
 ${boxes.join('\n')}
+` : ''}${agent.length ? `
+## The conversation
+
+${agent.join(' ')}
 ` : ''}
 
 ## Run it
