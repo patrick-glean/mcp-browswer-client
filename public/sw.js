@@ -1,21 +1,7 @@
 let mcpClient = null;
 let isRunning = true;
 
-// The Chat app's model, {serverUrl, toolName, args, messageField, conversationField}
-// (set_chat_model), and the context the page added, [{id, name, text, timestamp}]
-// (set_chat_context).
-let chatModel = {};
-let chatContext = [];
-
-// --- MCP Servers Index ---
-const mcpServersIndex = {};
-
-// When each conversation's replies last asked for tool calls: { conversationId: [timestamps] }
-const replyCallTimes = {};
-
 import * as authStore from './authStore.js';
-import { CHAT_INSTRUCTIONS } from './chat-instructions.js';
-import { loadConversation, openDB, saveMessage } from './chatStorage.js';
 import { MCP_CLIENTS } from './mcp-clients.js';
 import { formatDuration, logger, setLogSink } from './logger.js';
 import { canonicalJson, compareKeyFor, comparedValue, sha256, stored } from './workbench/runs.js';
@@ -82,14 +68,12 @@ const APPLICATION_TYPE = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(se
 // Tokens this close to expiring are refreshed before use.
 const REFRESH_MARGIN_MS = 60_000;
 
-// A static token, from the message or the server list the page last sent.
-function staticToken(url, message = {}) {
-    return message.bearerToken ?? mcpServersIndex[url]?.bearerToken;
-}
+// A static token, which the page sends with each message for the server it's for.
+const staticToken = (message = {}) => message.bearerToken;
 
 // Options for the MCP client. A static token wins; otherwise the server's OAuth token.
 async function mcpOptions(url, message = {}, extra = {}) {
-    const bearerToken = staticToken(url, message) || await oauthAccessToken(url);
+    const bearerToken = staticToken(message) || await oauthAccessToken(url);
     return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...extra });
 }
 
@@ -99,7 +83,7 @@ async function withAuth(url, message, extra, call) {
     try {
         return await call(await mcpOptions(url, message, extra));
     } catch (error) {
-        if (mcpError(error).kind !== 'auth_required' || staticToken(url, message)) throw error;
+        if (mcpError(error).kind !== 'auth_required' || staticToken(message)) throw error;
         const held = await authStore.getTokens(url);
         if (!held?.refreshToken) throw error;
         logger.info('The server turned down the access token; refreshing it and trying again', { server: url });
@@ -189,7 +173,9 @@ function describeServer(url, info) {
 }
 
 // Where a tool call came from, as the trace describes it. The sources are the runs' (see recordRun).
-const CALL_ORIGINS = { workbench: 'the page', chat: 'a chat message', reply: 'a tool call in a reply' };
+// Pages make every call: the Workbench's, and those of the apps you build, which run in the page,
+// including the tool calls a model writes in its answer to an app.
+const CALL_ORIGINS = { workbench: 'the page', app: 'an app', reply: "a tool call in a model's answer, from an app" };
 
 const METHOD_NOT_FOUND = -32601;
 const counted = (count, one) => `${count} ${one}${count === 1 ? '' : 's'}`;
@@ -200,30 +186,14 @@ function listNames(names, max = 8) {
 }
 
 // What a page message is about, for the trace. Payloads stay out of the log: they can be large
-// (the server list) or carry bearer tokens.
-function describeMessage({ url, refresh, call, model }) {
+// or carry bearer tokens.
+function describeMessage({ url, refresh, call }) {
     const detail = {};
-    const target = call ?? model;
     if (url) detail.url = url;
-    if (target?.serverUrl) detail.server = target.serverUrl;
-    if (target?.toolName) detail.tool = target.toolName;
+    if (call?.serverUrl) detail.server = call.serverUrl;
+    if (call?.toolName) detail.tool = call.toolName;
     if (refresh) detail.refresh = true;
     return Object.keys(detail).length ? detail : undefined;
-}
-
-async function saveChatMessage(message) {
-    if (message.conversationId) await saveMessage(message);
-}
-
-// At most three tool calls from a conversation's replies every 10 seconds.
-function shouldBreakCircuit(conversationId) {
-    const now = Date.now();
-    if (!conversationId) return false;
-    const recent = (replyCallTimes[conversationId] ?? []).filter(time => now - time < 10000);
-    replyCallTimes[conversationId] = recent;
-    if (recent.length >= 3) return true;
-    recent.push(now);
-    return false;
 }
 
 // Handle messages from clients. waitUntil keeps the worker alive until the handler finishes,
@@ -269,7 +239,6 @@ async function handleClientMessage(event) {
         case 'forget-mcp':
             if (message.url) {
                 mcpClient?.forget_server(message.url);
-                delete mcpServersIndex[message.url];
                 logger.debug('Forgot the connection', { server: message.url });
             }
             break;
@@ -374,8 +343,6 @@ async function handleClientMessage(event) {
             const started = performance.now();
             try {
                 const listing = JSON.parse(await withAuth(url, message, { refresh: !!message.refresh }, options => mcpClient.list_tools(url, options)));
-                if (!mcpServersIndex[url]) mcpServersIndex[url] = { url };
-                mcpServersIndex[url].tools = listing.tools;
                 broadcastToClients({
                     type: 'tools_list',
                     url,
@@ -467,83 +434,24 @@ async function handleClientMessage(event) {
             }
             break;
         }
-        case 'call_tool':
+        case 'call_tool': {
+            const source = Object.hasOwn(CALL_ORIGINS, message.source) ? message.source : 'workbench';
             if (!mcpClient) {
                 // Not a call, so not in history, but the page waits on this run id.
                 event.source?.postMessage({
                     type: 'tool_result',
                     error: 'The MCP client is not loaded',
                     run: message.run?.id ? { id: message.run.id, outcome: 'failed', changed: null } : null,
-                    source: 'workbench'
+                    source
                 });
                 break;
             }
-            await handleToolCall({ source: 'workbench', call: message.call, message, event });
-            break;
-        case 'get_chat_instructions':
-            event.source?.postMessage({ type: 'chat_instructions', instructions: CHAT_INSTRUCTIONS });
-            break;
-        case 'chat_message':
-            logger.error('Pages send chat_send; chat_message only goes from the worker to pages');
-            break;
-        case 'chat_send':
-            if (message.text) {
-                const sent = {
-                    text: message.text,
-                    role: message.role || 'user',
-                    timestamp: Date.now(),
-                    conversationId: message.conversationId || null
-                };
-                broadcastToClients({ type: 'chat_message', message: sent });
-                await saveChatMessage(sent);
-                try {
-                    if (chatModel.serverUrl && chatModel.toolName && (chatModel.messageField || chatModel.conversationField)) {
-                        await handleToolCall({ source: 'chat', call: chatModel, message: sent });
-                    }
-                } catch (err) {
-                    logger.error(`The chat's tool call failed: ${err.message}`, { server: chatModel.serverUrl });
-                }
-            } else {
-                logger.debug('Ignored a chat message without text');
-            }
-            break;
-        case 'get_chat_history': {
-            const { messages } = await loadConversation(message.conversationId ?? null);
-            event.source?.postMessage({ type: 'chat_history', conversationId: message.conversationId ?? null, messages });
+            await handleToolCall({ source, call: message.call, message, event });
             break;
         }
-        case 'set_chat_model':
-            chatModel = message.model || {};
-            logger.debug('The chat now sends messages to a tool', {
-                server: chatModel.serverUrl,
-                detail: { tool: chatModel.toolName, messageField: chatModel.messageField, conversationField: chatModel.conversationField }
-            });
-            return;
-        case 'set_chat_context':
-            if (Array.isArray(message.context)) {
-                chatContext = message.context;
-                logger.debug(`The chat's context has ${chatContext.length} entr${chatContext.length === 1 ? 'y' : 'ies'}`);
-            }
-            break;
-        case 'init_mcp_servers_index':
-            if (message.servers && typeof message.servers === 'object') {
-                Object.assign(mcpServersIndex, message.servers);
-                logger.debug(`The page registered ${Object.keys(message.servers).length} server(s)`);
-            }
-            break;
-        case 'reply_tool_call':
-            await runReplyToolCall(message.toolCall, message.conversationId || null);
-            break;
         default:
             logger.warn(`Ignored a message of unknown type ${message.type}`);
     }
-}
-
-// Chat messages go to every page; each shows the conversation it has open.
-function sendChatMessage(message, event) {
-    const update = { type: 'chat_message', message };
-    if (event?.source) event.source.postMessage(update);
-    else broadcastToClients(update);
 }
 
 // Initialize on install. A new version takes over as soon as it's installed instead of waiting
@@ -553,14 +461,25 @@ self.addEventListener('install', event => {
     logger.info(`Installing the service worker with the MCP client library builds ${builds}`);
     self.skipWaiting();
     event.waitUntil(loadClient());
-    event.waitUntil(openDB());
 });
+
+// The conversations the Chat app kept, before the Chat example replaced it: apps keep theirs on
+// their screens.
+const OLD_CHAT_DATABASE = 'chat_contexts';
+
+function deleteOldChatDatabase() {
+    return new Promise(resolve => {
+        const request = indexedDB.deleteDatabase(OLD_CHAT_DATABASE);
+        request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    });
+}
 
 // Handle activation
 self.addEventListener('activate', event => {
     logger.debug('Activating');
     event.waitUntil(clients.claim());
     event.waitUntil(initialClientBroadcast());
+    event.waitUntil(deleteOldChatDatabase());
 });
 
 
@@ -603,111 +522,10 @@ function extractToolResponseText(parsedResult) {
     return '[No content]';
 }
 
-// --- JSON-RPC Extraction Helper ---
-/**
- * Extracts all JSON-RPC objects from code blocks in a text blob (handles escaped quotes).
- * Returns an array of parsed JSON objects.
- */
-function extractJsonRpcCalls(text) {
-    const results = [];
-    if (!text || typeof text !== 'string') return results;
-    // Regex to match ```json ... ``` or ``` ... ```
-    const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
-    let match;
-    while ((match = codeBlockRegex.exec(text)) !== null) {
-        let code = match[1].trim();
-        // Try to unescape if needed (handles double-escaped quotes)
-        try {
-            // Try as-is
-            let obj = JSON.parse(code);
-            if (obj && obj.jsonrpc === '2.0' && typeof obj.method === 'string') {
-                results.push(obj);
-                continue;
-            }
-        } catch (e) {}
-        try {
-            // Try unescaping quotes (for escaped JSON in markdown)
-            let unescaped = code.replace(/\\"/g, '"');
-            let obj = JSON.parse(unescaped);
-            if (obj && obj.jsonrpc === '2.0' && typeof obj.method === 'string') {
-                results.push(obj);
-            }
-        } catch (e) {}
-    }
-    return results;
-}
-
-// A tool call a reply asked for: a JSON-RPC request whose method is a tool's name.
-async function runReplyToolCall(toolCall, conversationId) {
-    if (shouldBreakCircuit(conversationId)) {
-        logger.warn('Skipped a tool call from a reply: more than 3 in 10 seconds', { detail: { conversationId } });
-        broadcastToClients({
-            type: 'tool_result',
-            error: 'Circuit breaker: too many tool calls in a short period',
-            conversationId,
-            source: 'reply'
-        });
-        return;
-    }
-    if (toolCall && toolCall.method && toolCall.jsonrpc === '2.0') {
-        const found = findToolAndServerByMethod(toolCall.method);
-        if (!found) {
-            logger.error(`A reply asked for ${toolCall.method}, which no connected server offers`);
-            broadcastToClients({
-                type: 'tool_result',
-                error: `Tool not found: ${toolCall.method}`,
-                conversationId,
-                source: 'reply'
-            });
-            return;
-        }
-        const { serverUrl, tool } = found;
-        const call = { serverUrl, toolName: tool.name, args: toolCall.params || {} };
-
-        try {
-            logger.info(`A reply asked for ${tool.name}; calling it`, { server: serverUrl });
-            await handleToolCall({ source: 'reply', call, message: { ...toolCall, conversationId } });
-        } catch (err) {
-            logger.error(`Couldn't run the tool call from a reply: ${err.message}`, { server: serverUrl, detail: { toolCall } });
-            broadcastToClients({
-                type: 'tool_result',
-                error: err.message,
-                conversationId,
-                source: 'reply'
-            });
-        }
-    } else {
-        logger.error('reply_tool_call carried no JSON-RPC tool call', { detail: { toolCall } });
-    }
-}
-
-// {{message}} in a preset message field is replaced by the message ({{cbus_message}} is its old name).
-const MESSAGE_PLACEHOLDER = /\{\{(?:message|cbus_message)\}\}/g;
-
-// The chat model's arguments. Its message field gets the newest message, and its conversation field
-// everything before it: how to ask for a tool call, the servers and their tools to choose from, the
-// context the page added, then the conversation so far.
-async function modelArguments(model, conversationId) {
-    const args = { ...(model.args || {}) };
-    const { messageField, conversationField } = model;
-    if (!conversationId || !(messageField || conversationField)) return args;
-    const { messages } = await loadConversation(conversationId);
-    const context = chatContext.map(entry => entry?.text).filter(text => typeof text === 'string' && text.trim());
-    const texts = [CHAT_INSTRUCTIONS, JSON.stringify(serversForModel()), ...context, ...messages.map(message => message.text)];
-    const newest = texts.at(-1);
-    if (messageField) {
-        const preset = args[messageField];
-        if (typeof preset === 'string' && preset.match(MESSAGE_PLACEHOLDER)) args[messageField] = preset.replace(MESSAGE_PLACEHOLDER, () => newest);
-        else if (typeof preset !== 'string' || !preset) args[messageField] = newest;
-    }
-    if (conversationField) args[conversationField] = texts.slice(0, -1);
-    return args;
-}
-
-// Every tool call goes through here, whichever part of the app asked for it (`source`: workbench,
-// chat or reply). `call` is {serverUrl, toolName, args}; for the chat, the model with its fields.
+// Every tool call goes through here, whichever part of the page asked for it (`source`: workbench,
+// app or reply). `call` is {serverUrl, toolName, args}.
 async function handleToolCall({ source, call, message, event }) {
-    const toolArgs = source === 'chat' ? await modelArguments(call, message.conversationId) : { ...(call.args || {}) };
+    const toolArgs = { ...(call.args || {}) };
     const server = call.serverUrl;
     const tool = call.toolName;
     logger.debug(`Calling ${tool}`, { server, detail: { from: CALL_ORIGINS[source] || source, arguments: Object.keys(toolArgs) } });
@@ -717,9 +535,7 @@ async function handleToolCall({ source, call, message, event }) {
     const reply = update => (event?.source ? event.source.postMessage(update) : broadcastToClients(update));
     let result;
     try {
-        // Only calls the page asked for directly may bring a token; calls started from chat or
-        // from a reply use the one the page registered for the server.
-        result = await withAuth(server, source === 'workbench' ? message : {}, {}, options =>
+        result = await withAuth(server, message, {}, options =>
             mcpClient.call_tool(server, tool, JSON.stringify(toolArgs), options)
         );
     } catch (err) {
@@ -731,8 +547,7 @@ async function handleToolCall({ source, call, message, event }) {
             error: error.message,
             errorKind: error.kind,
             run,
-            source,
-            conversationId: message.conversationId || null
+            source
         });
         return;
     }
@@ -742,7 +557,7 @@ async function handleToolCall({ source, call, message, event }) {
     } catch (e) {
         parsedResult = { text: '[Tool returned invalid JSON]' };
     }
-    let toolText = extractToolResponseText(parsedResult);
+    const toolText = extractToolResponseText(parsedResult);
     const durationMs = performance.now() - started;
     const took = formatDuration(durationMs);
     if (parsedResult?.resultType === 'input_required') {
@@ -752,24 +567,13 @@ async function handleToolCall({ source, call, message, event }) {
     } else {
         logger.info(`${tool} returned in ${took}`, { server });
     }
-    // The chat's model and the tools its replies call answer in the conversation.
-    if (source === 'chat' || source === 'reply') {
-        const answer = { text: toolText, role: 'tool', timestamp: Date.now(), conversationId: message.conversationId || null };
-        sendChatMessage(answer, event);
-        await saveChatMessage(answer);
-    }
     const run = await recordRun(attempt, { outcome: parsedResult?.isError ? 'tool_error' : 'ok', result: parsedResult, durationMs });
     reply({
         type: 'tool_result',
         result: parsedResult,
         run,
-        source,
-        conversationId: message.conversationId || null
+        source
     });
-
-    for (const toolCall of extractJsonRpcCalls(toolText)) {
-        await runReplyToolCall(toolCall, message.conversationId || null);
-    }
 }
 
 // --- Run history: every tool call becomes a run, whichever part of the client made it ---
@@ -777,7 +581,8 @@ async function handleToolCall({ source, call, message, event }) {
 // Saves the call and compares its result with the last run of the same request. Pages asking for
 // a call send `run` details: the arguments as written (with {{variables}}), the saved request it
 // came from and the environment. History failing must never fail the call, so errors only log.
-// Sources are handleToolCall's: workbench (collection for Run all), chat and reply.
+// Sources are handleToolCall's: workbench (collection for Run all), app and reply. Runs from
+// before the Chat example replaced the Chat app may say chat.
 async function recordRun(attempt, { outcome, result = null, error = null, durationMs }) {
     const details = attempt.message?.run || {};
     const record = {
@@ -815,23 +620,4 @@ async function recordRun(attempt, { outcome, result = null, error = null, durati
         logger.warn(`Couldn't save the call to ${attempt.toolName} in the run history: ${failure.message}`, { server: attempt.serverUrl });
     }
     return summary;
-}
-
-// --- Tool/Server Lookup Helper ---
-// The server list as the page registered it, minus static tokens: the model's tool may be on any
-// server, and a token only ever goes to the server it's for.
-function serversForModel() {
-    return Object.fromEntries(Object.entries(mcpServersIndex).map(([url, { bearerToken, ...server }]) => [url, server]));
-}
-
-function findToolAndServerByMethod(method) {
-    for (const [url, server] of Object.entries(mcpServersIndex)) {
-        if (server.tools && Array.isArray(server.tools)) {
-            const tool = server.tools.find(t => t.name === method);
-            if (tool) {
-                return { serverUrl: url, tool };
-            }
-        }
-    }
-    return null;
 }

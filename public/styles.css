@@ -106,8 +106,7 @@ hr.divider {
     border-top: 1px solid var(--theme-border-light);
 }
 
-.text-secondary,
-.empty-state {
+.text-secondary {
     color: var(--theme-text-secondary);
 }
 
@@ -128,6 +127,7 @@ hr.divider {
 }
 
 .icon-external-link { --icon: url('icons/external-link.svg'); }
+.icon-eye { --icon: url('icons/eye.svg'); }
 .icon-play { --icon: url('icons/play.svg'); }
 .icon-plus { --icon: url('icons/plus.svg'); }
 .icon-power { --icon: url('icons/power.svg'); }
@@ -585,189 +585,7 @@ input[type='checkbox'] {
     background: var(--theme-background);
 }
 
-.panel-muted {
-    border-color: transparent;
-    background: var(--theme-background-light);
-}
-
-.panel-title {
-    margin-bottom: 12px;
-    font-family: var(--font-heading);
-    font-size: 1rem;
-    font-weight: 500;
-    line-height: 1.5rem;
-    letter-spacing: -0.034rem;
-}
-
-.panel-subtitle {
-    margin: -8px 0 16px;
-    color: var(--theme-text-secondary);
-}
-
-.panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-}
-
-.panel-header .panel-title {
-    margin-bottom: 0;
-}
-
-/* Context entries in the Chat app have the kit's menu-item look. */
-.context-list-item {
-    display: flex;
-    flex-direction: column;
-    padding: 8px 12px;
-    border-radius: var(--radius-200);
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-}
-
-.context-list-item:hover {
-    background: var(--theme-hover);
-}
-
-.context-list-item.selected {
-    background: var(--theme-selected);
-    font-weight: 500;
-}
-
-.empty-state {
-    padding: 8px 12px;
-}
-
-/* ---------- The Chat app ---------- */
-
-.chat-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 24px;
-    height: calc(100vh - 170px);
-    min-height: 480px;
-}
-
-.chat-card-left {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    padding: 0;
-    overflow: hidden;
-}
-
-.chat-messages {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 12px;
-    min-height: 0;
-    padding: 24px;
-    overflow-y: auto;
-}
-
-.chat-messages:empty::before {
-    content: 'Send a message to start the conversation.';
-    margin: auto;
-    color: var(--theme-text-secondary);
-}
-
-.chat-msg {
-    display: flex;
-}
-
-.chat-msg span {
-    max-width: 75%;
-    padding: 8px 16px;
-    border: 1px solid var(--theme-border-light);
-    border-radius: var(--radius-400);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.chat-msg.user {
-    justify-content: flex-end;
-}
-
-.chat-msg.user span {
-    border-color: var(--theme-background-mid);
-    border-bottom-right-radius: var(--radius-100);
-    background: var(--theme-background-mid);
-}
-
-.chat-msg.tool span {
-    border-bottom-left-radius: var(--radius-100);
-}
-
-.chat-msg.memory span {
-    border-style: dashed;
-    color: var(--theme-text-secondary);
-    font-size: 0.75rem;
-}
-
-.chat-input-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--theme-border-light);
-}
-
-.chat-input-row input {
-    flex: 1;
-    min-height: 40px;
-}
-
-.chat-conversation {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 16px 12px;
-    color: var(--theme-text-secondary);
-    font-size: 0.75rem;
-}
-
-.chat-conversation .mono {
-    color: var(--theme-text-primary);
-}
-
-.chat-card-right {
-    overflow-y: auto;
-}
-
-.chat-model-card {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.chat-model-card .panel-title {
-    margin-bottom: 0;
-}
-
-.chat-model-card .panel-subtitle {
-    margin: -12px 0 0;
-}
-
-.chat-server-select-row,
-.chat-tool-select-row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.chat-server-select-row label,
-.chat-tool-select-row label {
-    font-weight: 500;
-}
-
-.chat-tool-config {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-/* Generated tool-argument fields (the Workbench's request pane and the Chat app's Model). */
+/* Generated tool-argument fields (the Workbench's request pane). */
 .tool-input-card {
     display: flex;
     flex-direction: column;
@@ -781,21 +599,6 @@ input[type='checkbox'] {
 .tool-input-card > label strong {
     color: var(--theme-text-primary);
     font-weight: 500;
-}
-
-.chat-field-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 4px;
-    color: var(--theme-text-secondary);
-    font-size: 0.75rem;
-    cursor: pointer;
-}
-
-.chat-field-warning {
-    color: var(--theme-error);
-    font-size: 0.75rem;
 }
 
 .array-inputs,
@@ -1294,48 +1097,6 @@ input[type='checkbox'] {
     font-size: 0.75rem;
 }
 
-/* ---------- The Chat app's instructions and context ---------- */
-
-.context-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.context-timestamp {
-    color: var(--theme-text-secondary);
-    font-size: 0.75rem;
-    font-weight: 400;
-}
-
-.context-editor,
-.context-editor form {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.context-editor label {
-    margin-top: 8px;
-    font-weight: 500;
-}
-
-.context-editor label:first-child {
-    margin-top: 0;
-}
-
-.context-editor textarea {
-    min-height: 240px;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-}
-
-.editor-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-}
-
 /* ---------- The log (in the Workbench's dock) ---------- */
 
 .log-toolbar {
@@ -1613,14 +1374,5 @@ input[type='checkbox'] {
 @media (max-width: 900px) {
     .status-bar .status-label {
         display: none;
-    }
-
-    .chat-card {
-        grid-template-columns: minmax(0, 1fr);
-        height: auto;
-    }
-
-    .chat-messages {
-        min-height: 320px;
     }
 }

@@ -10,7 +10,7 @@ The app runs whichever MCP client library the page picks: the TypeScript SDK one
 1. **One interface for every library**:
    - Libraries export the functions in DEVELOPMENT.md ("The interface"): MCP and sign-in calls take and return JSON strings and reject with a JSON `McpError {kind, message, status?, code?, data?}`
    - A new capability goes into every library with the same shapes, or it isn't part of the interface
-   - Libraries store nothing and carry no app logic: the worker keeps sign-ins, runs and conversations in IndexedDB, and the Chat app's instructions are in `public/chat-instructions.js`
+   - Libraries store nothing and carry no app logic: the worker keeps sign-ins and runs in IndexedDB, and the agent loop (what a model is told, the tool calls in its answers) is the app runner's (`public/apps/agent.js`, `runner.js`)
    - Register a new library in `public/mcp-clients.js` and the Runtime menu's `#clientSelect`
 
 2. **Message Flow**:
@@ -32,11 +32,20 @@ The app runs whichever MCP client library the page picks: the TypeScript SDK one
    - A library's entries carry its `logSource` (`wasm`, `sdk`); debug entries are the HTTP trace
    - Never log tokens, `Authorization` values or sign-in secrets; shorten session IDs
 
-6. **The agent loop** (Chat app, in `sw.js`):
-   - The model is an MCP tool; tool calls are JSON-RPC requests in code blocks of its reply
-   - Nothing sent to the model may contain credentials (`serversForModel` strips static tokens)
-   - Every call, including the model's and those from its replies, is recorded as a run
+6. **The agent loop** (a rule in an app, in `public/apps/runner.js` and `agent.js`; the Chat example is `chatApp` in `apps.js`):
+ - The model is an MCP tool; tool calls are JSON-RPC requests in code blocks of its answer, run from the page with source `reply`, at most three every 10 seconds per rule
+ - Nothing sent to the model may contain credentials (`toolsForModel` gives each server's name, URL and tools only); a call from an answer goes to the server that has the tool, with only that server's token
+ - Every call, including the model's and those from its answers, is recorded as a run
 
-7. **Documentation**:
+7. **Apps you build** (`public/apps/`):
+ - The flow runs in the page and calls tools only through `AppShell.runTool`, with source `app` (or `reply` for a tool call in a model's answer), so every call is a run and the worker needs nothing app-specific
+ - The screen runs in a `sandbox="allow-scripts"` frame under the policy `frameDocument` sets: no network, no scripts but the runtime, no access to the page. It only reports events and shows what the page sends, with each message's token checked; never give it more, and never make it same-origin, even for HTML from our own tool calls: this origin's storage holds static tokens
+ - HTML from a model or a tool goes in without scripts, handlers, frames or forms (`sanitizePart`, `frameDocument`, the runtime's `fragment`); the flow takes over its elements by id, through the runtime's document-level listeners
+ - The canvas, Try it and Preview each run the app in a frame of their own, and only the one showing runs. Preview is the app as launched: the same frame and policy, over the whole window
+ - The frame asks the page to open links (`open`); the page opens only http(s) addresses, with `noopener`. It also tells the page about Escape (`escape`), nothing more. A box's answer is drawn in the page (`renderBox`), escaped, and sanitized again in the frame
+ - Only calls a rule names are made, and the tool calls in its model's answer when the rule says so (`tools`); values from the screen fill arguments as `{{id}}`, never credentials. Asking a model for HTML sends what to make and the HTML there is now, in the model's own fields, nothing else
+ - DML is the app's portable form: change `dml.js`'s reader and writer together, keep old files readable, and raise `DML_VERSION` for a change older readers can't read
+
+8. **Documentation**:
    - Update DEVELOPMENT.md for new interface functions, messages and patterns
    - Update the README when behavior a user sees changes

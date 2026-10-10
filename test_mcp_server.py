@@ -21,6 +21,7 @@ Examples:
 import argparse
 import base64
 import hashlib
+import html
 import json
 import re
 import threading
@@ -139,6 +140,32 @@ TOOLS = [
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
+    {
+        # An app's screen can be HTML a tool returns, as an embedded text/html resource.
+        "name": "make_screen",
+        "title": "Make a screen",
+        "description": "Makes an HTML page for an app's screen: a text box (question), a button (ask) and an output (answer).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"title": {"type": "string", "description": "The page's heading.", "default": "Ask the mock"}},
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
+    {
+        # A stand-in for a model, so the Chat example and the app builder's "Ask a model" work without one.
+        "name": "chat",
+        "title": "Chat (a stand-in model)",
+        "description": "A stand-in for a model: it answers what you say; asked to call one of the tools an app lists (\"call echo with hello\"), it writes the JSON-RPC request; asked for an app's boxes, it answers with one JSON object of made-up values in their shapes; and asked for HTML, it writes a page in an ```html block (a ticket dashboard, if you ask for one).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "What you say to it."},
+                "history": {"type": "array", "items": {"type": "string"}, "description": "The conversation so far."},
+            },
+            "required": ["message"],
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
 ]
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
@@ -157,6 +184,208 @@ RESOURCE_TEMPLATES = [
     {"uriTemplate": "mock://notes/{id}", "name": "note", "title": "A note", "description": "Note number id, made up on the spot.", "mimeType": "text/plain"},
 ]
 README = "# Mock MCP Server\n\nA server for testing MCP clients: tools, resources and prompts, in either protocol era.\n"
+# What make_screen returns. Its script must never run where an app shows the screen.
+SCREEN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <style>
+    body { margin: 0; padding: 24px; font: 15px/1.5 system-ui, sans-serif; }
+    main { display: grid; gap: 12px; max-width: 560px; }
+    input { padding: 8px 10px; font: inherit; }
+    button { justify-self: start; padding: 8px 18px; font: inherit; }
+    #answer { min-height: 40px; padding: 10px; background: #f3f3f3; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{title}</h1>
+    <label for="question">Question</label>
+    <input id="question" placeholder="Ask the mock something">
+    <button id="ask" type="button">Ask</button>
+    <div id="answer" aria-live="polite"></div>
+  </main>
+  <script>document.getElementById('answer').textContent = 'The screen ran its own script';</script>
+</body>
+</html>
+"""
+# What chat writes when asked for a dashboard: cards, a search field, a Refresh button and a list,
+# with an inline handler and a script that must never run where an app shows it.
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tickets</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; }
+    .dash { display: grid; gap: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .card { padding: 10px 12px; border-radius: 10px; background: #eef2ff; color: #1e2a5a; }
+    .card b { display: block; font-size: 1.5rem; }
+    .row { display: flex; gap: 8px; }
+    .row input { flex: 1; padding: 8px 10px; font: inherit; }
+    #tickets { margin: 0; padding-left: 18px; }
+    #details { min-height: 36px; padding: 8px 10px; border-radius: 8px; background: #f4f4f5; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main class="dash">
+    <h2>{title}</h2>
+    <div class="cards">
+      <div class="card">Open <b id="open">12</b></div>
+      <div class="card">Today <b id="today">3</b></div>
+      <div class="card">Waiting <b id="waiting">5</b></div>
+    </div>
+    <form class="row" onsubmit="alert('submitted')">
+      <label for="search" hidden>Find a ticket</label>
+      <input id="search" placeholder="Find a ticket">
+      <button id="refresh" type="submit" onclick="alert('clicked')">Refresh</button>
+    </form>
+    <ul id="tickets"><li>T-1 The printer jams</li><li>T-2 The VPN drops</li></ul>
+    <div id="details" aria-live="polite"></div>
+  </main>
+  <script>document.getElementById('details').textContent = 'The dashboard ran its own script';</script>
+</body>
+</html>
+"""
+
+
+# How an app's boxes ask for their pieces of an answer: a line for each key, as
+# - "key" (kind): what goes in it. As its shape.
+BOX_LINE = re.compile(r'^- "([^"]+)" \(([^)]+)\): (.*)$', re.M)
+WEEKS = ["Aug 31", "Sep 7", "Sep 14", "Sep 21", "Sep 28", "Oct 5"]
+
+
+def box_value(key, kind, about, subject=None):
+    """A made-up piece of an answer for one box, in the shape its kind asks for, about `subject`
+    (what the question asks about) when there is one."""
+    words = f"{key} {about}".lower()
+    if kind == "number":
+        if "health" in words or "track" in words:
+            return {"value": "On track", "note": "Two open risks, neither blocking"}
+        return {"value": 12, "note": "Up 3 since last week"}
+    if kind in ("bar chart", "line chart"):
+        found = re.search(r"(\d+)\s+(?:weeks|months|days)", about)
+        count = max(2, min(int(found.group(1)) if found else 6, 12))
+        values = [4, 7, 5, 9, 12, 8, 10, 6, 11, 13, 9, 14]
+        return {"labels": WEEKS if count == 6 else [f"Week {n + 1}" for n in range(count)], "values": values[:count]}
+    if kind == "list":
+        if "risk" in words or "block" in words:
+            return [
+                {"title": "The beta date depends on the API review", "detail": "Raised by the platform team"},
+                {"title": "Two pilot customers haven't signed off", "detail": "Raised by sales"},
+                {"title": "On-call isn't staffed for launch week", "detail": "Raised by support"},
+            ]
+        if "who" in words or "people" in words:
+            return [
+                {"title": "Ada Lovelace", "detail": "Leads it"},
+                {"title": "Grace Hopper", "detail": "Runs the beta"},
+            ]
+        return [
+            {"title": "Design doc", "url": "https://example.com/docs/design", "detail": "What it is, and the choices made so far"},
+            {"title": "Launch plan", "url": "https://example.com/docs/launch", "detail": "Dates, owners and the go/no-go list"},
+            {"title": "Weekly notes", "url": "https://example.com/docs/weekly", "detail": "Decisions from the last three meetings"},
+        ]
+    if kind == "table":
+        return {"columns": ["Item", "Owner", "Status"], "rows": [["Design review", "Ada", "Done"], ["Beta", "Grace", "In progress"], ["Launch", "Alan", "Not started"]]}
+    if kind == "html":
+        return ('<div class="banner" style="padding:12px 14px;border-radius:10px;background:#e7f6ec;color:#14532d">'
+                "<strong>On track.</strong> The beta starts once the API review is done.</div>")
+    if subject:
+        return f"On track: {subject} closed its design review last week, and the beta starts once the API review is done. Two risks are open, neither blocking."
+    return "On track: the design review closed last week, and the beta starts once the API review is done. Two risks are open, neither blocking."
+
+
+def boxes_reply(message):
+    """Answers a prompt an app's boxes added to: one JSON object, with a key for each box."""
+    asked = re.search(r"\blatest on (.+?)\?", message)
+    subject = asked.group(1).strip() if asked else None
+    answer = {key: box_value(key, kind.lower(), about, subject) for key, kind, about in BOX_LINE.findall(message)}
+    return f"```json\n{json.dumps(answer, indent=2)}\n```"
+
+
+def with_details(answer):
+    """An answer as Glean's chat sends one: the conversation's details after a line of dashes."""
+    return f"{answer}\n\n---\nchatId: mock-{uuid.uuid4().hex[:12]}\nmessages[1]:\n  -\n    stepId: MOCK"
+
+
+# What an app adds to a model's prompt around what the person said: the tools it may call, after
+# its instructions, and what the app's boxes need.
+TOOLS_LISTED = "The tools, by server:"
+BOXES_ASKED = "This answer fills the boxes on an app's screen."
+# Asked to call a tool: "call echo with hello".
+CALL_ASKED = re.compile(r"^call\s+([\w.-]+)(?:\s+with\s+(.+))?$", re.I | re.S)
+# The fields a tool's one value goes in, by name, before its first required text field.
+VALUE_FIELDS = ["text", "query", "message", "input", "q"]
+
+
+def said_in(message):
+    """What the person said: after the tools an app lists, or else its last paragraph (after the
+    app's instructions), and before what its boxes ask for."""
+    text = message.split(BOXES_ASKED, 1)[0]
+    if TOOLS_LISTED in text:
+        listed = text.split(TOOLS_LISTED, 1)[1]
+        # The block's fence closes at the start of a line; descriptions may have ``` in them.
+        close = listed.find("\n```", listed.find("```") + 3)
+        return listed[close + 4:].strip() if close >= 0 else ""
+    return text.strip().split("\n\n")[-1].strip()
+
+
+def tools_in(message):
+    """The tools an app says the model may call, from its JSON list of servers."""
+    if TOOLS_LISTED not in message:
+        return []
+    found = re.search(r"```json\n(.*?)\n```", message.split(TOOLS_LISTED, 1)[1], re.S)
+    try:
+        servers = json.loads(found.group(1)) if found else []
+    except ValueError:
+        return []
+    return [tool for server in servers for tool in server.get("tools", [])]
+
+
+def tool_call_reply(name, value, tools):
+    """Asks for a tool call, as a model the app lets use its tools does: a JSON-RPC request in a
+    ```json block, its one value in the tool's text field and the other required ones filled."""
+    tool = next((candidate for candidate in tools if candidate.get("name") == name), None)
+    if tool is None:
+        return f"I can't call {name}: it isn't one of the tools I was given."
+    schema = tool.get("inputSchema") or {}
+    props = schema.get("properties") or {}
+    texts = [key for key, prop in props.items() if prop.get("type") == "string"]
+    required = [key for key in schema.get("required", []) if key in texts]
+    params = {}
+    target = next((key for key in VALUE_FIELDS if key in texts), (required or texts or [None])[0])
+    for key in required:
+        prop = props[key]
+        params[key] = prop.get("default", (prop.get("examples") or [None])[0]) or key
+    if target and value:
+        params[target] = value.strip()
+    call = {"jsonrpc": "2.0", "method": name, "params": params, "id": 1}
+    return f"I'll ask {name}.\n\n```json\n{json.dumps(call)}\n```"
+
+
+def chat_reply(message, history=()):
+    """What the stand-in model says: an answer, a tool call when asked for one, the JSON an app's
+    boxes ask for, or a page when asked for HTML."""
+    if "one JSON object" in message and BOX_LINE.search(message):
+        return boxes_reply(message)
+    said = said_in(message)
+    asked_call = CALL_ASKED.match(said)
+    if asked_call:
+        return tool_call_reply(asked_call.group(1), asked_call.group(2) or "", tools_in(message))
+    if "html" not in said.lower():
+        earlier = f" ({len(history)} earlier message{'' if len(history) == 1 else 's'} came with it.)" if history else ""
+        return f"You said: {said}{earlier}"
+    first = next((line for line in message.splitlines() if line.startswith("Write ")), said.split("\n", 1)[0])
+    request = first.split(": ", 1)[-1].strip()
+    if "dashboard" in request.lower():
+        page = DASHBOARD_HTML.replace("{title}", html.escape(request[:1].upper() + request[1:60]))
+    else:
+        page = SCREEN_HTML.replace("{title}", html.escape(request[:60] or "Ask the mock"))
+    return f"Here is a page for that.\n\n```html\n{page}```\n\nIts buttons and fields have ids, so an app can wire them up."
+
+
 PROMPTS = [
     {
         "name": "greet",
@@ -516,6 +745,15 @@ class Handler(BaseHTTPRequestHandler):
             if problems:
                 return self.respond(request_id, {**result, "content": [text_content("; ".join(problems))], "isError": True})
             text = f"No notes match. Searched with {json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+        elif name == "chat":
+            history = args.get("history") if isinstance(args.get("history"), list) else []
+            text = with_details(chat_reply(str(args.get("message", "")), history))
+        elif name == "make_screen":
+            page = SCREEN_HTML.replace("{title}", html.escape(str(args.get("title") or "Ask the mock")))
+            return self.respond(request_id, {**result, "content": [
+                text_content("Here is the screen."),
+                {"type": "resource", "resource": {"uri": "mock://screen.html", "mimeType": "text/html", "text": page}},
+            ]})
         else:
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")

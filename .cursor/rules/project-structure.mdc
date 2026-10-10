@@ -19,17 +19,21 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 ### Service Worker
 - Implementation: [public/sw.js](mdc:public/sw.js)
   - Routes page messages to the active library (`mcpClient`); never builds JSON-RPC itself
-  - Owns sign-in storage (`authStore.js`), run history (`workbench/store.js`) and conversations (`chatStorage.js`)
-  - Runs the Chat app's agent loop (`handleToolCall`, `modelArguments`, `extractJsonRpcCalls`, `runReplyToolCall`), with its built-in instructions in [public/chat-instructions.js](mdc:public/chat-instructions.js)
+  - Owns sign-in storage (`authStore.js`) and run history (`workbench/store.js`)
+  - Runs only the calls pages send (`handleToolCall`), each with its own server's token; it keeps no server list
 
 ### Web Interface
 - Page: [public/index.html](mdc:public/index.html)
-  - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the Chat app) and the Guide
-  - `AppShell`, the controller: talks to the service worker, owns servers, sign-in, tool calls, resource reads and prompt gets, and emits events instead of drawing UI
+ - The top bar (Runtime menu with the library picker `#clientSelect`), the layout, the Apps page (the app builder, and its start page with the examples) and the Guide
+ - `AppShell`, the controller: talks to the service worker, owns servers, sign-in, tool calls, resource reads and prompt gets, and emits events instead of drawing UI
 - Workbench: [public/workbench/](mdc:public/workbench/index.js)
   - One custom element per part of the screen in `components/` (rail, server bar, tools with the Resources and Prompts tabs, request, resource, prompt, response, contents, splitter, dock, sheet, palette)
   - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`, sized by the splitters' CSS variables
   - Resource templates' URIs in `uri-template.js` (RFC 6570); Pre-fill's test data in `prefill.js`
+- App builder: [public/apps/](mdc:public/apps/index.js)
+ - An app is a screen (components, among them HTML parts a model or a tool makes, or HTML) and a flow (rules: when, call, then); the state is `apps.js` (with the model the builder asks and the examples, `chatApp` and `dashboardApp`), the components are in `components/`: rail and start page (`rail.js`), header, the canvas (`canvas.js`) and its Inspector, the Outline's Screen, Flow and Try it (`try.js`), Preview (`preview.js`, the app as it is when launched, over the whole window), and the editors they share (`rule-editor.js`, `html-source.js`, `call-editor.js`, `model-picker.js`, `trace.js`)
+ - `runner.js` runs an app: its screen in a sandboxed frame (`frameRuntime`, `frameDocument`), its flow in the page, each call through `AppShell.runTool` with source `app`, and the agent loop: the tool calls in a model's answer, with source `reply`
+ - `flow.js` (triggers, templates, arguments, the JSON in an answer, problems, sentences), `graph.js` (the flow as ports and wires), `boxes.js` (what boxes and conversations show, the request a rule adds to its prompt, drawing answers), `agent.js` (what a model is told about your tools, the calls in its answer, the limit) and `screen.js` (components and parts to HTML) are pure but for `sanitizePart`; `ask.js` asks the model for HTML; `dml.js` reads and writes the DML an app downloads as, `zip.js` the zip, `store.js` keeps apps in IndexedDB `mcp_apps`
 
 ## Build System
 - `npm run build` builds every library: `npm run build:sdk` ([sdk-client/build.mjs](mdc:sdk-client/build.mjs), esbuild) and `npm run build:wasm` ([wasm-build.sh](mdc:wasm-build.sh), [Cargo.toml](mdc:Cargo.toml))
@@ -37,9 +41,10 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`
-- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, and resource template URIs against RFC 6570's examples
+- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs), [tests/apps.test.mjs](mdc:tests/apps.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, resource template URIs against RFC 6570's examples, and the app builder's DML, zips, flow, graph, parts, examples and agent loop
 - `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
 
 ## Naming
 - Say "MCP client library" (or "library") for the pluggable protocol implementation, and use `client` in code: `set_client`, `client_loaded`, `client_status`, `?client=`, `--client=`
-- The Chat app's agent loop says conversation (`conversationId`), model (`set_chat_model`, `messageField`, `conversationField`), context (`set_chat_context`) and instructions (`public/chat-instructions.js`). Its first version's names (engram, CBus tap, imprints, bootrom) only survive in the code that moves old stored data over
+- The agent loop says model (an MCP tool that answers, `Apps.model()`, with its `messageField` and `conversationField`), conversation (an output with `show: 'conversation'`, whose entries say who they're from), instructions and tools (a rule's `instructions` and `tools`), and reply (a tool call in a model's answer, a run with source `reply`). There is no Chat app any more, only the Chat example; the Chat app's names only survive in the code that removes its old stored data
+- The app builder says app, example (what Chat and Project pulse are), screen, component, element (anything with an id), part (HTML a model or a tool made, whose elements are `part.id`), flow, rule (`when`, `call`, `then`), trigger (one `when`), route (one `then`; as it's sent, if it works, if it fails), box (an output that says what it shows and what goes in it), the prompt (the call's field a model's prompt goes in, which a rule's instructions, tools and boxes add to) and the request (what the boxes add to it), and DML (the markup an app downloads as, `app.dml`). On the canvas: port, wire (one part of a rule), Start, Sent, transform (what a route shows), Library and Inspector. Try it is the Outline's running app (`app-try`); Preview is the app as it is when launched (`app-preview`, the view `preview`)

@@ -326,8 +326,9 @@ body.wb-resizing-rows * {
         min-width: 0;
     }
 
-    .wb-apps .chat-card {
+    .wb-apps {
         grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
     }
 
     .wb-dock-head {
@@ -1536,15 +1537,20 @@ wb-palette {
     background: var(--theme-error);
 }
 
-/* ---------- Apps ---------- */
+/* ---------- Apps (the builder's own styles are in apps/apps.css) ---------- */
 
 .wb-apps {
-    display: flex;
+    display: grid;
     flex: 1;
-    flex-direction: column;
-    gap: 12px;
+    grid-template-columns: clamp(180px, 16vw, 232px) minmax(0, 1fr);
     min-height: 0;
-    padding: 16px 24px;
+}
+
+.apps-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
     overflow: auto;
 }
 
@@ -1555,30 +1561,6 @@ wb-palette {
 .wb-apps-head p {
     max-width: 720px;
     margin-top: 2px;
-}
-
-.wb-apps .chat-card {
-    flex: 1;
-    grid-template-columns: minmax(0, 1fr) 360px;
-    height: auto;
-    min-height: 420px;
-}
-
-.chat-context {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 24px;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border-light);
-}
-
-.chat-context .panel-header {
-    margin-bottom: 0;
-}
-
-.chat-context .panel-subtitle {
-    margin: 0;
 }
 
 /* ---------- Beside the guide ---------- */
