@@ -1200,7 +1200,7 @@ app-inspector:empty {
 
 /* An app with several screens has a tab for each in its title bar, with the ● that goes there. */
 .app-screen-bar[data-tabbed] {
-    padding: 0 4px;
+    padding: 0 2px;
 }
 
 .app-screen-bar[data-tabbed] .app-screen-dots,
@@ -1208,11 +1208,11 @@ app-inspector:empty {
     display: none;
 }
 
+/* Narrow, so a phone-sized screen fits four names before they shorten. */
 .app-screen-tabs {
     display: flex;
     flex: 1;
     align-items: center;
-    gap: 2px;
     min-width: 0;
     height: 100%;
     overflow-x: auto;
@@ -1221,11 +1221,11 @@ app-inspector:empty {
 
 .app-screen-tab {
     flex: 0 1 auto;
-    gap: 5px;
-    min-width: 46px;
+    gap: 3px;
+    min-width: 40px;
     height: 22px;
     min-height: 22px;
-    padding: 0 5px 0 8px;
+    padding: 0 3px 0 5px;
     border-color: transparent;
     border-radius: var(--radius-200);
     background: transparent;
@@ -1255,11 +1255,12 @@ app-inspector:empty {
     text-overflow: ellipsis;
 }
 
-.app-port-screen {
+.app-screen-tab .app-port-screen {
     --port: var(--theme-text-primary);
     position: relative;
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
+    border-width: 1.5px;
 }
 
 .app-screen-body {
