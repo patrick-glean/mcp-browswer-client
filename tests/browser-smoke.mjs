@@ -544,11 +544,11 @@ async function main() {
         check('logs: the worker reports the client build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -613,8 +613,8 @@ async function main() {
         check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
         check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 7)', inspector.filtered);
-        check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 10)', inspector.filtered);
+        check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket, check_in, call_front_desk', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
@@ -638,7 +638,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 7 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 10 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
@@ -747,7 +747,7 @@ async function main() {
             return shown && model ? [examples, rail, model].join(' / ') : null;
         })()`, 10000);
         check('Apps: with no app yet, the page offers the examples and a blank app, the rail lists the examples, and the model is a chat tool it found',
-            start === 'Chat, Project pulse, New app / Chat agent loop | Project pulse dashboard / chat on modern server, asked in message', start);
+            start === 'Chat, Project pulse, Front desk, New app / Chat agent loop | Project pulse dashboard | Front desk screens / chat on modern server, asked in message', start);
         await page.run(`(() => {
             const tool = document.querySelector('#appsStart [data-model-tool]');
             tool.value = 'echo';
@@ -1338,6 +1338,131 @@ async function main() {
             const notJson = await frameWaitFor(`!document.body.dataset.before && document.getElementById('summary')?.dataset.state === 'error' ? document.getElementById('summary').textContent : null`);
             check('Apps: without the boxes\' request, the answer isn\'t JSON, and the boxes say so',
                 notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
+
+            // Front desk, under Examples: a visitor kiosk over four screens, which the canvas shows
+            // one at a time, each with a tab above it, calling the mock's front desk tools.
+            await page.run(`document.querySelector('apps-rail [data-example="frontdesk"]').click()`);
+            const tabs = `[...document.querySelectorAll('app-canvas [data-screen-tab]')]`;
+            const gutter = `[...document.querySelectorAll('app-canvas [data-gutter-row]')].map(row => row.dataset.gutterRow).join(' ')`;
+            const deskCanvas = `(() => {
+                const names = ${tabs}.map(tab => tab.textContent.trim() + (tab.getAttribute('aria-selected') === 'true' ? '*' : '')).join(', ');
+                return [names, ${gutter}, document.querySelectorAll('app-canvas .app-wire-elsewhere').length + ' wires end at another screen\\'s tab'].join(' / ');
+            })()`;
+            const deskOpened = 'Welcome*, Confirm, Checked in, Not found / title intro visitor host find / 8 wires end at another screen\'s tab';
+            const deskShown = await page.waitFor(`document.getElementById('appName')?.value === 'Front desk' && ${deskCanvas} === ${JSON.stringify(deskOpened)} ? 'shown' : null`, 10000)
+                && await page.run(deskCanvas);
+            const firstScreen = await frameWaitFor(`(() => {
+                const screens = [...document.querySelectorAll('[data-screen]')];
+                return screens.length === 4 ? screens.map(screen => screen.id + (screen.hidden ? '' : '*')).join(' ') : null;
+            })()`);
+            check("Apps: Front desk, under Examples, has four screens, each a tab on the canvas, and opens on the first; wires to the others' elements end at their tabs",
+                deskShown === deskOpened && firstScreen === 'welcome* confirm done notfound', `${deskShown || await page.run(deskCanvas)}; ${firstScreen}`);
+
+            // A tab shows its screen and picks it; a button that goes to a screen has a wire to its tab.
+            const showTab = id => page.run(`${tabs}.find(tab => tab.dataset.screenTab === ${JSON.stringify(id)}).click()`);
+            await showTab('confirm');
+            const confirmShown = await frameWaitFor(`!document.getElementById('confirm').hidden && document.getElementById('welcome').hidden ? 'confirm' : null`);
+            const confirmPicked = await page.waitFor(`(() => {
+                const title = document.querySelector('app-inspector .app-inspector-title')?.textContent;
+                const ways = [...document.querySelectorAll('app-inspector .app-connections')].at(-1)?.textContent.replace(/\\s+/g, ' ').trim();
+                return ${gutter} === 'title visit yes notme' && document.querySelector('app-canvas [data-go-wire="notme"]') && title === 'confirm' ? [${gutter}, ways].join(' / ') : null;
+            })()`, 5000);
+            check("Apps: a screen's tab shows it on the canvas and picks it, the Inspector says how people get there, and a button that goes to a screen has a wire to its tab",
+                confirmShown === 'confirm' && confirmPicked === 'title visit yes notme / ← When find_visit works', `${confirmShown}; ${confirmPicked}`);
+
+            // Dragging a button to a screen's tab makes it go there; its menu in the Inspector changes it.
+            await showTab('done');
+            await page.waitFor(`!!${port('el:next')}`, 5000);
+            await drag('el:next', 'el:confirm');
+            const goneTo = await page.waitFor(`document.querySelector('app-canvas [data-go-wire="next"]') ? document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            await page.run(`(() => {
+                const go = document.querySelector('app-inspector [data-inspect-prop="go"]');
+                go.value = 'start';
+                go.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const startsOver = await page.waitFor(`!document.querySelector('app-canvas [data-go-wire="next"]') && document.querySelector('app-canvas [data-gutter-row="next"] .app-gutter-label')?.textContent === 'next ⟲' ? 'next ⟲' : null`, 5000);
+            check("Apps: dragging a button to a screen's tab makes it go there, and its When clicked, goes to menu puts it back",
+                goneTo === "Connected: next goes to Confirm (confirm) when it's clicked." && startsOver === 'next ⟲', `${goneTo}; ${startsOver}`);
+
+            // The Library adds a screen after the others, and shows it; what's added then goes on it.
+            await fromLibrary('[data-library-item="component"][data-type="screen"]');
+            const screenAdded = await page.waitFor(`${tabs}.length === 5 && ${tabs}.at(-1).getAttribute('aria-selected') === 'true' ? ${tabs}.at(-1).dataset.screenTab + ': ' + document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            const emptyScreen = await frameWaitFor(`document.getElementById('screen5') && !document.getElementById('screen5').hidden ? document.getElementById('screen5').children.length + ' on it' : null`);
+            await fromLibrary('[data-library-item="component"][data-type="button"]');
+            const onIt = await frameWaitFor(`document.querySelector('#screen5 > button')?.id || null`);
+            await showTab('screen5');
+            await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'screen5'`, 5000);
+            const screenContents = await page.run(`document.querySelector('app-inspector .app-connections')?.textContent.replace(/\\s+/g, ' ').trim()`);
+            const remove = `document.querySelector('app-inspector [data-remove-component]')`;
+            await page.run(`${remove}.click()`);
+            const confirming = await page.run(`${remove}.textContent`);
+            await page.run(`${remove}.click()`);
+            const screensLeft = await page.waitFor(`${tabs}.length === 4 && !document.querySelector('app-canvas [data-gutter-row="button"]') ? ${tabs}.map(tab => tab.dataset.screenTab).join(' ') : null`, 5000);
+            check('Apps: the Library adds a screen after the others and shows it, a component added then goes on it, and deleting the screen, on a second click, takes that along',
+                screenAdded === "screen5: Added screen5. Add components to it from the Library, and wire a button or a tool's Answer to its ● to go there."
+                    && emptyScreen === '0 on it' && onIt === 'button' && screenContents === 'Button button: Button' && confirming === 'Click again to confirm' && screensLeft === 'welcome confirm done notfound',
+                `${screenAdded}; ${emptyScreen}; ${onIt}; ${screenContents}; ${confirming}; ${screensLeft}`);
+
+            // The Outline lists each screen with what's on it set in under it.
+            await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
+            const outlined = await page.waitFor(`(() => {
+                const rows = [...document.querySelectorAll('app-screen .app-component')];
+                const goes = document.querySelector('app-screen [data-component="notme"] [data-prop="go"]');
+                if (!rows.length || !goes) return null;
+                return [rows.filter(row => row.classList.contains('app-component-screen')).map(row => row.dataset.component).join(' '),
+                    rows.filter(row => row.classList.contains('app-component-on-screen')).length + ' set in', goes.selectedOptions[0]?.textContent].join(' / ');
+            })()`, 5000);
+            await page.run(`document.querySelector('app-header [data-app-view-choice="canvas"]').click()`);
+            check("Apps: the Outline lists each screen with what's on it set in under it, and a button's menu of where it goes",
+                outlined === 'welcome confirm done notfound / 12 set in / The “Welcome” screen', outlined);
+
+            // In Preview, at a tablet's width, as a visitor uses it.
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            await page.run(`document.querySelector('app-preview [data-device="tablet"]').click()`);
+            const showing = `[...document.querySelectorAll('[data-screen]')].find(screen => !screen.hidden)?.id`;
+            const barScreen = `document.querySelector('app-preview [data-preview-screen]')?.textContent`;
+            const tap = id => frameRun(`(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+            const findVisit = async name => {
+                await frameWaitFor(`document.readyState === 'complete' && ${showing} === 'welcome' && !document.getElementById('find').disabled`);
+                await frameRun(`(() => {
+                    document.getElementById('visitor').value = ${JSON.stringify(name)};
+                    document.getElementById('find').click();
+                    return true;
+                })()`);
+            };
+            await findVisit('ada');
+            const visit = await frameWaitFor(`${showing} === 'confirm' ? document.getElementById('visit').textContent : null`);
+            const onConfirm = await page.waitFor(`${barScreen} === 'Confirm' ? 'Confirm' : null`, 5000);
+            await tap('yes');
+            const badge = await frameWaitFor(`${showing} === 'done' ? document.getElementById('badge').textContent : null`);
+            const onDone = await page.waitFor(`${barScreen} === 'Checked in' ? 'Checked in' : null`, 5000);
+            const checkedIn = await page.waitFor(`${latestRun('check_in', 'app')}.then(run => run?.sentArgs?.visitor || null)`, 5000);
+            await frameRun(`(document.body.dataset.before = 'start over', true)`);
+            await tap('next');
+            const over = await frameWaitFor(`!document.body.dataset.before && ${showing} === 'welcome' ? 'Welcome, name ' + (document.getElementById('visitor').value || 'empty') : null`);
+            check('Apps: in Preview, Front desk finds the visit and goes to Confirm with it, Yes checks you in and goes to Checked in, and Done starts over',
+                visit === 'Ada Lovelace, Analytical Engines\nHere to see Grace Hopper at 10:00, in Babbage, 3rd floor' && onConfirm === 'Confirm'
+                    && /^Welcome, Ada\. Your badge is V-\d+\. Grace Hopper knows you're here and will meet you in the lobby, then take you to Babbage, 3rd floor\.$/.test(badge || '')
+                    && onDone === 'Checked in' && checkedIn === 'ada' && over === 'Welcome, name empty',
+                `${JSON.stringify(visit)}; ${onConfirm}; ${badge}; ${onDone}; ${checkedIn}; ${over}`);
+            await findVisit('Bob');
+            const notFound = await frameWaitFor(`${showing} === 'notfound' ? document.getElementById('missing').textContent : null`);
+            await tap('desk');
+            const helped = await frameWaitFor(`/on the way/.test(document.getElementById('missing').textContent) ? document.getElementById('missing').textContent : null`);
+            await tap('retry');
+            const retried = await frameWaitFor(`${showing} === 'welcome' ? 'Welcome, name ' + document.getElementById('visitor').value : null`);
+            await findVisit('Ada');
+            await frameWaitFor(`${showing} === 'confirm'`);
+            await tap('notme');
+            const notMe = await frameWaitFor(`${showing} === 'welcome' ? 'Welcome' : null`);
+            check("Apps: a visit it can't find goes to Not found with why, where the front desk can be called; Try again goes back with the name still typed, and Not me goes to Welcome",
+                notFound === "There's no visit today for “Bob”. Check the spelling, or call the front desk and someone will come and help."
+                    && helped === 'Someone from the front desk is on the way, Bob. Please take a seat.' && retried === 'Welcome, name Bob' && notMe === 'Welcome',
+                `${notFound}; ${helped}; ${retried}; ${notMe}`);
+            await page.run(`document.querySelector('app-preview [data-device="desktop"]').click()`);
+            await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
+            await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
             await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
-import { chatApp, dashboardApp, foundModel, readmeFor } from '../public/apps/apps.js';
+import { chatApp, dashboardApp, foundModel, frontDeskApp, readmeFor } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -16,8 +16,11 @@ import {
     answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, jsonIn, newRule, normalizeRule, renameInFlow,
     renderTemplate, routeSummary, rulesFor, templateValue, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
-import { canConnect, connect, disconnect, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
-import { componentsHtml, elementsOfComponents, freeId, htmlFromResult, newComponent, partElements, prefixIds, scopeCss } from '../public/apps/screen.js';
+import { canConnect, connect, disconnect, goPairOf, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
+import {
+    canMove, componentsHtml, elementsOfComponents, endOfScreen, freeId, goOptions, htmlFromResult, movedComponents, newComponent, partElements, prefixIds,
+    scopeCss, screenOfEach, screensOf, withNewScreen, withoutComponent,
+} from '../public/apps/screen.js';
 import { crc32, unzip, zip } from '../public/apps/zip.js';
 
 const MOCK = 'http://127.0.0.1:8081/';
@@ -764,4 +767,124 @@ test("a Sent wire is a route as it's sent: what the call sends goes to the scree
     assert.throws(() => connect(flow, `sent:${rule.id}`, `run:${rule.id}`, { kindOf }), /A tool's Sent goes to the screen/);
     assert.equal(routeSummary({ if: 'sent', show: '' }), 'nothing');
     assert.deepEqual(disconnect(flow, wiresOf(flow, ['conversation', 'message']).find(wire => wire.kind === 'sent' && wire.element === 'message'))[0].then.map(route => `${route.if} ${route.into}`), ['sent conversation', 'ok conversation']);
+});
+
+// Two screens under a title: First, with a text and a button that goes to Second; and Second,
+// with an output and buttons that go back and start over.
+function twoScreens() {
+    return [
+        { id: 'title', type: 'title', text: 'Steps' },
+        { id: 'first', type: 'screen', label: 'First' },
+        { id: 'hello', type: 'text', text: 'Hello' },
+        { id: 'next', type: 'button', label: 'Next', go: 'second' },
+        { id: 'second', type: 'screen', label: 'Second' },
+        { id: 'out', type: 'output', label: 'Out', placeholder: '' },
+        { id: 'back', type: 'button', label: 'Back', go: 'back' },
+        { id: 'again', type: 'button', label: 'Again', go: 'start' },
+    ];
+}
+
+test("an app's screens: what follows a Screen is on it, what's above the first on every one, and the HTML shows one at a time", () => {
+    const components = twoScreens();
+    assert.deepEqual(screensOf(components), [{ id: 'first', label: 'First' }, { id: 'second', label: 'Second' }]);
+    assert.deepEqual(Object.fromEntries(screenOfEach(components)), { title: null, first: 'first', hello: 'first', next: 'first', second: 'second', out: 'second', back: 'second', again: 'second' });
+    assert.deepEqual(elementsOfComponents(components).map(element => `${element.id} ${element.kind} ${element.screen}${element.go ? ` ${element.go}` : ''}`), [
+        'title static null', 'first screen first', 'hello static first', 'next button first second',
+        'second screen second', 'out output second', 'back button second back', 'again button second start',
+    ]);
+    const html = componentsHtml(components, { title: 'Steps' });
+    assert.match(html, /<main class="app">\n {4}<h1 id="title">Steps<\/h1>\n {4}<section id="first" class="screen" data-screen aria-label="First">\n {6}<p id="hello" class="text">Hello<\/p>\n {6}<button id="next" type="button" data-go="second">Next<\/button>\n {4}<\/section>\n {4}<section id="second" class="screen" data-screen aria-label="Second" hidden>/);
+    assert.match(html, /<button id="back" type="button" data-go="back">Back<\/button>\n {6}<button id="again" type="button" data-go="start">Again<\/button>\n {4}<\/section>\n {2}<\/main>/);
+    assert.doesNotMatch(componentsHtml(components.filter(component => component.type !== 'screen')), /<section id|data-screen/, 'without a Screen, an app is one screen');
+    assert.deepEqual(goOptions(components), {
+        '': 'Nowhere: it stays on this screen', first: 'The “First” screen', second: 'The “Second” screen', back: 'Back to the screen before', start: 'Start over: the first screen, as when the app opens',
+    });
+    assert.deepEqual(Object.keys(goOptions([])), ['', 'start'], 'one screen has none before it to go back to');
+});
+
+test('a screen moves with what is on it and is deleted with it; the first one added makes the app a screen too', () => {
+    const components = twoScreens();
+    const ids = list => list.map(component => component.id).join(' ');
+    assert.equal(ids(movedComponents(components, 'second', -1)), 'title second out back again first hello next');
+    assert.equal(ids(movedComponents(components, 'first', 1)), 'title second out back again first hello next');
+    assert.equal(ids(movedComponents(components, 'hello', -1)), 'title hello first next second out back again', 'above its screen, a component is on every one');
+    assert.equal(ids(movedComponents(components, 'out', -1)), 'title first hello next out second back again', 'or at the end of the screen before');
+    assert.deepEqual(['first:-1', 'second:1', 'title:-1', 'again:1', 'first:1'].map(move => canMove(components, move.split(':')[0], Number(move.split(':')[1]))), [false, false, false, false, true]);
+    const without = withoutComponent(components, 'second');
+    assert.equal(ids(without), 'title first hello next');
+    assert.equal(without.find(component => component.id === 'next').go, undefined, 'a button that went there goes nowhere');
+    assert.equal(ids(withoutComponent(components, 'out')), 'title first hello next second back again');
+    assert.deepEqual([endOfScreen(components, 'first'), endOfScreen(components, 'second'), endOfScreen(components, null)], [4, 8, 8]);
+
+    const { components: two, added } = withNewScreen([{ id: 'title', type: 'title', text: 'T' }, { id: 'input', type: 'textbox' }, { id: 'run', type: 'button' }]);
+    assert.equal(ids(two), 'title screen1 input run screen2');
+    assert.deepEqual([added.id, added.label, two[1].label], ['screen2', 'Screen 2', 'Screen 1']);
+    assert.equal(ids(withNewScreen(two).components), 'title screen1 input run screen2 screen3');
+    assert.equal(ids(withNewScreen([{ id: 'title', type: 'title', text: 'T' }]).components), 'title screen1', 'with nothing to put on a first screen, it is the first');
+});
+
+test("screens travel in the DML as <screen>s inside the app's <screen>, with where buttons go, and broken ones say what's wrong", () => {
+    const app = { id: 'app-steps', name: 'Steps', description: '', version: 0, screen: { kind: 'components', components: twoScreens() }, flow: [] };
+    const dml = toDml(app);
+    assert.match(dml, /<screen src="index\.html" built-from="components">\n {4}<title id="title">Steps<\/title>\n {4}<screen id="first" label="First">\n {6}<text id="hello">Hello<\/text>\n {6}<button id="next" label="Next" go="second"\/>\n {4}<\/screen>\n {4}<screen id="second" label="Second">/);
+    assert.match(dml, /<button id="back" label="Back" go="back"\/>\n {6}<button id="again" label="Again" go="start"\/>\n {4}<\/screen>\n {2}<\/screen>/);
+    assert.deepEqual(fromDml(dml).app.screen.components, twoScreens());
+    const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
+    assert.throws(broken('go="second"', 'go="third"'), /go="third" isn't one of this app's screens, back or start\./);
+    assert.throws(broken('    </screen>\n  </screen>', '    </screen>\n    <text id="late">Late</text>\n  </screen>'), /<text> comes after a <screen>: put it in one, or above the first <screen> to show it on every screen\./);
+    assert.throws(broken('<text id="hello">Hello</text>', '<screen id="inner" label="Inner"/>'), /A <screen> can't hold another: put it after this one\./);
+    assert.throws(broken('<text id="hello">', '<text id="second">'), /Two components are second; each needs its own id\./);
+});
+
+test("a route into a screen goes there, and a screen connects to a button, which then goes there, or to a tool's Sent, Answer or Error", () => {
+    const kinds = { next: 'button', out: 'output', second: 'screen', q: 'input' };
+    const kindOf = id => kinds[id] || 'static';
+    const rule = newRule({ element: 'next', serverUrl: MOCK, toolName: 'echo', args: { text: '{{q}}' }, into: null });
+    assert.deepEqual([goPairOf('el:next', 'el:second', { kindOf }), goPairOf('el:second', 'el:next', { kindOf })], [{ button: 'next', screen: 'second' }, { button: 'next', screen: 'second' }]);
+    assert.equal(goPairOf('el:out', 'el:second', { kindOf }), null);
+    assert.deepEqual(['el:next', 'el:out', `ok:${rule.id}`, `sent:${rule.id}`, `run:${rule.id}`, `arg:${rule.id}:text`].map(port => canConnect(port, 'el:second', { kindOf })), [true, false, true, true, false, false]);
+    assert.equal(canConnect('el:next', 'el:out', { kindOf }), false, 'other elements still connect through a tool');
+    let { flow, made } = connect([rule], `ok:${rule.id}`, 'el:second', { kindOf, defaultShow: () => '{{json.second}}' });
+    assert.equal(made.kind, 'route');
+    assert.deepEqual(flow[0].then, [{ if: 'ok', show: '', into: 'second', how: 'replace' }], 'a route to a screen shows nothing');
+    ({ flow } = connect(flow, 'el:second', `err:${rule.id}`, { kindOf }));
+    assert.throws(() => connect(flow, 'el:out', 'el:second', { kindOf }), /A screen connects to a button, which then goes there/);
+    assert.throws(() => connect(flow, 'el:second', `run:${rule.id}`, { kindOf }), /A screen doesn't start a tool or fill a field/);
+    assert.equal(describeRule(flow[0], { isScreen: id => kinds[id] === 'screen' }),
+        'When next is clicked, call echo on http://127.0.0.1:8081/ with text = {{q}}; if it works, go to second; if it fails, go to second.');
+});
+
+test('the Front desk example: four screens under its title, and three rules on the tools of the server that has them, with no model', () => {
+    const servers = { [MOCK]: { url: MOCK, alias: 'Mock', status: 'connected', tools: ['find_visit', 'check_in', 'call_front_desk'].map(name => ({ name })) } };
+    const app = frontDeskApp({ shell: { servers }, name: 'Front desk' });
+    const components = app.screen.components;
+    assert.deepEqual(screensOf(components).map(screen => `${screen.id} ${screen.label}`), ['welcome Welcome', 'confirm Confirm', 'done Checked in', 'notfound Not found']);
+    const elements = elementsOfComponents(components);
+    const on = screen => elements.filter(element => element.screen === screen && element.kind !== 'screen').map(element => element.id + (element.go ? ` → ${element.go}` : ''));
+    assert.deepEqual([null, 'welcome', 'confirm', 'done', 'notfound'].map(on), [
+        ['title'], ['intro', 'visitor', 'host', 'find'], ['visit', 'yes', 'notme → welcome'], ['badge', 'next → start'], ['missing', 'retry → back', 'desk'],
+    ]);
+    assert.deepEqual(app.flow.map(rule => [rule.call.serverUrl, rule.call.toolName, rule.prompt]), [[MOCK, 'find_visit', undefined], [MOCK, 'check_in', undefined], [MOCK, 'call_front_desk', undefined]], 'no rule asks a model');
+    assert.deepEqual(flowProblems(app.flow, { elements, servers }).map(([, problems]) => problems), [[], [], []]);
+    const isScreen = id => elements.some(element => element.id === id && element.kind === 'screen');
+    const [find, checkIn] = app.flow;
+    assert.equal(describeRule(find, { isScreen, serverName: () => 'Mock' }),
+        'When find is clicked or visitor gets Enter or host gets Enter, call find_visit on Mock with visitor = {{visitor}}, host = {{host}}; '
+        + 'if it works, put “{{structured.visitor}}, {{structured.company}}\nHere to see {{structured.host}} at {{structured.time}}, in {{structured.room}}” into visit; '
+        + 'if it works, go to confirm; if it fails, put {{error}} into missing; if it fails, go to notfound.');
+    assert.equal(describeRule(checkIn, { isScreen, serverName: () => 'Mock' }),
+        'When yes is clicked, call check_in on Mock with visitor = {{visitor}}, host = {{host}}; if it works, put {{text}} into badge; if it works, go to done; if it fails, put {{error}} into visit.');
+    assert.deepEqual(wiresOf(app.flow, elements.map(element => element.id)).filter(wire => isScreen(wire.element)).map(wire => `${wire.kind} ${wire.to}`), ['answer el:confirm', 'error el:notfound', 'answer el:done']);
+    const readme = readmeFor(app, { serverName: () => 'Mock server' });
+    assert.match(readme, /\n## The screens\n\nIt has 4 screens, one showing at a time; Front desk \(`title`\), above the first, shows on every one\./);
+    assert.match(readme, /\n2\. `confirm`: Is this you\? \(`visit`\), Yes, check me in \(`yes`\) and Not me \(`notme`\)\. Clicking Not me \(`notme`\) goes to `welcome`\.\n/);
+    assert.match(readme, /\n4\. Not found \(`notfound`\): .*\. Clicking Try again \(`retry`\) goes back to the screen before\.\n/);
+    assert.match(readme, /; if it works, go to Checked in \(`done`\);/);
+    const dml = toDml(app);
+    assert.equal(toDml(fromDml(dml).app), dml);
+    assert.equal(app.serverNames, undefined);
+
+    const alone = frontDeskApp({ shell: { servers: {} }, name: 'Front desk' });
+    assert.deepEqual([...new Set(alone.flow.map(rule => rule.call.serverUrl))], ['http://127.0.0.1:8081']);
+    assert.deepEqual(alone.serverNames, { 'http://127.0.0.1:8081': 'Mock server' }, 'without the tools, its rules call the mock server, which they offer to add');
 });
