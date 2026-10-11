@@ -166,8 +166,100 @@ TOOLS = [
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
+    {
+        # A front desk's tools, for the Front desk example: today's visits, a check-in that prints
+        # a badge and tells the host, and a call for someone to come and help.
+        "name": "find_visit",
+        "title": "Find a visit",
+        "description": "Finds today's visit for someone at the front desk, by their name and, if they say, who they're here to see. Fails, saying why, when there's no visit or more than one.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "visitor": {"type": "string", "description": "The visitor's name, or part of it, as they typed it.", "examples": ["Ada Lovelace"]},
+                "host": {"type": "string", "description": "Who they're here to see, if they said."},
+            },
+            "required": ["visitor"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "visitor": {"type": "string", "description": "The visitor's full name."},
+                "company": {"type": "string", "description": "Where they're from."},
+                "host": {"type": "string", "description": "Who they're here to see."},
+                "time": {"type": "string", "description": "When, as HH:MM."},
+                "room": {"type": "string", "description": "Where they'll meet."},
+            },
+            "required": ["visitor", "company", "host", "time", "room"],
+        },
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "check_in",
+        "title": "Check in",
+        "description": "Checks a visitor in for today's visit, found as find_visit finds it: prints their badge and tells their host they're here.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "visitor": {"type": "string", "description": "The visitor's name, as they typed it for find_visit.", "examples": ["Ada Lovelace"]},
+                "host": {"type": "string", "description": "Who they're here to see, if they said."},
+            },
+            "required": ["visitor"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "badge": {"type": "string", "description": "The badge printed for them."},
+                "visitor": {"type": "string", "description": "The visitor's full name."},
+                "host": {"type": "string", "description": "Who was told they're here."},
+                "room": {"type": "string", "description": "Where they'll meet."},
+            },
+            "required": ["badge", "visitor", "host", "room"],
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "call_front_desk",
+        "title": "Call the front desk",
+        "description": "Asks someone at the front desk to come and help a visitor.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "visitor": {"type": "string", "description": "Who needs help, if they said."},
+                "reason": {"type": "string", "description": "What they need, in a few words."},
+            },
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
 ]
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
+
+# Today's visits, as the front desk's tools know them.
+VISITS = [
+    {"visitor": "Ada Lovelace", "company": "Analytical Engines", "host": "Grace Hopper", "time": "10:00", "room": "Babbage, 3rd floor"},
+    {"visitor": "Alan Turing", "company": "Bletchley Labs", "host": "Dana Lee", "time": "11:30", "room": "Enigma, 2nd floor"},
+    {"visitor": "Katherine Johnson", "company": "Langley Research", "host": "Dana Lee", "time": "14:00", "room": "Orbit, 5th floor"},
+    {"visitor": "Alan Kay", "company": "Learning Research", "host": "Grace Hopper", "time": "15:30", "room": "Dynabook, 4th floor"},
+]
+
+
+def name_matches(typed, name):
+    """Whether what someone typed names this person: each word starts one of the name's words."""
+    words = name.casefold().split()
+    return all(any(word.startswith(part) for word in words) for part in typed.casefold().split())
+
+
+def find_visit(visitor, host=""):
+    """Today's visit for a visitor, as (visit, None), or (None, why there's none)."""
+    visitor, host = " ".join(str(visitor or "").split()), " ".join(str(host or "").split())
+    if not visitor:
+        return None, "Type your name first, as it is on your invitation."
+    found = [visit for visit in VISITS if name_matches(visitor, visit["visitor"]) and (not host or name_matches(host, visit["host"]))]
+    if len(found) > 1:
+        return None, f"More than one visit today is for “{visitor}”. Type your full name, or who you're here to see."
+    if not found:
+        seeing = f" to see “{host}”" if host else ""
+        return None, f"There's no visit today for “{visitor}”{seeing}. Check the spelling, or call the front desk and someone will come and help."
+    return found[0], None
 # x-mcp-header arrived with 2026-07-28, so the legacy face of the server doesn't offer those tools.
 LEGACY_TOOLS = [TOOLS_BY_NAME["echo"], TOOLS_BY_NAME["count"]]
 
@@ -754,6 +846,23 @@ class Handler(BaseHTTPRequestHandler):
                 text_content("Here is the screen."),
                 {"type": "resource", "resource": {"uri": "mock://screen.html", "mimeType": "text/html", "text": page}},
             ]})
+        elif name in ("find_visit", "check_in"):
+            visit, why = find_visit(args.get("visitor"), args.get("host"))
+            if not visit:
+                return self.respond(request_id, {**result, "content": [text_content(why)], "isError": True})
+            if name == "find_visit":
+                text = f"{visit['visitor']} of {visit['company']} is here to see {visit['host']} at {visit['time']}, in {visit['room']}."
+                return self.respond(request_id, {**result, "content": [text_content(text)], "structuredContent": visit})
+            with self.server.lock:
+                self.server.badges += 1
+                badge = f"V-{self.server.badges}"
+            first = visit["visitor"].split()[0]
+            text = f"Welcome, {first}. Your badge is {badge}. {visit['host']} knows you're here and will meet you in the lobby, then take you to {visit['room']}."
+            structured = {"badge": badge, "visitor": visit["visitor"], "host": visit["host"], "room": visit["room"]}
+            return self.respond(request_id, {**result, "content": [text_content(text)], "structuredContent": structured})
+        elif name == "call_front_desk":
+            visitor = " ".join(str(args.get("visitor") or "").split())
+            text = f"Someone from the front desk is on the way{f', {visitor}' if visitor else ''}. Please take a seat."
         else:
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")
@@ -1048,6 +1157,7 @@ def main():
     server.oauth_clients, server.oauth_codes, server.oauth_access, server.oauth_refresh = {}, {}, {}, {}
     server.sessions = {}
     server.tickets = 0
+    server.badges = 1000
     server.lock = threading.Lock()
     url = f"http://{args.host}:{args.port}"
     features = [args.mode] + (["SSE replies"] if args.sse else []) + (["bearer token required"] if args.token else [])
