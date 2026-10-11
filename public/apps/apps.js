@@ -21,9 +21,9 @@ import { conversationFieldOf } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
-import { answerOf, callArguments, describeRule, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
+import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
-import { componentsHtml, elementsOf, htmlFromResult, newComponent, sanitizePart, screenHtml } from './screen.js';
+import { componentsHtml, elementsOf, htmlFromResult, movedComponents, newComponent, sanitizePart, screenHtml, withNewScreen, withoutComponent } from './screen.js';
 import * as store from './store.js';
 import { unzip, zip } from './zip.js';
 
@@ -197,7 +197,17 @@ export function readmeFor(app, { serverName = url => url } = {}) {
         return label && label.toLowerCase() !== id.toLowerCase() ? `${label} (\`${id}\`)` : `\`${id}\``;
     };
     const servers = serversOf(app);
-    const rules = (app.flow || []).map((rule, index) => `${index + 1}. ${describeRule(rule, { elementName, serverName })}`);
+    const isScreen = id => elements.get(id)?.kind === 'screen';
+    const rules = (app.flow || []).map((rule, index) => `${index + 1}. ${describeRule(rule, { elementName, serverName, isScreen })}`);
+    const screens = [...elements.values()].filter(element => element.kind === 'screen');
+    const own = screen => [...elements.values()].filter(element => element.screen === screen && element.kind !== 'screen' && !element.part);
+    const goes = element => (element.go === 'back' ? 'goes back to the screen before' : element.go === 'start' ? 'starts the app over' : `goes to ${elementName(element.go)}`);
+    const screenLines = screens.map((screen, index) => {
+        const on = own(screen.id);
+        const clicks = on.filter(element => element.go).map(element => `clicking ${elementName(element.id)} ${goes(element)}`).join('; ');
+        return `${index + 1}. ${elementName(screen.id)}${index ? '' : ', where the app opens'}: ${on.length ? listed(on.map(element => elementName(element.id))) : 'nothing yet'}.${clicks ? ` ${clicks[0].toUpperCase()}${clicks.slice(1)}.` : ''}`;
+    });
+    const shared = own(null);
     const parts = (app.screen?.components || []).filter(component => component.type === 'part');
     const made = part => (part.ask ? `made by a model asked for "${part.ask}"` : part.from ? `made by a call to \`${part.from.toolName}\` on ${serverName(part.from.serverUrl)}` : 'written as HTML');
     const boxes = [...elements.values()].filter(isBox).map(box => `- \`${box.id}\`, ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}: ${box.about || box.label}`);
@@ -215,7 +225,13 @@ An app built in MCP Browser Client${app.version ? `, version ${app.version}` : '
 - \`index.html\`: the screen, what people see. ${app.screen?.kind === 'html' ? (app.screen.from ? `A call to \`${app.screen.from.toolName}\` on ${serverName(app.screen.from.serverUrl)} made it.` : 'It was written as HTML.') : 'It was built from components, which app.dml lists.'}
 - \`app.dml\`: the screen's components and the flow, what happens when people use it, as markup.${parts.map(part => `\n- \`${partFile(part.id)}\`: the part \`${part.id}\`, ${made(part)}. On the screen its ids start with \`${part.id}.\`.`).join('')}
 
-## The flow
+${screens.length ? `## The screens
+
+It has ${screens.length} screens, one showing at a time${shared.length ? `; ${listed(shared.map(element => elementName(element.id)))}, above the first, ${shared.length === 1 ? 'shows' : 'show'} on every one` : ''}. A button that goes somewhere takes people there when it's clicked, and a rule that goes to a screen does when its tool answers. What's typed on one screen is still there on the next.
+
+${screenLines.join('\n')}
+
+` : ''}## The flow
 
 ${rules.length ? rules.join('\n') : 'No rules yet.'}
 
@@ -453,11 +469,35 @@ export class Apps {
         return wire;
     }
 
-    // Changes a component's id, taking the flow's references with it.
+    // A component a place up (-1) or down (1); a screen moves with what's on it (screen.js).
+    moveComponent(id, step, { by = null } = {}) {
+        this.change(app => { app.screen.components = movedComponents(app.screen.components, id, step); }, { part: 'screen', by });
+    }
+
+    // Deletes a component; a screen goes with what's on it, and buttons that went to it go nowhere.
+    removeComponent(id, { by = null } = {}) {
+        this.change(app => { app.screen.components = withoutComponent(app.screen.components, id); }, { part: 'screen', by });
+    }
+
+    // Adds a screen after the others (screen.js withNewScreen) and returns it.
+    addScreen({ by = null } = {}) {
+        let added = null;
+        this.change(app => {
+            const next = withNewScreen(app.screen.components);
+            app.screen.components = next.components;
+            added = next.added;
+        }, { part: 'screen', by });
+        return added;
+    }
+
+    // Changes a component's id, taking the flow's references with it, and the buttons that go to it
+    // when it's a screen.
     renameElement(from, to) {
         this.change(app => {
-            const component = app.screen.components.find(candidate => candidate.id === from);
-            if (component) component.id = to;
+            for (const component of app.screen.components) {
+                if (component.id === from) component.id = to;
+                else if (component.go === from) component.go = to;
+            }
             app.flow = renameInFlow(app.flow, from, to);
         }, { part: 'screen' });
         this.emit('app', { part: 'flow' });

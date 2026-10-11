@@ -21,6 +21,9 @@
 // goes in it; its rule asks for it in the <arg role="prompt">, and takes it as {{json.<id>}}.
 // That prompt also gets the rule's <instructions> and, with tools="yes" on its <when>, the tools
 // its model may call; a <then if="sent"> runs as the call is sent, before there's an answer.
+// An app with several screens has a <screen id label> inside <screen> for each, holding its
+// components (those above the first are on every screen); a <button go="…"> goes to one, back or
+// start, and a <then into="…"> naming one goes there.
 //   </app>
 //
 // It's XML, read and written here without a DOM, so the worker and Node can use it too.
@@ -97,7 +100,7 @@ function componentNode(component, { standalone }) {
                 width,
             }];
         case 'button':
-            return ['button', { id, label: component.label ?? '', width }];
+            return ['button', { id, label: component.label ?? '', go: orUndefined(component.go), width }];
         case 'output': {
             const show = BOX_KINDS[component.show] && component.show !== 'text' ? component.show : undefined;
             const about = String(component.about ?? '').trim();
@@ -111,6 +114,22 @@ function componentNode(component, { standalone }) {
         default:
             return [type, { id }];
     }
+}
+
+// Components as markup: those above the first Screen, which are on every screen, then each screen
+// holding its own.
+function componentNodes(components, { standalone }) {
+    const nodes = [];
+    let group = null;
+    for (const component of components) {
+        if (component.type === 'screen') {
+            group = ['screen', { id: component.id, label: component.label ?? '' }];
+            nodes.push(group);
+        } else {
+            (group || nodes).push(componentNode(component, { standalone }));
+        }
+    }
+    return nodes;
 }
 
 // Every server the app calls, for people reading it and for importing it somewhere new.
@@ -136,7 +155,7 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
             ...(screen.ask ? [['ask', {}, screen.ask]] : []),
             ...(screen.from ? [callNode('from', screen.from)] : []),
             ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
-        : ['screen', { src, 'built-from': 'components', size }, ...(screen.components || []).map(component => componentNode(component, { standalone }))];
+        : ['screen', { src, 'built-from': 'components', size }, ...componentNodes(screen.components || [], { standalone })];
     const servers = serversOf(app);
     const triggerAttributes = candidate => (candidate
         ? { element: candidate.event === 'open' ? undefined : candidate.element, event: candidate.event }
@@ -341,12 +360,20 @@ export function fromDml(source, { files = {} } = {}) {
     if (screenNode.attrs['built-from'] === 'components') {
         const components = [];
         const ids = new Set();
-        for (const node of elementsIn(screenNode)) {
-            if (!COMPONENT_TYPES[node.name]) fail(node, `<${node.name}> isn't a component; a screen has ${Object.keys(COMPONENT_TYPES).map(type => `<${type}>`).join(', ')}.`);
+        // Each button that goes somewhere, checked once every screen is read.
+        const goes = [];
+        const takeId = node => {
             const id = node.attrs.id;
             if (!id) fail(node, `<${node.name}> needs id="…", the name the flow uses for it.`);
             if (ids.has(id)) fail(node, `Two components are ${id}; each needs its own id.`);
             ids.add(id);
+            return id;
+        };
+        const readComponent = node => {
+            if (!COMPONENT_TYPES[node.name] || node.name === 'screen') {
+                fail(node, `<${node.name}> isn't a component; a screen has ${Object.keys(COMPONENT_TYPES).filter(type => type !== 'screen').map(type => `<${type}>`).join(', ')}.`);
+            }
+            const id = takeId(node);
             const attr = name => node.attrs[name] ?? '';
             const component = { id, type: node.name };
             if (node.attrs.width !== undefined) {
@@ -355,7 +382,13 @@ export function fromDml(source, { files = {} } = {}) {
             }
             if (node.name === 'title' || node.name === 'text') component.text = textIn(node);
             if (node.name === 'textbox') Object.assign(component, { label: attr('label'), placeholder: attr('placeholder'), lines: Math.max(1, Number(node.attrs.lines) || 1), value: attr('value') });
-            if (node.name === 'button') component.label = attr('label');
+            if (node.name === 'button') {
+                component.label = attr('label');
+                if (node.attrs.go) {
+                    component.go = node.attrs.go;
+                    goes.push([node, node.attrs.go]);
+                }
+            }
             if (node.name === 'output') {
                 Object.assign(component, { label: attr('label'), placeholder: attr('placeholder') });
                 const { show } = node.attrs;
@@ -378,6 +411,25 @@ export function fromDml(source, { files = {} } = {}) {
                 });
             }
             components.push(component);
+        };
+        // A <screen> inside holds one of the app's screens; what's above the first is on every one.
+        let screens = 0;
+        for (const node of elementsIn(screenNode)) {
+            if (node.name !== 'screen') {
+                if (screens) fail(node, `<${node.name}> comes after a <screen>: put it in one, or above the first <screen> to show it on every screen.`);
+                readComponent(node);
+                continue;
+            }
+            components.push({ id: takeId(node), type: 'screen', label: node.attrs.label ?? '' });
+            screens++;
+            for (const child of elementsIn(node)) {
+                if (child.name === 'screen') fail(child, "A <screen> can't hold another: put it after this one.");
+                readComponent(child);
+            }
+        }
+        const screenIds = new Set(components.filter(component => component.type === 'screen').map(component => component.id));
+        for (const [node, go] of goes) {
+            if (go !== 'back' && go !== 'start' && !screenIds.has(go)) fail(node, `go="${go}" isn't one of this app's screens, back or start.`);
         }
         screen = { kind: 'components', components };
     } else {

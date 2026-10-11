@@ -6,8 +6,11 @@
 //   sent      the tool's Sent to an element                    a route of rule.then, as it's sent
 //   answer    the tool's Answer to an element                  a route of rule.then, if it works
 //   error     the tool's Error to an element                   a route of rule.then, if it fails
+// A route to one of the app's screens goes there. One more wire isn't part of the flow: a button to
+// a screen is where the button goes (its `go`), set with goPairOf.
 // Ports are strings: 'start', 'el:<id>', 'run:<rule>', 'arg:<rule>:<field>', 'sent:<rule>',
-// 'ok:<rule>', 'err:<rule>'. Pure functions, so the tests can check them without a page.
+// 'ok:<rule>', 'err:<rule>'; a screen's is 'el:<id>' too. Pure functions, so the tests can check
+// them without a page.
 
 import { variablesIn } from '../workbench/template.js';
 import { defaultEvent, DEFAULT_SHOW, FlowError, routeWhen, trigger, triggersOf } from './flow.js';
@@ -29,10 +32,34 @@ const PHASE_OF = { sent: 'sent', ok: 'ok', err: 'error' };
 const PAIRS = new Set(['el+run', 'run+start', 'arg+el', 'el+sent', 'el+ok', 'el+err']);
 const pairOf = (a, b) => [parsePort(a).kind, parsePort(b).kind].sort().join('+');
 
-export const canConnect = (a, b) => a !== b && PAIRS.has(pairOf(a, b));
+// The kinds of the elements two ports are on (`kindOf(id)`), for those that are elements.
+const elementKinds = (a, b, kindOf) => [a, b].map(parsePort).filter(port => port.kind === 'el').map(port => kindOf(port.element));
+
+// A button and a screen: where the button goes. { button, screen } or null.
+export function goPairOf(a, b, { kindOf = () => 'static' } = {}) {
+    const ports = [parsePort(a), parsePort(b)];
+    if (a === b || ports.some(port => port.kind !== 'el')) return null;
+    const button = ports.find(port => kindOf(port.element) === 'button')?.element;
+    const screen = ports.find(port => kindOf(port.element) === 'screen')?.element;
+    return button && screen ? { button, screen } : null;
+}
+
+// Whether two ports join. A screen takes a tool's Sent, Answer or Error (going there) and a button
+// (where the button goes); it doesn't start a tool or fill a field.
+export function canConnect(a, b, { kindOf = () => 'static' } = {}) {
+    if (a === b) return false;
+    const pair = pairOf(a, b);
+    if (pair === 'el+el') return !!goPairOf(a, b, { kindOf });
+    if (elementKinds(a, b, kindOf).includes('screen') && (pair === 'el+run' || pair === 'arg+el')) return false;
+    return PAIRS.has(pair);
+}
 
 // What to say when two ports don't join.
-function whyNot(pair) {
+function whyNot(pair, kinds = []) {
+    if (kinds.includes('screen')) {
+        if (pair === 'el+el') return "A screen connects to a button, which then goes there, or to a tool's Answer, Error or Sent.";
+        return "A screen doesn't start a tool or fill a field: wire a button on it, or a tool's Answer to the screen to go there.";
+    }
     if (pair === 'el+el') return "Two parts of the screen don't connect to each other: connect them through a tool.";
     if (pair.includes('start')) return "Start connects to a tool's Run: that tool is called when the app opens.";
     if (pair === 'ok+run' || pair === 'err+run' || pair === 'arg+ok' || pair === 'arg+err') return "A tool's answer can't start another tool yet; send it to the screen.";
@@ -75,7 +102,7 @@ export function wiresOf(flow, elementIds = []) {
 // Throws a FlowError saying why when the ports don't join.
 export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () => null } = {}) {
     const pair = pairOf(a, b);
-    if (a === b || !PAIRS.has(pair)) throw new FlowError(whyNot(pair));
+    if (pair === 'el+el' || !canConnect(a, b, { kindOf })) throw new FlowError(whyNot(pair, elementKinds(a, b, kindOf)));
     const ports = [parsePort(a), parsePort(b)];
     const port = kind => ports.find(candidate => candidate.kind === kind);
     const { ruleId } = port('run') || port('arg') || port('sent') || port('ok') || port('err');
@@ -99,7 +126,7 @@ export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () 
         const then = rule.then || [];
         const index = then.findIndex(route => routeWhen(route) === phase && route.into === element);
         made = index >= 0 ? { kind: 'already', ruleId } : { kind: 'route', ruleId, index: then.length };
-        const show = defaultShow({ element, phase, rule }) ?? DEFAULT_SHOW[phase];
+        const show = kindOf(element) === 'screen' ? '' : defaultShow({ element, phase, rule }) ?? DEFAULT_SHOW[phase];
         const route = { if: phase, show, into: element, how: 'replace' };
         return index >= 0 ? rule : { ...rule, then: [...then, route] };
     });

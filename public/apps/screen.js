@@ -10,6 +10,12 @@
 // dashboard, kept without its scripts. On the screen its ids get the part's id in front (`refresh` in the part
 // `dashboard` is `dashboard.refresh`) and its styles reach only inside it, so parts can't clash;
 // the flow takes over its buttons and fields by those ids.
+//
+// Components can make several screens: a Screen ({ type: 'screen', label }) starts one, and the
+// components after it, up to the next, are on it. Those above the first Screen are on every screen,
+// as a header is. The app opens on the first; a button that says where it goes (`go`: a screen's
+// id, 'back' or 'start') takes people there, and so does a rule's route into a screen. All screens
+// are one document, so what's typed on one is still there on the next.
 
 import { escapeHtml } from '../workbench/util.js';
 import { BOX_KINDS, WIDTHS } from './boxes.js';
@@ -24,22 +30,120 @@ export const COMPONENT_TYPES = {
     button: { label: 'Button', kind: 'button', base: 'button' },
     output: { label: 'Output', kind: 'output', base: 'output' },
     part: { label: 'HTML part', kind: 'output', base: 'part' },
+    screen: { label: 'Screen', kind: 'screen', base: 'screen' },
 };
 
-export const ELEMENT_KINDS = { button: 'Button', input: 'Field', output: 'Output', static: 'Text' };
+export const ELEMENT_KINDS = { button: 'Button', input: 'Field', output: 'Output', static: 'Text', screen: 'Screen' };
 
 const WIDTH_PROP = ['width', 'Width', 'select', WIDTHS];
 const SHOW_OPTIONS = Object.fromEntries(Object.entries(BOX_KINDS).map(([kind, { label }]) => [kind, label]));
 
-// What each component lets you set, in order: [prop, label, kind of field, options of a select].
-// An output's `show` and `about` make it a box: what it shows, and what goes in it, in words.
+// An app's screens, in order: [{ id, label }]. An app without a Screen component is one screen.
+export const screensOf = (components = []) => components.filter(component => component.type === 'screen')
+    .map(component => ({ id: component.id, label: componentName(component) }));
+
+// Which screen each component is on: Map<id, screen id>, null for those above the first Screen,
+// which are on every screen. A Screen is on itself.
+export function screenOfEach(components = []) {
+    const of = new Map();
+    let screen = null;
+    for (const component of components) {
+        if (component.type === 'screen') screen = component.id;
+        of.set(component.id, screen);
+    }
+    return of;
+}
+
+// Each screen's place in the components: its Screen at `start`, its own up to `end`.
+function screenSpans(components) {
+    const starts = components.flatMap((component, index) => (component.type === 'screen' ? [index] : []));
+    return starts.map((start, n) => ({ id: components[start].id, start, end: starts[n + 1] ?? components.length }));
+}
+
+// Where a component added to a screen goes: after its last one. Without that screen, at the end.
+export function endOfScreen(components, screenId) {
+    return screenSpans(components).find(span => span.id === screenId)?.end ?? components.length;
+}
+
+// A new Screen, numbered after the app's others: screen2, "Screen 2".
+function nextScreen(components) {
+    const ids = components.map(component => component.id);
+    let n = screensOf(components).length + 1;
+    while (ids.includes(`screen${n}`)) n++;
+    return newComponent('screen', ids, { id: `screen${n}`, label: `Screen ${n}` });
+}
+
+// The components with a screen added at the end: { components, added }. An app's first makes what
+// it had a screen too, all but a title on top, which is then on every screen.
+export function withNewScreen(components = []) {
+    const list = [...components];
+    if (!screensOf(list).length) {
+        const at = list[0]?.type === 'title' ? 1 : 0;
+        if (list.length > at) list.splice(at, 0, nextScreen(list));
+    }
+    const added = nextScreen(list);
+    list.push(added);
+    return { components: list, added };
+}
+
+// The components with one moved a place up (-1) or down (1). A screen moves with its own past the
+// screen before or after it; anything else moves a place, so at the edge of a screen it goes to
+// the next one.
+export function movedComponents(components = [], id, step) {
+    const list = [...components];
+    const from = list.findIndex(component => component.id === id);
+    if (from < 0 || (step !== -1 && step !== 1)) return list;
+    if (list[from].type !== 'screen') {
+        const to = from + step;
+        if (to >= 0 && to < list.length) list.splice(to, 0, ...list.splice(from, 1));
+        return list;
+    }
+    const spans = screenSpans(list);
+    const at = spans.findIndex(span => span.id === id);
+    if (!spans[at + step]) return list;
+    const [first, second] = step < 0 ? [spans[at - 1], spans[at]] : [spans[at], spans[at + 1]];
+    return [...list.slice(0, first.start), ...list.slice(second.start, second.end), ...list.slice(first.start, first.end), ...list.slice(second.end)];
+}
+
+export const canMove = (components, id, step) => movedComponents(components, id, step).some((component, index) => component !== components[index]);
+
+// The components without one. A screen goes with its own, and the buttons that went to it then go
+// nowhere.
+export function withoutComponent(components = [], id) {
+    const span = screenSpans(components).find(candidate => candidate.id === id);
+    if (!span) return components.filter(component => component.id !== id);
+    return [...components.slice(0, span.start), ...components.slice(span.end)].map(component => {
+        if (component.go !== id) return component;
+        const { go, ...rest } = component;
+        return rest;
+    });
+}
+
+// Where a clicked button can take people, besides a screen.
+export const GO_PLACES = { back: 'Back to the screen before', start: 'Start over: the first screen, as when the app opens' };
+
+// The places a button's Goes to offers, for an app with these components.
+export function goOptions(components = []) {
+    const screens = screensOf(components);
+    return {
+        '': 'Nowhere: it stays on this screen',
+        ...Object.fromEntries(screens.map(screen => [screen.id, `The “${screen.label}” screen`])),
+        ...(screens.length ? { back: GO_PLACES.back } : {}),
+        start: GO_PLACES.start,
+    };
+}
+
+// What each component lets you set, in order: [prop, label, kind of field, options of a select,
+// or a function of the app's components that makes them]. An output's `show` and `about` make it
+// a box: what it shows, and what goes in it, in words.
 export const COMPONENT_PROPS = {
     title: [['text', 'Text', 'text']],
     text: [['text', 'Text', 'lines'], WIDTH_PROP],
     textbox: [['label', 'Label', 'text'], ['placeholder', 'Placeholder', 'text'], ['lines', 'Lines', 'number'], WIDTH_PROP],
-    button: [['label', 'Label', 'text'], WIDTH_PROP],
+    button: [['label', 'Label', 'text'], ['go', 'When clicked, goes to', 'select', goOptions], WIDTH_PROP],
     output: [['label', 'Label', 'text'], ['show', 'Shows', 'select', SHOW_OPTIONS], ['about', 'What goes here', 'lines'], ['placeholder', 'When empty', 'text'], WIDTH_PROP],
     part: [['label', 'Label', 'text'], WIDTH_PROP],
+    screen: [['label', 'Name', 'text']],
 };
 
 const DEFAULTS = {
@@ -49,6 +153,7 @@ const DEFAULTS = {
     button: { label: 'Button' },
     output: { label: 'Output', placeholder: 'What the tool returns shows here.', show: 'text', about: '' },
     part: { label: 'Part', html: '', from: null, ask: '' },
+    screen: { label: 'Screen' },
 };
 
 // The first free id for a new component: input, input2, input3…
@@ -74,15 +179,22 @@ export function componentName(component) {
     return text.length > 40 ? `${text.slice(0, 39)}…` : text || component.id;
 }
 
+// Each element with what it is and the screen it's on (`screen`, null when it's on every one).
 export function elementsOfComponents(components = []) {
-    return components.flatMap(component => [{
-        id: component.id,
-        kind: COMPONENT_TYPES[component.type]?.kind || 'static',
-        type: component.type,
-        label: componentName(component),
-        width: WIDTHS[component.width] ? component.width : 'full',
-        ...(component.type === 'output' ? { show: BOX_KINDS[component.show] ? component.show : 'text', about: component.about || '' } : {}),
-    }, ...(component.type === 'part' ? partElements(component) : [])]);
+    const screens = screenOfEach(components);
+    return components.flatMap(component => {
+        const screen = screens.get(component.id) ?? null;
+        return [{
+            id: component.id,
+            kind: COMPONENT_TYPES[component.type]?.kind || 'static',
+            type: component.type,
+            label: componentName(component),
+            width: WIDTHS[component.width] ? component.width : 'full',
+            screen,
+            ...(component.type === 'output' ? { show: BOX_KINDS[component.show] ? component.show : 'text', about: component.about || '' } : {}),
+            ...(component.type === 'button' && component.go ? { go: component.go } : {}),
+        }, ...(component.type === 'part' ? partElements(component).map(element => ({ ...element, screen })) : [])];
+    });
 }
 
 const kindOfTag = (tag, type = '') => (tag === 'button' || tag === 'a' || (tag === 'input' && ['button', 'submit', 'reset'].includes(type.toLowerCase())) ? 'button'
@@ -229,11 +341,13 @@ export const SCREEN_CSS = `
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 .app { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: start; max-width: 640px; margin: 0 auto; padding: 28px 24px 40px; }
 .app-wide { max-width: 1080px; }
-.app > * { grid-column: span 6; min-width: 0; }
-.app > .w-two-thirds { grid-column: span 4; }
-.app > .w-half { grid-column: span 3; }
-.app > .w-third { grid-column: span 2; }
-@media (max-width: 520px) { .app > *, .app > .w-two-thirds, .app > .w-half, .app > .w-third { grid-column: 1 / -1; } }
+.app > *, .screen > * { grid-column: span 6; min-width: 0; }
+.app > .w-two-thirds, .screen > .w-two-thirds { grid-column: span 4; }
+.app > .w-half, .screen > .w-half { grid-column: span 3; }
+.app > .w-third, .screen > .w-third { grid-column: span 2; }
+.screen { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.screen[hidden] { display: none; }
+@media (max-width: 520px) { .app > *, .screen > *, .app > .w-two-thirds, .app > .w-half, .app > .w-third, .screen > .w-two-thirds, .screen > .w-half, .screen > .w-third { grid-column: 1 / -1; } }
 h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
 .text { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .field { display: flex; flex-direction: column; gap: 6px; }
@@ -311,7 +425,8 @@ function componentHtml(component) {
         }
         case 'button': {
             const width = widthClass(component);
-            return `<button id="${id}" type="button"${width ? ` class="${width}"` : ''}>${escapeHtml(component.label)}</button>`;
+            const go = component.go ? ` data-go="${escapeHtml(component.go)}"` : '';
+            return `<button id="${id}" type="button"${width ? ` class="${width}"` : ''}${go}>${escapeHtml(component.label)}</button>`;
         }
         case 'output': {
             const show = BOX_KINDS[component.show] && component.show !== 'text' ? component.show : '';
@@ -329,6 +444,24 @@ function componentHtml(component) {
     }
 }
 
+// The components in their screens: each screen a section, all but the first hidden until the app
+// goes to it; those above the first are outside the sections, so they show on every one.
+function screensHtml(components) {
+    const lines = [];
+    let open = false;
+    for (const component of components) {
+        if (component.type !== 'screen') {
+            lines.push(`${open ? '      ' : '    '}${componentHtml(component)}`);
+            continue;
+        }
+        if (open) lines.push('    </section>');
+        lines.push(`    <section id="${escapeHtml(component.id)}" class="screen" data-screen aria-label="${escapeHtml(componentName(component))}"${open ? ' hidden' : ''}>`);
+        open = true;
+    }
+    if (open) lines.push('    </section>');
+    return lines.join('\n');
+}
+
 // The HTML document a screen built from components is: what the preview runs and the zip's
 // index.html. A wide screen (`size`) is a dashboard's, with room for boxes side by side.
 export function componentsHtml(components = [], { title = 'App', size = 'narrow' } = {}) {
@@ -344,7 +477,7 @@ ${SCREEN_CSS.split('\n').map(line => `    ${line}`).join('\n')}
 </head>
 <body>
   <main class="${classes('app', size === 'wide' && 'app-wide')}">
-${components.map(component => `    ${componentHtml(component)}`).join('\n')}
+${screensHtml(components)}
   </main>
 </body>
 </html>

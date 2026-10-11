@@ -8,7 +8,8 @@
 // A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position?,
 //           prompt?, instructions?, tools? }
 // A trigger: { element, event }; any of a rule's triggers starts it.
-// A route: { if: 'sent' | 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }
+// A route: { if: 'sent' | 'ok' | 'error', show, into, how: 'replace' | 'append' | 'html' }; one
+// into one of the app's screens goes to that screen.
 // position: where the rule's tool sits on the canvas, { x, y }. prompt: the argument a model's
 // prompt goes in, which instructions and, with tools, your servers' tools are added to (agent.js).
 // Pure functions, shared by the builder, the runner and the tests.
@@ -370,13 +371,16 @@ function promptAdded(rule) {
     return parts.length ? `, adding to ${rule.prompt} ${listed(parts)}` : `, asking in ${rule.prompt}`;
 }
 
-// A rule as a sentence, for people reading the app: the zip's README and the builder.
-export function describeRule(rule, { elementName = id => id, serverName = url => url } = {}) {
+// A rule as a sentence, for people reading the app: the zip's README and the builder. A route
+// into one of the app's screens (`isScreen`) goes there.
+export function describeRule(rule, { elementName = id => id, serverName = url => url, isScreen = () => false } = {}) {
     const triggers = triggersOf(rule).map(({ element, event }) => (event === 'open' ? 'the app opens' : `${elementName(element)} ${EVENTS[event] || event}`));
     const when = triggers.length ? `When ${triggers.join(' or ')}` : 'Once something starts it';
     const args = Object.entries(rule.call?.args || {}).map(([key, value]) => `${key} = ${typeof value === 'string' ? quoted(value) : JSON.stringify(value)}`);
     const call = `call ${rule.call?.toolName || '(no tool)'} on ${serverName(rule.call?.serverUrl)}${args.length ? ` with ${args.join(', ')}` : ''}${promptAdded(rule)}`;
-    const routes = (rule.then || []).map(route => `${ROUTE_WHEN[routeWhen(route)]}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`);
+    const routes = (rule.then || []).map(route => (isScreen(route.into)
+        ? `${ROUTE_WHEN[routeWhen(route)]}, go to ${elementName(route.into)}`
+        : `${ROUTE_WHEN[routeWhen(route)]}, put ${route.show === '' ? 'nothing (clearing it)' : quoted(route.show)} into ${elementName(route.into)}${route.how && route.how !== 'replace' ? ` ${ROUTE_HOW[route.how]}` : ''}`));
     return `${when}, ${call}${routes.length ? `; ${routes.join('; ')}` : ''}.`;
 }
 
