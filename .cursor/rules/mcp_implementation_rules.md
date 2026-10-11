@@ -53,7 +53,8 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - A part is HTML a model or a tool made, kept without scripts, handlers or forms (`sanitizePart`), its ids prefixed with the part's id and its styles in `@scope`. Ask a model calls the model (`Apps.model()`, `ask.js`), a run from the app like any other call.
 - There's one kind of app. The agent loop is a rule's: its model's prompt field gets its `instructions` and, with `tools`, your servers' tools; the JSON-RPC calls in its answer run through `AppShell.runTool` with source `reply`, at most three every 10 seconds per rule, and their results join the conversations the answer went to (`agent.js`, `runner.js`). Chat is an example of it (`chatApp`), not an app of its own.
 - A rule's `when` is a list of triggers; `{{name}}` is an element's value, then an environment variable; a whole `{{name}}` takes the field's type. What a route shows is a template over the answer (`text`, `structured`, `json`, `html`, `result`, `error`) and the screen. Element ids can't be those answer names.
-- The canvas draws the flow (`graph.js`): every wire is one part of a rule, and the canvas keeps only where each tool sits (`rule.position`). Change the flow's shape and the graph together.
+- The canvas draws the flow (`graph.js`): every wire is one part of a rule, and the canvas keeps only where each tool sits (`rule.position`). Change the flow's shape and the graph together. A button wired to a screen's tab isn't the flow's: it's the button's `go`.
+- An app's screens are one document, with a Screen component starting each and only one section showing; the frame's runtime goes between them (`screen`, `restart`) and never calls tools to do it. Keep a screen whole in every list change (`movedComponents`, `withoutComponent`).
 - DML (`dml.js`) is the portable form. Its reader and writer change together and stay DOM-free; old files must stay readable, and a change older readers can't read raises `DML_VERSION`. Apps live in IndexedDB `mcp_apps`, separate from `mcp_sandbox`.
 - Only edits may change an app: AppShell's `fillToolForm` fires `input` when it fills a form, which the call editor ignores.
 
@@ -127,6 +128,11 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 
 ### Done (app builder milestone 2, fifth step: Preview)
 - [x] Preview: the app as it is when launched, over the whole window and from the start, with nothing of the builder; a phone's, a tablet's or the window's width; Restart; Escape on the page or the screen ends it
+
+### Done (app builder milestone 2, sixth step: screens)
+- [x] Screens: a Screen component starts each of an app's steps, what's above the first shows on every one, and one shows at a time; buttons go to a screen, back or start over, and a rule's route into a screen goes there; `<screen id label>` inside the app's `<screen>`, and `go=` in DML
+- [x] On the canvas a tab for each screen, wires to other screens' elements ending at their tabs, buttons dragged to a tab; the Inspector and Outline move and delete a screen with what's on it; Preview's bar names the screen
+- [x] The Front desk example, a visitor kiosk over four screens with no model, on the mock's `find_visit`, `check_in` and `call_front_desk`
 
 ### Next
 - [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool, so a model gets its tools' results at once), allowed tools for a rule's model, and output checks
