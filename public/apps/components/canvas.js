@@ -4,14 +4,16 @@
 // through a transform that says what of the answer is shown. Drag from a port to another to wire
 // them, drag a tool by its title to move it, and pick anything to change it in the Inspector. In
 // Design, clicks on the screen pick its elements; in Run, the screen takes them, and wires light up
-// as rules run. The Library adds components, tools and transforms.
+// as rules run. The Library adds components, tools and transforms. An app with several screens
+// shows one at a time, picked by its tab above the screen; a tab's ● is where a tool's Answer or a
+// button goes to go there, and a wire to an element on another screen ends at that screen's tab.
 
 import { debounce, escapeHtml, schemaOf, serverLabel } from '../../workbench/util.js';
 import { answerKey, BOX_KINDS, BOX_WIDTHS, isBox, promptFieldOf } from '../boxes.js';
 import { EVENTS, FlowError, flowProblems, isDefaultShow, newRule, routeSummary, triggersOf } from '../flow.js';
-import { canConnect, connect, parsePort, placeRules, wiresOf } from '../graph.js';
+import { canConnect, connect, goPairOf, parsePort, placeRules, wiresOf } from '../graph.js';
 import { AppRunner } from '../runner.js';
-import { COMPONENT_TYPES, freeId, newComponent } from '../screen.js';
+import { COMPONENT_TYPES, endOfScreen, freeId, GO_PLACES, newComponent, screensOf } from '../screen.js';
 import { AppElement } from './base.js';
 import { TraceList } from './trace.js';
 
@@ -29,7 +31,7 @@ const TRANSFORMS = [
     ['json', 'JSON', 'The whole result, as JSON', { show: '{{result}}', how: 'replace' }],
     ['html', 'HTML', 'The HTML in its answer, shown as HTML', { show: '{{html}}', how: 'html' }],
 ];
-const WIRE_KINDS = ['trigger', 'arg', 'sent', 'answer', 'error'];
+const WIRE_KINDS = ['trigger', 'arg', 'sent', 'answer', 'error', 'go'];
 // The wires that carry something to the screen, each with its transform: what of it shows.
 const ROUTE_KINDS = new Set(['sent', 'answer', 'error']);
 // How near an edge of the canvas a wire being dragged starts it scrolling.
@@ -54,8 +56,14 @@ export class AppCanvas extends AppElement {
             },
             onActivity: activity => this.showActivity(activity),
             onAnswer: (ruleId, answer) => this.apps.setAnswer(ruleId, answer),
+            onScreen: id => {
+                this.screenId = id;
+                this.renderTabs();
+            },
             signal,
         });
+        // Which of the app's screens the canvas shows, when it has several.
+        this.screenId = null;
         this.reloadSoon = debounce(() => this.load({ start: false }), 300);
         this.drawSoon = () => {
             cancelAnimationFrame(this.drawFrame);
@@ -64,6 +72,7 @@ export class AppCanvas extends AppElement {
         this.apps.on('shown', () => {
             this.trace.entries = [];
             this.mode = 'design';
+            this.screenId = null;
             this.render({ start: true });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
@@ -76,7 +85,10 @@ export class AppCanvas extends AppElement {
             if (part === 'flow') this.runner.flowChanged();
             if ((part === 'flow' || part === 'layout' || part === 'name') && by !== this) this.renderGraph();
         }, signal);
-        this.apps.on('select', () => this.markSelection(), signal);
+        this.apps.on('select', () => {
+            this.followSelection();
+            this.markSelection();
+        }, signal);
         this.apps.on('restart', () => this.restart(), signal);
         this.apps.on('highlight', ({ elements }) => this.runner.highlight(elements), signal);
         this.shell.on('mode', ({ mode }) => {
@@ -147,7 +159,7 @@ export class AppCanvas extends AppElement {
                     </button>
                     <div class="app-screen-card" data-screen-card>
                         <div class="app-screen-window">
-                            <div class="app-screen-bar"><span class="app-screen-dots" aria-hidden="true"></span><span class="app-screen-name" data-screen-name></span></div>
+                            <div class="app-screen-bar"><span class="app-screen-dots" aria-hidden="true"></span><span class="app-screen-name" data-screen-name></span><div class="app-screen-tabs" data-screen-tabs role="tablist" aria-label="Screens" hidden></div></div>
                             <div class="app-screen-body">
                                 <iframe class="app-canvas-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="${escapeHtml(app.name)}, running"></iframe>
                                 <div class="app-screen-overlay" data-overlay></div>
@@ -178,7 +190,8 @@ export class AppCanvas extends AppElement {
         this.load({ start });
     }
 
-    // Only a screen someone can see runs, so an app's "when it opens" calls wait until then.
+    // Only a screen someone can see runs, so an app's "when it opens" calls wait until then. A
+    // reload after an edit stays on the screen being shown.
     load({ start }) {
         if (!this.frame || !this.app || this.apps.view !== 'canvas') return;
         if (document.body.dataset.mode !== 'apps') {
@@ -186,7 +199,37 @@ export class AppCanvas extends AppElement {
             return;
         }
         this.waiting = null;
-        this.runner.load(this.frame, { start });
+        this.runner.load(this.frame, { start, screen: this.screenId });
+    }
+
+    // The app's screens as tabs in its title bar, each with the ● that goes there. One screen has none.
+    renderTabs() {
+        const tabs = this.$('[data-screen-tabs]');
+        if (!tabs || !this.app) return;
+        const screens = screensOf(this.app.screen.kind === 'html' ? [] : this.app.screen.components || []);
+        if (!screens.some(screen => screen.id === this.screenId)) this.screenId = screens[0]?.id || null;
+        tabs.closest('.app-screen-bar').toggleAttribute('data-tabbed', screens.length > 0);
+        tabs.hidden = !screens.length;
+        tabs.innerHTML = screens.map(screen => `
+            <button type="button" class="app-screen-tab" role="tab" data-screen-tab="${escapeHtml(screen.id)}" aria-selected="${screen.id === this.screenId}" title="${escapeHtml(`${screen.label} (${screen.id}): show it here. Wire a button or a tool's Answer to its ● to go there.`)}">
+                <span class="app-screen-tab-name">${escapeHtml(screen.label)}</span>
+                <span class="app-port app-port-screen" data-port="${escapeHtml(elementPort(screen.id))}"></span>
+            </button>`).join('');
+    }
+
+    // Shows one of the app's screens on the canvas, as the app would go there.
+    showScreen(id) {
+        this.screenId = id;
+        this.renderTabs();
+        this.runner.showScreen(id);
+    }
+
+    // An element picked on another of the app's screens shows that screen.
+    followSelection() {
+        const selection = this.apps.selection;
+        const element = selection?.kind === 'element' ? this.element(selection.id) : null;
+        const screen = element?.kind === 'screen' ? element.id : element?.screen;
+        if (this.frame && screen && screen !== this.screenId) this.showScreen(screen);
     }
 
     restart() {
@@ -230,6 +273,7 @@ export class AppCanvas extends AppElement {
     portSlots() {
         const slots = [];
         for (const element of this.elements()) {
+            if (element.kind === 'screen') continue;
             const rect = this.layout.rects[element.id];
             if (!rect) continue;
             slots.push({ id: element.id, at: rect.top + Math.min(rect.height, 40) / 2 });
@@ -293,6 +337,7 @@ export class AppCanvas extends AppElement {
         this.style.setProperty('--screen-w', `${this.screenWidth()}px`);
         this.$('[data-screen-name]').textContent = app.name || 'App';
         this.style.setProperty('--frame-h', `${Math.max(220, Math.ceil(this.layout.height || 0))}px`);
+        this.renderTabs();
         this.renderGutter();
         this.renderOverlay();
         this.renderNodes();
@@ -306,18 +351,23 @@ export class AppCanvas extends AppElement {
         const elements = this.elements();
         // A part's elements go under the part's own row, by the rest of their id (.refresh under part).
         const shortId = element => (element.part ? element.id.slice(element.part.length) : element.id);
+        // A button that goes back or starts over says so; one that goes to a screen has a wire to it.
+        const goes = element => (element.go === 'back' ? ' ↩' : element.go === 'start' ? ' ⟲' : '');
+        const goTitle = element => (GO_PLACES[element.go] ? `. When clicked: ${GO_PLACES[element.go].toLowerCase()}` : '');
+        const screens = elements.some(element => element.kind === 'screen');
+        const portTitle = element => `${element.id}: drag to a tool's Run or one of its fields, or from a tool's Answer to here${element.kind === 'button' && screens ? ", or to a screen's ● for where it goes" : ''}`;
         this.$('[data-gutter]').innerHTML = `
             <svg class="app-leads" aria-hidden="true">${Object.values(slots).map(slot => `<path d="M 0 ${SCREEN.bar + slot.at} C 9 ${SCREEN.bar + slot.at}, 7 ${SCREEN.bar + slot.y}, 16 ${SCREEN.bar + slot.y}"/>`).join('')}</svg>
             ${elements.filter(element => slots[element.id]).map(element => `
                 <div class="app-gutter-row" style="--y: ${SCREEN.bar + slots[element.id].y}px" data-gutter-row="${escapeHtml(element.id)}">
-                    <span class="app-gutter-label mono" title="${escapeHtml(`${element.label} (${element.id})`)}">${escapeHtml(shortId(element))}</span>
-                    <span class="app-port app-port-element app-port-${element.kind}" data-port="${escapeHtml(elementPort(element.id))}" title="${escapeHtml(`${element.id}: drag to a tool's Run or one of its fields, or from a tool's Answer to here`)}"></span>
+                    <span class="app-gutter-label mono" title="${escapeHtml(`${element.label} (${element.id})${goTitle(element)}`)}">${escapeHtml(shortId(element) + goes(element))}</span>
+                    <span class="app-port app-port-element app-port-${element.kind}" data-port="${escapeHtml(elementPort(element.id))}" title="${escapeHtml(portTitle(element))}"></span>
                 </div>`).join('')}`;
     }
 
     renderOverlay() {
         const overlay = this.$('[data-overlay]');
-        overlay.innerHTML = this.elements().filter(element => this.layout.rects[element.id]).map(element => {
+        overlay.innerHTML = this.elements().filter(element => element.kind !== 'screen' && this.layout.rects[element.id]).map(element => {
             const rect = this.layout.rects[element.id];
             return `<button type="button" class="app-element-box${element.part ? ' app-element-in-part' : ''}" data-element-box="${escapeHtml(element.id)}" style="--top: ${rect.top}px; --left: ${rect.left}px; --width: ${rect.width}px; --height: ${rect.height}px" aria-label="${escapeHtml(`Pick ${element.id}`)}" title="${escapeHtml(`${element.label} (${element.id})`)}"></button>`;
         }).join('');
@@ -402,6 +452,23 @@ export class AppCanvas extends AppElement {
         return `M ${from.x} ${from.y} C ${from.x + from.out * reach} ${from.y}, ${to.x + to.out * reach} ${to.y}, ${to.x} ${to.y}`;
     }
 
+    // Where a wire ends: its port, or for an element on a screen that isn't shown, that screen's tab.
+    wireEnd(port) {
+        const point = this.portPoint(port);
+        if (point) return { point, elsewhere: false };
+        const { kind, element } = parsePort(port);
+        const screen = kind === 'el' ? this.element(element)?.screen : null;
+        const tab = screen && screen !== this.screenId ? this.portPoint(elementPort(screen)) : null;
+        return tab ? { point: tab, elsewhere: true } : null;
+    }
+
+    // The buttons on the shown screen that go to another, each a wire to that screen's tab.
+    goWires() {
+        const screens = new Set(screensOf(this.app.screen.components || []).map(screen => screen.id));
+        return this.elements().filter(element => element.kind === 'button' && screens.has(element.go))
+            .map(element => ({ id: `g:${element.id}`, button: element.id, from: elementPort(element.id), to: elementPort(element.go) }));
+    }
+
     drawWires() {
         if (!this.surface?.isConnected || !this.app) return;
         const group = this.$('[data-wire-paths]');
@@ -417,14 +484,23 @@ export class AppCanvas extends AppElement {
             paths.push(`<path class="app-entry" d="M ${x} ${box.bottom - surface.top} L ${x} ${SCREEN.y - 4}" marker-end="url(#app-arrow-trigger)"/>`);
         }
         for (const wire of wires) {
-            const from = this.portPoint(wire.from);
-            const to = this.portPoint(wire.to);
-            if (!from || !to) continue;
+            const fromEnd = this.wireEnd(wire.from);
+            const toEnd = this.wireEnd(wire.to);
+            if (!fromEnd || !toEnd) continue;
+            const [from, to] = [fromEnd.point, toEnd.point];
             const d = this.curve(from, to);
             // A route's wire leaves the tool leftwards and reaches the screen from the right, so its
             // curve's middle is halfway between its ends.
             middles.set(wire.id, { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 });
-            paths.push(`<g class="app-wire app-wire-${wire.kind}" data-wire="${escapeHtml(wire.id)}"><path class="app-wire-hit" d="${d}"/><path class="app-wire-line" d="${d}" marker-end="url(#app-arrow-${wire.kind})"/></g>`);
+            const elsewhere = fromEnd.elsewhere || toEnd.elsewhere ? ' app-wire-elsewhere' : '';
+            paths.push(`<g class="app-wire app-wire-${wire.kind}${elsewhere}" data-wire="${escapeHtml(wire.id)}"><path class="app-wire-hit" d="${d}"/><path class="app-wire-line" d="${d}" marker-end="url(#app-arrow-${wire.kind})"/></g>`);
+        }
+        for (const wire of this.goWires()) {
+            const from = this.portPoint(wire.from);
+            const to = this.portPoint(wire.to);
+            if (!from || !to) continue;
+            const d = this.curve(from, to);
+            paths.push(`<g class="app-wire app-wire-go" data-go-wire="${escapeHtml(wire.button)}"><path class="app-wire-hit" d="${d}"/><path class="app-wire-line" d="${d}" marker-end="url(#app-arrow-go)"/></g>`);
         }
         group.innerHTML = paths.join('');
         // Transforms sit on their wires, nudged apart where wires meet.
@@ -445,6 +521,8 @@ export class AppCanvas extends AppElement {
     markSelection() {
         const selection = this.apps.selection;
         this.querySelectorAll('[data-wire]').forEach(wire => wire.classList.toggle('app-selected', selection?.kind === 'wire' && wire.dataset.wire === selection.id));
+        this.querySelectorAll('[data-go-wire]').forEach(wire => wire.classList.toggle('app-selected', selection?.kind === 'element' && wire.dataset.goWire === selection.id));
+        this.querySelectorAll('[data-screen-tab]').forEach(tab => tab.classList.toggle('app-selected', selection?.kind === 'element' && tab.dataset.screenTab === selection.id));
         this.querySelectorAll('[data-pill]').forEach(pill => pill.classList.toggle('app-selected', selection?.kind === 'wire' && pill.dataset.pill === selection.id));
         this.querySelectorAll('[data-node]').forEach(node => node.classList.toggle('app-selected', selection?.kind === 'rule' && node.dataset.node === selection.id));
         this.querySelectorAll('[data-element-box]').forEach(box => box.classList.toggle('app-selected', selection?.kind === 'element' && box.dataset.elementBox === selection.id));
@@ -510,6 +588,8 @@ export class AppCanvas extends AppElement {
     }
 
     wire(a, b) {
+        const go = goPairOf(a, b, { kindOf: id => this.kindOf(id) });
+        if (go) return this.setGo(go.button, go.screen);
         try {
             let made;
             this.changeFlow(flow => {
@@ -546,6 +626,16 @@ export class AppCanvas extends AppElement {
         }
     }
 
+    // A button wired to a screen's tab goes there when it's clicked.
+    setGo(buttonId, screenId) {
+        const component = this.app.screen.components.find(candidate => candidate.id === buttonId);
+        if (!component) return this.hint(`${buttonId} is in a part, which says itself what its buttons do: wire it to a tool's Run, and the tool's Answer to the screen.`, { error: true });
+        if (component.go === screenId) return this.hint('Those are connected already.');
+        this.apps.change(app => { app.screen.components.find(candidate => candidate.id === buttonId).go = screenId; }, { part: 'screen' });
+        this.apps.select({ kind: 'element', id: buttonId });
+        this.hint(`Connected: ${buttonId} goes to ${this.apps.elementName(screenId)} when it's clicked.`);
+    }
+
     removeWire(id) {
         if (this.apps.removeWire(id)) this.hint('Removed the connection.');
     }
@@ -568,12 +658,24 @@ export class AppCanvas extends AppElement {
         return this.addComponent('output', index, { id: freeId(base, ids), label, show: kind, width: BOX_WIDTHS[kind], placeholder: 'Filled in when the app runs.' });
     }
 
+    // A component goes where it was dropped, or at the end of the screen shown; a screen goes after
+    // the others, and shows.
     addComponent(type, index = null, props = {}) {
         const app = this.app;
         if (app.screen.kind === 'html') return this.hint('This screen is HTML, so it has no components: switch it to Components in the Inspector first.', { error: true });
+        if (type === 'screen') {
+            const titled = app.screen.components[0]?.type === 'title';
+            const before = screensOf(app.screen.components).length;
+            const screen = this.apps.addScreen();
+            const screens = screensOf(this.app.screen.components);
+            this.apps.select({ kind: 'element', id: screen.id });
+            return this.hint(!before && screens.length === 2
+                ? `Added ${screen.id}. What was on the screen is on ${screens[0].id} now${titled ? ', and the title above them shows on both' : ''}. Wire a button or a tool's Answer to a screen's ● to go there.`
+                : `Added ${screen.id}. Add components to it from the Library, and wire a button or a tool's Answer to its ● to go there.`);
+        }
         const added = newComponent(type, app.screen.components.map(component => component.id), props);
         this.apps.change(found => {
-            const at = index === null ? found.screen.components.length : index;
+            const at = index ?? endOfScreen(found.screen.components, this.screenId);
             found.screen.components.splice(at, 0, added);
         }, { part: 'screen' });
         this.apps.select({ kind: 'element', id: added.id });
@@ -633,6 +735,7 @@ export class AppCanvas extends AppElement {
             button: 'Something to click, to start a tool',
             output: 'Where an answer shows',
             part: 'HTML a model or a tool makes: a dashboard, a card, a form',
+            screen: 'Another screen, which a button or an answer goes to',
         }[type], html ? 'disabled' : ''));
         const servers = Object.values(this.shell.servers).filter(server => server.tools?.length);
         const tools = servers.map(server => {
@@ -677,11 +780,11 @@ export class AppCanvas extends AppElement {
         const surface = this.surface.getBoundingClientRect();
         const point = { x: event.clientX - surface.left, y: event.clientY - surface.top };
         if (data.libraryItem === 'component' || data.libraryItem === 'box') {
-            // Before the first component whose middle is below where it was dropped.
+            // Before the first component shown whose middle is below where it was dropped.
             const top = SCREEN.y + SCREEN.bar;
             const components = this.app.screen.components || [];
             const index = components.findIndex(component => {
-                const rect = this.layout.rects[component.id];
+                const rect = component.type !== 'screen' && this.layout.rects[component.id];
                 return rect && top + rect.top + rect.height / 2 > point.y;
             });
             return this.useLibraryItem(data, { at: { index: index < 0 ? null : index } });
@@ -707,7 +810,8 @@ export class AppCanvas extends AppElement {
         const draft = this.$('[data-draft]');
         const start = this.portPoint(from);
         if (!start) return;
-        this.querySelectorAll('[data-port]').forEach(port => port.classList.toggle('app-port-can', canConnect(from, port.dataset.port)));
+        const kindOf = id => this.kindOf(id);
+        this.querySelectorAll('[data-port]').forEach(port => port.classList.toggle('app-port-can', canConnect(from, port.dataset.port, { kindOf })));
         this.classList.add('app-wiring');
         const scroller = this.$('[data-canvas-scroll]');
         let pointer = null;
@@ -761,8 +865,9 @@ export class AppCanvas extends AppElement {
         const under = at?.closest('[data-port]') || at?.closest('[data-gutter-row], .app-node-row, [data-start]')?.querySelector('[data-port]');
         if (under && under.dataset.port !== from) return under.dataset.port;
         let best = null;
+        const kindOf = id => this.kindOf(id);
         for (const port of this.querySelectorAll('[data-port]')) {
-            if (!canConnect(from, port.dataset.port)) continue;
+            if (!canConnect(from, port.dataset.port, { kindOf })) continue;
             const box = port.getBoundingClientRect();
             const distance = Math.hypot(box.left + box.width / 2 - x, box.top + box.height / 2 - y);
             if (distance < 22 && (!best || distance < best.distance)) best = { port: port.dataset.port, distance };
@@ -844,12 +949,18 @@ export class AppCanvas extends AppElement {
         if (button?.dataset.tidy !== undefined) return this.tidy();
         if (button?.dataset.clearTrace !== undefined) return this.trace.clear();
         if (button?.dataset.openRun) return this.apps.openRun(button.dataset.openRun);
+        if (button?.dataset.screenTab) {
+            this.showScreen(button.dataset.screenTab);
+            return this.apps.select({ kind: 'element', id: button.dataset.screenTab });
+        }
         if (target.closest('[data-port]')) return;
         if (button?.dataset.selectStart !== undefined) return this.apps.select({ kind: 'start' });
         if (button?.dataset.elementBox) return this.apps.select({ kind: 'element', id: button.dataset.elementBox });
         if (button?.dataset.pill) return this.apps.select({ kind: 'wire', id: button.dataset.pill, ruleId: button.dataset.pill.split(':')[1] });
         const wire = target.closest('[data-wire]');
         if (wire) return this.apps.select({ kind: 'wire', id: wire.dataset.wire, ruleId: wire.dataset.wire.split(':')[1] });
+        const goWire = target.closest('[data-go-wire]');
+        if (goWire) return this.apps.select({ kind: 'element', id: goWire.dataset.goWire });
         const row = target.closest('[data-gutter-row]');
         if (row) return this.apps.select({ kind: 'element', id: row.dataset.gutterRow });
         const node = target.closest('[data-node]');

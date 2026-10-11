@@ -17,11 +17,15 @@ export class AppTry extends AppElement {
             onTrace: entry => this.trace.add(entry),
             onLayout: ({ height }) => this.style.setProperty('--app-frame-height', `${Math.ceil(height)}px`),
             onAnswer: (ruleId, answer) => this.apps.setAnswer(ruleId, answer),
+            onScreen: id => { this.screenId = id; },
             signal,
         });
+        // Which of the app's screens shows, so a reload after an edit stays on it.
+        this.screenId = null;
         this.reloadSoon = debounce(() => this.load({ start: false }), 300);
         this.apps.on('shown', () => {
             this.trace.entries = [];
+            this.screenId = null;
             this.render({ start: true });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
@@ -80,7 +84,7 @@ export class AppTry extends AppElement {
             return;
         }
         this.waiting = null;
-        this.runner.load(this.frame, { start });
+        this.runner.load(this.frame, { start, screen: this.screenId });
     }
 
     restart() {

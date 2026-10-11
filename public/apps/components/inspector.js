@@ -1,15 +1,16 @@
 // The canvas's Inspector: what's picked on the canvas, to change. The screen, when nothing is; an
-// element (a component's fields, a part's HTML and where it comes from, and its connections); a
-// tool, as its rule; a wire, as the part of its rule it is; or Start.
+// element (a component's fields, a part's HTML and where it comes from, and its connections; a
+// screen's name, what's on it and how people get there); a tool, as its rule; a wire, as the part
+// of its rule it is; or Start.
 
-import { escapeHtml } from '../../workbench/util.js';
+import { confirmThen, escapeHtml } from '../../workbench/util.js';
 import { BOX_KINDS } from '../boxes.js';
 import { elementIdProblem, EVENTS, routeSummary } from '../flow.js';
 import { wiresOf } from '../graph.js';
-import { COMPONENT_PROPS, COMPONENT_TYPES, ELEMENT_KINDS } from '../screen.js';
+import { canMove, COMPONENT_PROPS, COMPONENT_TYPES, ELEMENT_KINDS, screensOf } from '../screen.js';
 import { AppElement } from './base.js';
 import { HtmlSourceEditor } from './html-source.js';
-import { propField, propValue } from './props.js';
+import { propField, propValue, setProp } from './props.js';
 import { RuleEditor } from './rule-editor.js';
 
 export class AppInspector extends AppElement {
@@ -41,12 +42,11 @@ export class AppInspector extends AppElement {
             if (!field) return;
             const id = this.apps.selection?.id;
             const prop = field.dataset.inspectProp;
-            const value = prop === 'lines' ? Math.max(1, Math.min(20, Number(field.value) || 1)) : field.value;
             this.apps.change(app => {
                 const component = app.screen.components.find(candidate => candidate.id === id);
-                if (component) component[prop] = value;
+                if (component) setProp(component, prop, field.value);
             }, { part: 'screen', by: this });
-            if (prop === 'show') this.markBox(value);
+            if (prop === 'show') this.markBox(field.value);
         }, { signal });
         this.addEventListener('change', event => {
             if (event.target.matches('[data-inspect-id]')) this.rename(event.target);
@@ -98,6 +98,8 @@ export class AppInspector extends AppElement {
     renderScreen() {
         const screen = this.app.screen;
         const html = screen.kind === 'html';
+        const screens = screensOf(screen.components || []).length;
+        const count = (screen.components || []).filter(component => component.type !== 'screen').length;
         this.innerHTML = `
             ${this.head('Screen', this.app.name || 'App', 'Nothing is picked, so this is the screen. Pick an element, a tool, a wire or Start on the canvas to change it here.')}
             <div class="wb-chips" role="group" aria-label="What the screen is made of">
@@ -108,12 +110,13 @@ export class AppInspector extends AppElement {
                 <button type="button" class="wb-chip" data-screen-size="narrow" aria-pressed="${screen.size !== 'wide'}" title="One column, as a form or a phone shows it">Narrow</button>
                 <button type="button" class="wb-chip" data-screen-size="wide" aria-pressed="${screen.size === 'wide'}" title="Room for boxes side by side, as a dashboard has">Wide</button>
             </div>
-            ${html ? '<div data-screen-source></div>' : `<p class="text-secondary">${screen.components.length} components. Add more from the Library: boxes for what a tool answers (a chart, a list, a number), or a part a model or a tool makes.</p>`}
+            ${html ? '<div data-screen-source></div>' : `<p class="text-secondary">${count} components${screens ? ` on ${screens} screens` : ''}. Add more from the Library: boxes for what a tool answers (a chart, a list, a number), a part a model or a tool makes, or another screen.</p>`}
             <h4 class="app-inspector-section">How it works</h4>
             <ul class="app-inspector-tips">
                 <li>Drag from an element's ● to a tool's <b>Run</b> to start the tool, or to one of its fields to fill that field with what the element holds.</li>
                 <li>Drag from a tool's <b>Answer</b> or <b>Error</b> to an element to show it there. The label on the wire is its transform: what of the answer shows.</li>
                 <li>A <b>box</b> says what it shows and what goes in it. Wired to a tool's Answer, it adds to the tool's prompt what it needs, so the layout writes the format of the answer.</li>
+                <li>A <b>screen</b> is one step of the app, with a tab above it. Wire a button to a screen's ● to go there when it's clicked, or a tool's Answer or Error to go there when the tool answers.</li>
                 <li><b>Start</b> begins the app. Wire it to a tool's Run to call the tool when the app opens, such as to fill a dashboard.</li>
                 <li><b>Run</b> lets you use the screen; the wires light up as their rules run, and What happened says each step.</li>
             </ul>`;
@@ -142,6 +145,41 @@ export class AppInspector extends AppElement {
             : `<p class="text-secondary">No wires yet. ${elementId === null ? "Drag from Start's ● to a tool's Run." : "Drag from its ● beside the screen to a tool's Run or field, or from a tool's Answer to it."}</p>`;
     }
 
+    // Which of the app's screens an element is on, when it has several.
+    whereItIs(element) {
+        const screens = screensOf(this.app.screen.components);
+        if (!screens.length) return '';
+        if (element.kind === 'screen') {
+            return `${screens[0].id === element.id ? 'The app opens on this screen. ' : ''}What's below it, up to the next screen, shows on it; moving or deleting it takes that along.`;
+        }
+        const screen = screens.find(candidate => candidate.id === element.screen);
+        return screen ? `On the screen “${screen.label}”.` : "Above the app's screens, so it shows on every one.";
+    }
+
+    // What's on a screen, each a click away.
+    screenContents(id) {
+        const on = this.apps.elements().filter(element => element.screen === id && element.id !== id && !element.part);
+        return on.length
+            ? `<ul class="app-connections">${on.map(element => `<li><button type="button" class="app-connection" data-select-element="${escapeHtml(element.id)}">${escapeHtml(`${ELEMENT_KINDS[element.kind]} ${element.id}${element.label !== element.id ? `: ${element.label}` : ''}`)}</button></li>`).join('')}</ul>`
+            : '<p class="text-secondary">Nothing yet. With its tab picked, add components from the Library.</p>';
+    }
+
+    // How people get to a screen: the app opening, the buttons that go there, and the rules that do.
+    waysTo(id) {
+        const flow = this.app.flow;
+        const tool = wire => flow.find(rule => rule.id === wire.ruleId)?.call?.toolName || 'a tool';
+        const when = { sent: name => `As ${name} is called`, answer: name => `When ${name} works`, error: name => `When ${name} fails` };
+        const routes = wiresOf(flow, this.apps.elements().map(element => element.id)).filter(wire => wire.element === id && when[wire.kind]);
+        const items = [
+            ...(screensOf(this.app.screen.components)[0]?.id === id ? ['<li class="text-secondary">▶ When the app opens</li>'] : []),
+            ...this.apps.elements().filter(element => element.go === id).map(button => `<li><button type="button" class="app-connection" data-select-element="${escapeHtml(button.id)}">${escapeHtml(`↪ When ${button.id} is clicked`)}</button></li>`),
+            ...routes.map(wire => `<li><button type="button" class="app-connection" data-select-wire="${escapeHtml(wire.id)}" data-rule="${escapeHtml(wire.ruleId)}">${escapeHtml(`← ${when[wire.kind](tool(wire))}`)}</button></li>`),
+        ];
+        return items.length
+            ? `<ul class="app-connections">${items.join('')}</ul>`
+            : "<p class=\"text-secondary\">Nothing goes here yet. Drag from a button's ● beside the screen, or from a tool's Answer or Error, to this screen's ● on its tab.</p>";
+    }
+
     renderElement(id) {
         const element = this.apps.elements().find(candidate => candidate.id === id);
         if (!element) return this.renderScreen();
@@ -154,22 +192,24 @@ export class AppInspector extends AppElement {
                 ${this.connections(id)}`;
             return;
         }
-        const index = this.app.screen.components.indexOf(component);
+        const components = this.app.screen.components;
         const props = COMPONENT_PROPS[component.type] || [];
+        const screen = component.type === 'screen';
         this.innerHTML = `
-            ${this.head(COMPONENT_TYPES[component.type]?.label || component.type, component.id)}
+            ${this.head(COMPONENT_TYPES[component.type]?.label || component.type, component.id, escapeHtml(this.whereItIs(element)))}
             <label class="app-field"><span>id: how the flow names it, as {{${escapeHtml(component.id)}}}</span><input type="text" class="mono" data-inspect-id autocomplete="off" spellcheck="false"></label>
             <p class="app-field-error text-error" data-id-error hidden></p>
-            ${props.map(([prop, label, kind, options]) => `<label class="app-field"><span>${label}</span>${propField(prop, kind, options, 'data-inspect-prop')}</label>`).join('')}
+            ${props.map(([prop, label, kind, options]) => `<label class="app-field"><span>${label}</span>${propField(prop, kind, options, 'data-inspect-prop', { components })}</label>`).join('')}
             ${component.type === 'output' ? '<p class="app-note text-secondary" data-box-note></p>' : ''}
             ${component.type === 'part' ? '<h4 class="app-inspector-section">Where it comes from</h4><div data-part-source></div>' : ''}
             <div class="button-row app-inspector-actions">
-                <button type="button" class="btn-sm" data-move-component="-1" ${index === 0 ? 'disabled' : ''}>Move up</button>
-                <button type="button" class="btn-sm" data-move-component="1" ${index === this.app.screen.components.length - 1 ? 'disabled' : ''}>Move down</button>
-                <button type="button" class="btn-sm btn-tertiary btn-danger" data-remove-component>Delete</button>
+                <button type="button" class="btn-sm" data-move-component="-1" ${canMove(components, id, -1) ? '' : 'disabled'}>Move up</button>
+                <button type="button" class="btn-sm" data-move-component="1" ${canMove(components, id, 1) ? '' : 'disabled'}>Move down</button>
+                <button type="button" class="btn-sm btn-tertiary btn-danger" data-remove-component>${screen ? "Delete it and what's on it" : 'Delete'}</button>
             </div>
-            <h4 class="app-inspector-section">Connections</h4>
-            ${this.connections(id)}`;
+            ${screen ? `<h4 class="app-inspector-section">On it</h4>${this.screenContents(id)}` : ''}
+            <h4 class="app-inspector-section">${screen ? 'How people get here' : 'Connections'}</h4>
+            ${screen ? this.waysTo(id) : this.connections(id)}`;
         this.$('[data-inspect-id]').value = component.id;
         for (const field of this.querySelectorAll('[data-inspect-prop]')) field.value = propValue(component, field, field.dataset.inspectProp);
         if (component.type === 'output') this.markBox(component.show);
@@ -221,14 +261,21 @@ export class AppInspector extends AppElement {
         const tool = rule.call?.toolName || 'the tool';
         const title = wire.kind === 'trigger' ? (wire.event === 'open' ? `Start → ${tool}` : `${wire.element} → ${tool}`)
             : wire.kind === 'arg' ? `${wire.element} → ${tool}.${wire.arg}` : `${tool} → ${wire.element}`;
-        const note = {
+        const toScreen = this.apps.elements().some(element => element.id === wire.element && element.kind === 'screen');
+        const note = toScreen ? {
+            sent: `Goes to the screen ${wire.element} as ${tool} is called, before its answer.`,
+            answer: `Goes to the screen ${wire.element} when ${tool} works.`,
+            error: `Goes to the screen ${wire.element} when ${tool} fails.`,
+        }[wire.kind] : {
             trigger: wire.event === 'open' ? `Calls ${tool} when the app opens.` : `Starts ${tool} when ${wire.element} ${EVENTS[wire.event]}; choose what it waits for below.`,
             arg: `Fills ${tool}'s ${wire.arg} with what ${wire.element} holds, as {{${wire.element}}}.`,
+            sent: `Puts what ${tool} is called with into ${wire.element} as it's called, before there's an answer. With nothing to show, it clears ${wire.element}.`,
             answer: `Puts ${tool}'s answer into ${wire.element}. What it shows is its transform, below: {{text}} is the text, {{structured.…}} a value, or your own words around them.`,
             error: `Puts ${tool}'s error into ${wire.element} when it fails.`,
         }[wire.kind];
+        const kind = toScreen ? 'Where it goes' : { trigger: 'What starts it', arg: 'What fills a field', sent: "What shows as it's sent", answer: 'Where the answer goes', error: 'Where an error goes' }[wire.kind];
         this.innerHTML = `
-            ${this.head(wire.kind === 'trigger' ? 'What starts it' : wire.kind === 'arg' ? 'What fills a field' : wire.kind === 'answer' ? 'Where the answer goes' : 'Where an error goes', title, escapeHtml(note))}
+            ${this.head(kind, title, escapeHtml(note))}
             <div class="button-row app-inspector-actions"><button type="button" class="btn-sm btn-tertiary btn-danger" data-remove-wire="${escapeHtml(wire.id)}">Remove this connection</button></div>
             <div data-rule-editor></div>`;
         const focus = wire.kind === 'trigger' ? { trigger: wire.index } : wire.kind === 'arg' ? { arg: wire.arg } : { route: wire.index };
@@ -270,21 +317,21 @@ export class AppInspector extends AppElement {
         if (dataset.screenKind) return this.apps.setScreenKind(dataset.screenKind);
         if (dataset.screenSize) return this.apps.setScreenSize(dataset.screenSize);
         if (dataset.selectWire) return this.apps.select({ kind: 'wire', id: dataset.selectWire, ruleId: dataset.rule });
+        if (dataset.selectElement) return this.apps.select({ kind: 'element', id: dataset.selectElement });
         if (dataset.removeWire) return this.apps.removeWire(dataset.removeWire);
         const id = this.apps.selection?.id;
         if (dataset.moveComponent) {
-            this.apps.change(app => {
-                const components = app.screen.components;
-                const from = components.findIndex(component => component.id === id);
-                const to = from + Number(dataset.moveComponent);
-                if (to < 0 || to >= components.length) return;
-                components.splice(to, 0, ...components.splice(from, 1));
-            }, { part: 'screen' });
+            this.apps.moveComponent(id, Number(dataset.moveComponent));
             return this.render();
         }
         if (dataset.removeComponent !== undefined) {
-            this.apps.change(app => { app.screen.components = app.screen.components.filter(component => component.id !== id); }, { part: 'screen' });
-            this.apps.select(null);
+            const remove = () => {
+                this.apps.removeComponent(id);
+                this.apps.select(null);
+            };
+            // A screen goes with what's on it, so that takes a second click.
+            if (this.component(id)?.type === 'screen') return confirmThen(button, remove);
+            remove();
         }
     }
 }

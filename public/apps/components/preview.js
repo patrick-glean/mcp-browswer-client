@@ -29,6 +29,7 @@ export class AppPreview extends AppElement {
             getApp: () => this.apps.app,
             onActivity: activity => this.showActivity(activity),
             onAnswer: (ruleId, answer) => this.apps.setAnswer(ruleId, answer),
+            onScreen: id => this.showScreenName(id),
             onEscape: () => this.apps.exitPreview(),
             signal,
         });
@@ -70,6 +71,7 @@ export class AppPreview extends AppElement {
             <div class="app-preview-bar">
                 <span class="app-preview-badge">Preview</span>
                 <span class="app-preview-name">${escapeHtml(app.name || 'Untitled app')}</span>
+                <span class="app-preview-screen" data-preview-screen hidden></span>
                 <span class="app-preview-status text-secondary" data-preview-status aria-live="polite"></span>
                 <span class="wb-spacer"></span>
                 <div class="wb-chips" role="group" aria-label="Width">
@@ -126,6 +128,16 @@ export class AppPreview extends AppElement {
         // People using the app see a failure only where its rule puts one.
         const shown = (rule?.then || []).some(route => route.if === 'error');
         this.status(`${tool} failed${took}.${shown ? '' : ' Its rule puts nothing on the screen when it fails, so people won\'t know.'}`, { error: true });
+    }
+
+    // Which of the app's screens shows, for an app with several.
+    showScreenName(id) {
+        const shown = this.$('[data-preview-screen]');
+        const screen = this.apps.elements().find(element => element.id === id && element.kind === 'screen');
+        if (!shown) return;
+        shown.hidden = !screen;
+        shown.textContent = screen ? screen.label : '';
+        shown.title = screen ? `The screen showing: ${screen.label} (${screen.id})` : '';
     }
 
     status(text, { error = false } = {}) {

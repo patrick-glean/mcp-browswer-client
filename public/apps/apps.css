@@ -134,6 +134,18 @@ app-preview[hidden] {
     white-space: nowrap;
 }
 
+.app-preview-screen {
+    padding: 1px 8px;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.app-preview-screen[hidden] {
+    display: none;
+}
+
 .app-preview-status {
     flex: 0 1 auto;
     min-width: 0;
@@ -405,6 +417,23 @@ app-try {
 
 .app-component:hover {
     border-color: var(--theme-border-dark);
+}
+
+/* A screen starts a step of the app; what's on it is set in under it. */
+.app-component-screen {
+    margin-top: 6px;
+    border-color: var(--theme-border-dark);
+    background: var(--theme-background);
+}
+
+.app-component-screen .badge {
+    border-color: var(--theme-primary-highlight);
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+}
+
+.app-component-on-screen {
+    margin-left: 18px;
 }
 
 .app-component-head {
@@ -787,6 +816,13 @@ app-try {
     gap: 6px;
 }
 
+/* A route into a screen goes there: it shows nothing. */
+.app-route-go [data-route-show],
+.app-route-go [data-route-how],
+.app-route-go [data-route-into-word] {
+    display: none;
+}
+
 .app-route-add {
     display: flex;
     gap: 4px;
@@ -1015,12 +1051,25 @@ app-inspector:empty {
 .app-wire-sent { --wire: var(--theme-info-foreground); }
 .app-wire-answer { --wire: var(--theme-success-foreground); }
 .app-wire-error { --wire: var(--theme-error); }
+.app-wire-go { --wire: var(--theme-text-primary); }
 
 .app-arrow-trigger path { fill: var(--theme-warning-foreground); }
 .app-arrow-arg path { fill: var(--theme-link); }
 .app-arrow-sent path { fill: var(--theme-info-foreground); }
 .app-arrow-answer path { fill: var(--theme-success-foreground); }
 .app-arrow-error path { fill: var(--theme-error); }
+.app-arrow-go path { fill: var(--theme-text-primary); }
+
+/* Where a button goes is a dashed line to the screen's tab; so is a wire whose element is on a
+   screen that isn't shown, which ends at that screen's tab. */
+.app-wire-go .app-wire-line,
+.app-wire-elsewhere .app-wire-line {
+    stroke-dasharray: 5 4;
+}
+
+.app-wire-elsewhere .app-wire-line {
+    opacity: 0.6;
+}
 
 .app-wire-hit {
     fill: none;
@@ -1147,6 +1196,70 @@ app-inspector:empty {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* An app with several screens has a tab for each in its title bar, with the ● that goes there. */
+.app-screen-bar[data-tabbed] {
+    padding: 0 4px;
+}
+
+.app-screen-bar[data-tabbed] .app-screen-dots,
+.app-screen-bar[data-tabbed] .app-screen-name {
+    display: none;
+}
+
+.app-screen-tabs {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    height: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.app-screen-tab {
+    flex: 0 1 auto;
+    gap: 5px;
+    min-width: 46px;
+    height: 22px;
+    min-height: 22px;
+    padding: 0 5px 0 8px;
+    border-color: transparent;
+    border-radius: var(--radius-200);
+    background: transparent;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+}
+
+.app-screen-tab:hover:not(:disabled) {
+    background: var(--theme-hover);
+}
+
+.app-screen-tab[aria-selected='true'] {
+    flex-shrink: 0;
+    border-color: var(--theme-border-light);
+    background: var(--theme-background);
+    color: var(--theme-text-primary);
+    font-weight: 600;
+}
+
+.app-screen-tab.app-selected {
+    border-color: var(--theme-link);
+}
+
+.app-screen-tab-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.app-port-screen {
+    --port: var(--theme-text-primary);
+    position: relative;
+    width: 10px;
+    height: 10px;
 }
 
 .app-screen-body {

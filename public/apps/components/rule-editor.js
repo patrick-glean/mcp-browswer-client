@@ -22,7 +22,7 @@ const ANSWER_CHIPS = [
     ['result', 'The whole result, as JSON'],
     ['error', 'Why it failed'],
 ];
-const KIND_GROUPS = { button: 'Buttons', input: 'Fields', output: 'Outputs', static: 'Text' };
+const KIND_GROUPS = { button: 'Buttons', input: 'Fields', output: 'Outputs', static: 'Text', screen: 'Screens' };
 const MAX_PICKS = 40;
 
 // The values in an answer, by the path a template names them with: [[path, value]].
@@ -90,6 +90,10 @@ export class RuleEditor {
         return `${app ? '<option value="">The app</option>' : ''}${none}${missing}${groups}`;
     }
 
+    isScreen(id) {
+        return this.apps.elements().some(element => element.id === id && element.kind === 'screen');
+    }
+
     // The ids {{id}} usually brings in: fields, then outputs (any element's id works).
     valueIds() {
         const order = { input: 0, output: 1 };
@@ -154,10 +158,10 @@ export class RuleEditor {
                         <ol class="app-route-list">${(rule.then || []).map((route, index) => `
                             <li class="app-route${focused('route', index)}" data-route="${index}">
                                 <select data-route-if aria-label="When this happens">${Object.entries(ROUTE_WHEN).map(([when, label]) => `<option value="${when}">${label[0].toUpperCase()}${label.slice(1)}</option>`).join('')}</select>
-                                <span class="app-route-word">put</span>
+                                <span class="app-route-word" data-route-put>put</span>
                                 <input type="text" class="mono" data-route-show aria-label="What to show" placeholder="nothing, which clears it" autocomplete="off" spellcheck="false">
                                 <span class="app-route-where">
-                                    <span class="app-route-word">into</span>
+                                    <span class="app-route-word" data-route-into-word>into</span>
                                     <select data-route-into aria-label="Where it goes"></select>
                                     <select data-route-how aria-label="How">${Object.entries(ROUTE_HOW).map(([how, label]) => `<option value="${how}">${label}</option>`).join('')}</select>
                                     <button type="button" class="btn-icon btn-sm btn-tertiary" data-remove-route aria-label="Remove this"><span class="icon icon-x" aria-hidden="true"></span></button>
@@ -210,9 +214,13 @@ export class RuleEditor {
             row.querySelector('[data-route-if]').value = routeWhen(route);
             row.querySelector('[data-route-show]').value = route.show ?? '';
             const into = row.querySelector('[data-route-into]');
-            into.innerHTML = this.elementOptions(['output', 'input', 'static', 'button'], route.into);
+            into.innerHTML = this.elementOptions(['output', 'input', 'static', 'button', 'screen'], route.into);
             into.value = route.into || '';
             row.querySelector('[data-route-how]').value = route.how || 'replace';
+            // A route into a screen goes there, so it shows nothing.
+            const go = this.isScreen(route.into);
+            row.classList.toggle('app-route-go', go);
+            row.querySelector('[data-route-put]').textContent = go ? 'go to' : 'put';
         });
         const chips = this.container.querySelector('[data-route-chips]');
         const answerChips = ANSWER_CHIPS.map(([name, help]) => `<button type="button" class="wb-chip mono" data-insert-show="{{${name}}}" title="${escapeHtml(help)}">${name}</button>`);
@@ -295,6 +303,7 @@ export class RuleEditor {
         card.querySelector('[data-sentence]').textContent = describeRule(rule, {
             elementName: element => element || '…',
             serverName: url => (url ? this.apps.serverName(url) : '…'),
+            isScreen: id => this.isScreen(id),
         });
         const [[, problems]] = flowProblems([rule], { elements: this.apps.elements(), servers: this.shell.servers });
         const list = card.querySelector('[data-problems]');
@@ -345,11 +354,14 @@ export class RuleEditor {
             });
             this.fill();
         } else if (target.matches('[data-route-into]')) {
-            // An answer sent to a box takes the box's key of it, unless it was made to show more.
+            // An answer sent to a box takes the box's key of it, unless it was made to show more. A
+            // route to a screen shows nothing, and one from a screen to an element what it usually does.
             const box = isBox(this.apps.elements().find(element => element.id === target.value));
             this.editRoute(target, route => {
                 const plain = route.show === DEFAULT_SHOW.ok || route.show === `{{json.${answerKey(route.into)}}}`;
-                if (routeWhen(route) === 'ok' && plain) route.show = box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW.ok;
+                if (this.isScreen(target.value)) Object.assign(route, { show: '', how: 'replace' });
+                else if (this.isScreen(route.into)) route.show = routeWhen(route) === 'ok' && box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW[routeWhen(route)];
+                else if (routeWhen(route) === 'ok' && plain) route.show = box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW.ok;
                 route.into = target.value;
             });
             this.fill();
