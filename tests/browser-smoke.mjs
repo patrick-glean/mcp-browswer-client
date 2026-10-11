@@ -1340,7 +1340,9 @@ async function main() {
                 notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
 
             // Front desk, under Examples: a visitor kiosk over four screens, which the canvas shows
-            // one at a time, each with a tab above it, calling the mock's front desk tools.
+            // one at a time, each with a tab above it, calling the mock's front desk tools. The link
+            // opened above is a tab in front of this one, where the canvas couldn't draw its wires.
+            await page.send('Page.bringToFront');
             await page.run(`document.querySelector('apps-rail [data-example="frontdesk"]').click()`);
             const tabs = `[...document.querySelectorAll('app-canvas [data-screen-tab]')]`;
             const gutter = `[...document.querySelectorAll('app-canvas [data-gutter-row]')].map(row => row.dataset.gutterRow).join(' ')`;
