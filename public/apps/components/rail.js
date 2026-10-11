@@ -6,7 +6,7 @@ import { EXAMPLES } from '../apps.js';
 import { AppElement } from './base.js';
 import { ModelPicker } from './model-picker.js';
 
-const SHOWN_EXAMPLES = ['chat', 'dashboard'];
+const SHOWN_EXAMPLES = ['chat', 'dashboard', 'frontdesk'];
 
 export class AppsRail extends AppElement {
     setup(signal) {
@@ -92,7 +92,7 @@ export class AppsStart extends AppElement {
                 </li>`).join('')}
             </ul>
             <div class="apps-start-model">
-                <p class="app-note text-secondary">The examples call this model. Without Glean, the mock server's chat tool stands in for one.</p>
+                <p class="app-note text-secondary">Chat and Project pulse call this model; without Glean, the mock server's chat tool stands in for one. Front desk calls no model, only the mock server's front desk tools.</p>
                 <div data-model-picker></div>
             </div>`;
         this.picker = new ModelPicker({ shell: this.shell, apps: this.apps, container: this.$('[data-model-picker]'), signal: this.signal });

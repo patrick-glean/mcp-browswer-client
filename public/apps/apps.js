@@ -17,7 +17,7 @@
 //   highlight  point these elements out on the screen           { elements }
 
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
-import { conversationFieldOf } from './agent.js';
+import { conversationFieldOf, serverWithTool } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
@@ -181,11 +181,74 @@ export function dashboardApp({ shell, workbench, model, name }) {
     return newApp({ name, screen: { kind: 'components', size: 'wide', components }, flow: [rule] });
 }
 
+// The mock server, as the Guide adds it: where the Front desk example's tools are.
+const MOCK_URL = 'http://127.0.0.1:8081';
+const VISIT_SHOWN = '{{structured.visitor}}, {{structured.company}}\nHere to see {{structured.host}} at {{structured.time}}, in {{structured.room}}';
+
+// The Front desk example: a visitor kiosk over four screens, with no model in it. Welcome asks who
+// you are; find_visit looks for today's visit, and the app goes to Confirm with it, or to Not found
+// with why. Confirm's Yes checks you in (check_in) and goes to Checked in; Not me goes to Welcome.
+// Checked in's Done starts over for the next visitor; Not found goes back to try again, or calls
+// the front desk. Its tools are on the server that has find_visit, else on the mock server, to add.
+export function frontDeskApp({ shell, name }) {
+    const server = serverWithTool(shell.servers, 'find_visit')?.server;
+    const serverUrl = server?.url || MOCK_URL;
+    const call = (toolName, args) => ({ serverUrl, toolName, args });
+    const add = (type, props) => newComponent(type, [], props);
+    const components = [
+        add('title', { id: 'title', text: name }),
+        add('screen', { id: 'welcome', label: 'Welcome' }),
+        add('text', { id: 'intro', text: "Welcome! Tell us who you are, and we'll let your host know you're here." }),
+        add('textbox', { id: 'visitor', label: 'Your name', placeholder: 'As it is on your invitation' }),
+        add('textbox', { id: 'host', label: "Who you're here to see", placeholder: 'If you know' }),
+        add('button', { id: 'find', label: 'Find my visit' }),
+        add('screen', { id: 'confirm', label: 'Confirm' }),
+        add('output', { id: 'visit', label: 'Is this you?', placeholder: 'The visit find_visit found shows here.' }),
+        add('button', { id: 'yes', label: 'Yes, check me in', width: 'two-thirds' }),
+        add('button', { id: 'notme', label: 'Not me', width: 'third', go: 'welcome' }),
+        add('screen', { id: 'done', label: 'Checked in' }),
+        add('output', { id: 'badge', label: "You're checked in", placeholder: 'Your badge, and who knows you are here, show here.' }),
+        add('button', { id: 'next', label: 'Done', go: 'start' }),
+        add('screen', { id: 'notfound', label: 'Not found' }),
+        add('output', { id: 'missing', label: "We couldn't find your visit", placeholder: 'Why shows here.' }),
+        add('button', { id: 'retry', label: 'Try again', width: 'half', go: 'back' }),
+        add('button', { id: 'desk', label: 'Call the front desk', width: 'half' }),
+    ];
+    const find = {
+        ...newRule({ ...call('find_visit', { visitor: '{{visitor}}', host: '{{host}}' }), into: null }),
+        when: [trigger('find', 'click'), trigger('visitor', 'enter'), trigger('host', 'enter')],
+        then: [
+            { if: 'ok', show: VISIT_SHOWN, into: 'visit', how: 'replace' },
+            { if: 'ok', show: '', into: 'confirm', how: 'replace' },
+            { if: 'error', show: '{{error}}', into: 'missing', how: 'replace' },
+            { if: 'error', show: '', into: 'notfound', how: 'replace' },
+        ],
+    };
+    const checkIn = {
+        ...newRule({ element: 'yes', event: 'click', ...call('check_in', { visitor: '{{visitor}}', host: '{{host}}' }), into: null }),
+        then: [
+            { if: 'ok', show: '{{text}}', into: 'badge', how: 'replace' },
+            { if: 'ok', show: '', into: 'done', how: 'replace' },
+            { if: 'error', show: '{{error}}', into: 'visit', how: 'replace' },
+        ],
+    };
+    const desk = {
+        ...newRule({ element: 'desk', event: 'click', ...call('call_front_desk', { visitor: '{{visitor}}', reason: "The kiosk couldn't find their visit" }), into: null }),
+        then: [
+            { if: 'ok', show: '{{text}}', into: 'missing', how: 'replace' },
+            { if: 'error', show: '{{error}}', into: 'missing', how: 'replace' },
+        ],
+    };
+    const app = newApp({ name, screen: { kind: 'components', components }, flow: [find, checkIn, desk] });
+    return server ? app : { ...app, serverNames: { [MOCK_URL]: 'Mock server' } };
+}
+
 // What create() starts from: the examples, and a blank app. Each with the name its app gets, and
 // what it is in a few words (`kind`) and in a sentence (`about`).
 export const EXAMPLES = {
     chat: { name: 'Chat', make: chatApp, kind: 'agent loop', about: "A conversation with a model, which can call your servers' tools" },
     dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
+    frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, with the mock server's tools" },
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 
@@ -505,8 +568,8 @@ export class Apps {
 
     // --- The list ---
 
-    // A new app from an example (EXAMPLES): `chat`, `dashboard`, or `blank` (a text box, a button
-    // and an output). The examples call the model.
+    // A new app from an example (EXAMPLES): `chat`, `dashboard`, `frontdesk`, or `blank` (a text
+    // box, a button and an output). Chat and the dashboard call the model.
     async create(example = 'blank') {
         const { name: base, make } = EXAMPLES[example] || EXAMPLES.blank;
         const taken = new Set(this.list.map(app => app.name));
