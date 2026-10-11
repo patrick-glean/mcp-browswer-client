@@ -3,15 +3,18 @@
 // call tools, reach the network or run the screen's own scripts. Each call goes to the worker like
 // a Workbench call, and is recorded as a run from the app.
 //
-// Frame -> page: ready { values }, event { element, event, values },
+// Frame -> page: ready { values, screen }, event { element, event, values },
 //                layout { height, rects: { id: { top, left, width, height } } }, open { url },
-//                escape
+//                escape, screen { id, button }, restart { button }
 // Page -> frame: config { config }, show { element, value, how, failed }, busy { elements, busy },
-//                highlight { elements }
+//                highlight { elements }, screen { id }
 // Every message carries the token this load of the frame was given. `layout` says where each
 // element the config tracks is, so the canvas can put its ports on the running screen. `open`
 // asks the page to open a link's http(s) address in a new tab, which the sandbox can't. `escape`
 // is Escape pressed in the frame, which the page's own keys never see (Preview closes on it).
+// `screen` says which of the app's screens shows, after a button (`button`) or the page went
+// there, and `restart` is a button that starts the app over, which the page does by loading it
+// again.
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
 import { allowedCall, composePrompt, serverWithTool, toolCallsIn } from './agent.js';
@@ -49,16 +52,42 @@ export function frameRuntime({ config, token, roles = {} }) {
     const waitsFor = (id, event) => watch.some(entry => entry.element === id && entry.event === event);
     const report = (element, event) => send({ type: 'event', element: element.id, event, values: values() });
 
+    // The screens, one showing at a time, and the ones gone through, for Back.
+    const screens = [...document.querySelectorAll('[data-screen]')];
+    const shownScreen = () => screens.find(screen => !screen.hidden)?.id || '';
+    const history = [];
+    const showScreen = (id, { button = null, back = false } = {}) => {
+        const target = screens.find(screen => screen.id === id);
+        const current = shownScreen();
+        if (!target || target.id === current) return;
+        if (!back && current) history.push(current);
+        for (const screen of screens) screen.hidden = screen !== target;
+        scrollTo(0, 0);
+        send({ type: 'screen', id, button });
+        layout();
+    };
+    // Where a button with somewhere to go takes people: a screen, back, or a fresh start.
+    const go = (where, button) => {
+        if (where === 'start') send({ type: 'restart', button });
+        else if (where === 'back') {
+            if (history.length) showScreen(history.pop(), { button, back: true });
+        } else showScreen(where, { button });
+    };
+
     document.addEventListener('click', event => {
         const link = event.target.closest?.('a[href]');
         if (link && !link.getAttribute('href').startsWith('#')) event.preventDefault();
+        const goer = event.target.closest?.('button[data-go]');
         for (let element = event.target; element && element !== document.documentElement; element = element.parentElement) {
             if (element.id && waitsFor(element.id, 'click')) {
                 event.preventDefault();
+                // The rules get what the screen held before the button took people elsewhere.
                 report(element, 'click');
+                if (goer && !goer.disabled) go(goer.dataset.go, goer.id);
                 return;
             }
         }
+        if (goer) return go(goer.dataset.go, goer.id);
         if (link && /^https?:$/.test(link.protocol)) send({ type: 'open', url: link.href });
     }, true);
     document.addEventListener('keydown', event => {
@@ -172,6 +201,7 @@ export function frameRuntime({ config, token, roles = {} }) {
             ({ watch, read, track = [] } = message.config);
             layout();
         } else if (message.type === 'show') show(message);
+        else if (message.type === 'screen') showScreen(message.id);
         else if (message.type === 'busy') busy(message.elements || [], message.busy);
         else if (message.type === 'highlight') highlight(message.elements);
     });
@@ -179,7 +209,7 @@ export function frameRuntime({ config, token, roles = {} }) {
         if (event.key === 'Escape') send({ type: 'escape' });
     }, true);
     new ResizeObserver(layout).observe(document.documentElement);
-    send({ type: 'ready', values: values() });
+    send({ type: 'ready', values: values(), screen: shownScreen() });
     layout();
 }
 
@@ -221,10 +251,11 @@ const shortText = (text, max = 80) => {
 // the next event. It tells its owner what happens: `onTrace` each step in words, `onLayout` where
 // the screen's elements are, `onActivity` a rule starting its call ({ ruleId, phase: 'call',
 // trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error', routes }), `onAnswer` each
-// rule's answer, for picking values from it, and `onEscape` Escape pressed on the screen.
+// rule's answer, for picking values from it, `onScreen` which of the app's screens shows, and
+// `onEscape` Escape pressed on the screen.
 export class AppRunner {
-    constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, onEscape = () => {}, signal }) {
-        Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer, onEscape });
+    constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, onScreen = () => {}, onEscape = () => {}, signal }) {
+        Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer, onScreen, onEscape });
         this.frame = null;
         this.token = null;
         this.running = new Set();
@@ -241,7 +272,8 @@ export class AppRunner {
     }
 
     // Shows the app's screen; with `start`, its "when the app opens" rules run once it's ready.
-    load(frame, { start = false } = {}) {
+    // Without, `screen` is the one of the app's screens to show (the canvas's, after an edit).
+    load(frame, { start = false, screen = null } = {}) {
         const app = this.getApp();
         if (this.frame !== frame) {
             frame.addEventListener('load', () => {
@@ -259,8 +291,15 @@ export class AppRunner {
         this.ready = false;
         this.navigated = false;
         this.starting = start;
-        this.elementIds = elementsOf(app.screen).map(element => element.id);
+        const elements = elementsOf(app.screen);
+        this.screenAfterLoad = !start && elements.some(element => element.id === screen && element.kind === 'screen') ? screen : null;
+        this.elementIds = elements.map(element => element.id);
         frame.srcdoc = frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token });
+    }
+
+    // Shows one of the app's screens, as a button that goes there would.
+    showScreen(id) {
+        this.post({ type: 'screen', id });
     }
 
     // The flow changed: the frame watches for what its rules wait for now.
@@ -285,6 +324,10 @@ export class AppRunner {
             this.ready = true;
             // The flow may have changed while the frame loaded.
             this.flowChanged();
+            const wanted = this.screenAfterLoad;
+            this.screenAfterLoad = null;
+            if (wanted && wanted !== message.screen) this.showScreen(wanted);
+            else if (typeof message.screen === 'string' && message.screen) this.onScreen(message.screen);
             if (this.starting) {
                 this.starting = false;
                 this.fire('', 'open', message.values || {});
@@ -297,7 +340,19 @@ export class AppRunner {
             this.open(message.url);
         } else if (message.type === 'escape') {
             this.onEscape();
+        } else if (message.type === 'screen' && typeof message.id === 'string') {
+            if (typeof message.button === 'string') this.trace({ kind: 'route', text: `${message.button} went to ${this.screenName(message.id)}` });
+            this.onScreen(message.id);
+        } else if (message.type === 'restart') {
+            if (typeof message.button === 'string') this.trace({ kind: 'note', text: `${message.button} started the app over.` });
+            this.load(this.frame, { start: true });
         }
+    }
+
+    // A screen as What happened names it: its name, and its id when that's different.
+    screenName(id) {
+        const screen = elementsOf(this.getApp()?.screen).find(element => element.id === id && element.kind === 'screen');
+        return screen && screen.label !== id ? `“${screen.label}” (${id})` : `“${id}”`;
     }
 
     // A link on the screen, in a tab of its own: only web addresses, and without this page as its opener.
@@ -380,7 +435,8 @@ export class AppRunner {
         const sentRoutes = this.route(rule, { ok: true, values: {} }, screen, 'sent');
         this.onActivity({ ruleId: rule.id, phase: 'call', trigger, routes: sentRoutes });
         const triggerElement = triggersOf(rule)[trigger]?.element || '';
-        const busy = [...new Set([triggerElement, ...(rule.then || []).map(route => route.into)].filter(Boolean))];
+        const screens = new Set(elementsOf(app?.screen).filter(element => element.kind === 'screen').map(element => element.id));
+        const busy = [...new Set([triggerElement, ...(rule.then || []).map(route => route.into)].filter(id => id && !screens.has(id)))];
         this.post({ type: 'busy', elements: busy, busy: true });
         // Until the tool calls in its answer have run too, so the next message gets their results.
         this.running.add(rule.id);
@@ -455,6 +511,12 @@ export class AppRunner {
         for (const [route] of taken) {
             if (!this.elementIds.includes(route.into)) {
                 this.trace({ kind: 'error', text: `${route.into || 'Where the answer goes'} isn't on the screen.` });
+                continue;
+            }
+            // A route into a screen goes there.
+            if (elements.get(route.into)?.kind === 'screen') {
+                this.showScreen(route.into);
+                this.trace({ kind: 'route', text: `Went to ${this.screenName(route.into)}` });
                 continue;
             }
             const values = { ...screen, ...answer.values };
