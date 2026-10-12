@@ -134,6 +134,11 @@ This file tracks the MCP client libraries our service worker runs and the app bu
 - [x] On the canvas a tab for each screen, wires to other screens' elements ending at their tabs, buttons dragged to a tab; the Inspector and Outline move and delete a screen with what's on it; Preview's bar names the screen
 - [x] The Front desk example, a visitor kiosk over four screens with no model, on the mock's `find_visit`, `check_in` and `call_front_desk`
 
+### Done (app builder milestone 2, seventh step: demo servers built in)
+- [x] MCP servers that answer in the service worker (`public/demo-servers/`), reached by the library's own requests to `.invalid` addresses: Front desk (demo) and the demo model, in both protocol eras
+- [x] The examples come with theirs: Front desk calls its own, and Chat and Project pulse the demo model when no other model is found; the Guide and the Model picker offer them, and Import adds them
+- [x] Servers it calls: an app's calls move to another server with the same tools that takes what it sends, such as yours in place of a demo server
+
 ### Next
 - [ ] App builder milestone 2, next steps: rules that chain (a tool's Answer wired to another tool, so a model gets its tools' results at once), allowed tools for a rule's model, and output checks
 - [ ] App builder milestone 3: a download that runs on its own (a static site or web component with a library); milestone 4: an in-browser model as a local MCP server

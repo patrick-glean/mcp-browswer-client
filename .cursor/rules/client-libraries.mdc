@@ -16,6 +16,7 @@ The app runs whichever MCP client library the page picks: the TypeScript SDK one
 2. **Message Flow**:
    - Page -> Service Worker -> MCP client library -> MCP server, and back
    - Pages never speak MCP and never see tokens; the worker never builds JSON-RPC
+   - The demo servers built in (`public/demo-servers/`) are servers, not part of the worker's logic: `installDemoServers` answers the library's own requests to their `.invalid` addresses through `self.fetch`, so the library talks to them as to any server. Keep every other request going to the network, and never special-case a demo server in a library or in `sw.js`'s handlers
    - Handle errors at each step: `Result<T, JsValue>` in Rust, rejections with `McpError` in JavaScript, try/catch in the worker, error replies handled in the page
 
 3. **Testing Process**:
