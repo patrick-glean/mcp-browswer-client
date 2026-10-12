@@ -9,7 +9,8 @@
 // A part ({ type: 'part', html, from, ask }) is HTML a model or a tool returned, such as a
 // dashboard, kept without its scripts. On the screen its ids get the part's id in front (`refresh` in the part
 // `dashboard` is `dashboard.refresh`) and its styles reach only inside it, so parts can't clash;
-// the flow takes over its buttons and fields by those ids.
+// the flow takes over its buttons and fields by those ids. The screen's look reaches in (its font,
+// how buttons and fields look) but not how it lays out its own buttons and fields.
 //
 // Components can make several screens: a Screen ({ type: 'screen', label }) starts one, and the
 // components after it, up to the next, are on it. Those above the first Screen are on every screen,
@@ -352,9 +353,11 @@ h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
 .text { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .label { font-size: 0.8125rem; font-weight: 600; }
-input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: inherit; font: inherit; }
+input, textarea, select { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: inherit; font: inherit; }
+.field > input, .field > textarea, .field > select { width: 100%; }
 input:focus, textarea:focus, select:focus { border-color: var(--accent); outline: none; }
-button { justify-self: start; align-self: end; padding: 9px 20px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
+button { padding: 9px 20px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
+.app > button, .screen > button { justify-self: start; align-self: end; }
 button:disabled { cursor: progress; opacity: 0.55; }
 .output { min-height: 46px; padding: 12px 14px; border-radius: 10px; background: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; }
 .output:empty::before { content: attr(data-placeholder); color: var(--muted); }
