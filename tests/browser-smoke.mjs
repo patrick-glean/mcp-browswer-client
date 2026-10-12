@@ -601,6 +601,17 @@ async function main() {
         const counted = await callTool(page, `${HOST}:${PORTS.sse}/`, 'count', { n: 3 });
         check('modern server with SSE replies: reads a streamed reply', !!counted?.includes('Counted to 3'), counted);
 
+        // A demo server built in answers in the worker, through the library's own requests, at an
+        // address no network answers.
+        const deskUrl = 'https://frontdesk.demo.invalid/mcp';
+        const builtIn = await addAndConnect(page, deskUrl, 'Front desk (demo)');
+        const builtInTools = await toolNames(page, deskUrl);
+        const builtInCall = await callTool(page, deskUrl, 'find_visit', { visitor: 'ada' });
+        check('built-in demo server: connects in the worker as MCP 2026-07-28, lists its tools and answers a call',
+            builtIn?.status === 'connected' && builtIn.era === 'modern' && builtIn.name === 'Front desk demo server'
+                && builtInTools?.join(', ') === 'find_visit, check_in, call_front_desk' && !!builtInCall?.includes('Ada Lovelace of Analytical Engines is here to see Grace Hopper at 10:00'),
+            `${JSON.stringify(builtIn)}; ${builtInTools}; ${builtInCall?.slice(0, 120)}`);
+
         // The inspector views of the modern mock: echo has a title and annotations, count an output
         // schema, and broken_header is hidden.
         const inspector = await page.run(`(() => {
@@ -1492,6 +1503,44 @@ async function main() {
             await page.run(`document.querySelector('app-preview [data-device="desktop"]').click()`);
             await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
             await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
+
+            // Front desk came with its demo server, built in. The mock server has the same tools,
+            // so the Inspector's Servers it calls offers it in its place, and not the servers without
+            // them; choosing it moves every rule, and the next check-in goes there.
+            const deskRun = await page.run(`${latestRun('check_in', 'app')}.then(run => run?.serverUrl || null)`);
+            await page.run(`document.querySelector('app-canvas').apps.select(null)`);
+            const offered = await page.waitFor(`(() => {
+                const use = document.querySelector('app-inspector [data-server-use]');
+                const select = use?.querySelector('[data-call-instead]');
+                if (!select) return null;
+                const options = [...select.options].slice(1);
+                return JSON.stringify({ calls: use.dataset.serverUse, tools: use.querySelector('.app-server-use-tools').textContent, badge: use.querySelector('.badge')?.textContent,
+                    can: options.filter(option => !option.disabled).map(option => option.value), cannot: options.filter(option => option.disabled).map(option => option.textContent) });
+            })()`, 5000);
+            const { calls, tools: called, badge: builtInBadge, can = [], cannot = [] } = JSON.parse(offered || '{}');
+            await page.run(`(() => {
+                const select = document.querySelector('app-inspector [data-call-instead]');
+                select.value = ${JSON.stringify(modernUrl)};
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const moved = await page.waitFor(`(() => {
+                const urls = [...new Set(document.querySelector('app-canvas').apps.app.flow.map(rule => rule.call.serverUrl))];
+                return urls.join(' ') === ${JSON.stringify(modernUrl)} ? document.querySelector('app-inspector [data-server-use]')?.dataset.serverUse : null;
+            })()`, 5000);
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            await findVisit('ada');
+            await frameWaitFor(`${showing} === 'confirm'`);
+            await tap('yes');
+            await frameWaitFor(`${showing} === 'done'`);
+            const mockRun = await page.waitFor(`${latestRun('check_in', 'app')}.then(run => run?.serverUrl === ${JSON.stringify(modernUrl)} ? run.serverUrl : null)`, 5000);
+            await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
+            await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
+            check("Apps: Front desk runs on its demo server, built in, and can call the mock server instead, which has the same tools; servers without them say what's missing",
+                deskRun === deskUrl && calls === deskUrl && called === 'find_visit, check_in, call_front_desk' && builtInBadge === 'Demo, built in'
+                    && can.includes(modernUrl) && !can.includes(`${HOST}:${PORTS.legacy}/`) && cannot.some(text => text.endsWith(': it has no find_visit'))
+                    && moved === modernUrl && mockRun === modernUrl,
+                `${deskRun}; ${offered}; ${moved}; ${mockRun}`);
             await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);

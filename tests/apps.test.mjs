@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
-import { chatApp, dashboardApp, foundModel, frontDeskApp, readmeFor } from '../public/apps/apps.js';
+import { DEMO_SERVERS } from '../public/demo-servers/index.js';
+import { chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, readmeFor } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -21,6 +22,7 @@ import {
     canMove, componentsHtml, elementsOfComponents, endOfScreen, freeId, goOptions, htmlFromResult, movedComponents, newComponent, partElements, prefixIds,
     scopeCss, screenOfEach, screensOf, withNewScreen, withoutComponent,
 } from '../public/apps/screen.js';
+import { serverCalls, whyNotInstead, withCallsTo } from '../public/apps/servers.js';
 import { crc32, unzip, zip } from '../public/apps/zip.js';
 
 const MOCK = 'http://127.0.0.1:8081/';
@@ -453,7 +455,7 @@ test('asking a model sends it what to make, with the rules a screen needs', () =
     assert.deepEqual(modelCall({ ...model, conversationField: null }, 'Write the screen…', { schema, goal: 'a ticket dashboard' }).args, { _user_goal: 'a ticket dashboard', message: 'Write the screen…' });
     assert.deepEqual(modelArgs(model, { prompt: '{{message}}', conversation: '{{conversation}}', schema, base: { n: 1, message: 'test' } }),
         { n: 1, _user_goal: '{{message}}', history: '{{conversation}}', message: '{{message}}' });
-    assert.throws(() => modelCall(null, 'x'), /There is no model to ask yet\. Add a server with a chat tool \(Glean, or the mock\), or choose one under Model\./);
+    assert.throws(() => modelCall(null, 'x'), /There is no model to ask yet\. Add a server with a chat tool \(Glean, or the demo model, built in\), or choose one under Model\./);
     assert.throws(() => modelCall({ ...model, messageField: null }, 'x'), /Choose the field of chat the request goes in, under Model\./);
 });
 
@@ -854,8 +856,12 @@ test("a route into a screen goes there, and a screen connects to a button, which
         'When next is clicked, call echo on http://127.0.0.1:8081/ with text = {{q}}; if it works, go to second; if it fails, go to second.');
 });
 
-test('the Front desk example: four screens under its title, and three rules on the tools of the server that has them, with no model', () => {
-    const servers = { [MOCK]: { url: MOCK, alias: 'Mock', status: 'connected', tools: ['find_visit', 'check_in', 'call_front_desk'].map(name => ({ name })) } };
+test('the Front desk example: four screens under its title, and three rules on its demo server, with no model', () => {
+    const DESK = DEMO_SERVERS.frontdesk.url;
+    const servers = {
+        [MOCK]: { url: MOCK, alias: 'Mock', status: 'connected', tools: DEMO_SERVERS.frontdesk.tools },
+        [DESK]: { url: DESK, alias: DEMO_SERVERS.frontdesk.name, status: 'connected', tools: DEMO_SERVERS.frontdesk.tools },
+    };
     const app = frontDeskApp({ shell: { servers }, name: 'Front desk' });
     const components = app.screen.components;
     assert.deepEqual(screensOf(components).map(screen => `${screen.id} ${screen.label}`), ['welcome Welcome', 'confirm Confirm', 'done Checked in', 'notfound Not found']);
@@ -864,7 +870,8 @@ test('the Front desk example: four screens under its title, and three rules on t
     assert.deepEqual([null, 'welcome', 'confirm', 'done', 'notfound'].map(on), [
         ['title'], ['intro', 'visitor', 'host', 'find'], ['visit', 'yes', 'notme → welcome'], ['badge', 'next → start'], ['missing', 'retry → back', 'desk'],
     ]);
-    assert.deepEqual(app.flow.map(rule => [rule.call.serverUrl, rule.call.toolName, rule.prompt]), [[MOCK, 'find_visit', undefined], [MOCK, 'check_in', undefined], [MOCK, 'call_front_desk', undefined]], 'no rule asks a model');
+    assert.deepEqual(app.flow.map(rule => [rule.call.serverUrl, rule.call.toolName, rule.prompt]), [[DESK, 'find_visit', undefined], [DESK, 'check_in', undefined], [DESK, 'call_front_desk', undefined]],
+        'no rule asks a model, and its own server wins over another with the same tools');
     assert.deepEqual(flowProblems(app.flow, { elements, servers }).map(([, problems]) => problems), [[], [], []]);
     const isScreen = id => elements.some(element => element.id === id && element.kind === 'screen');
     const [find, checkIn] = app.flow;
@@ -883,8 +890,44 @@ test('the Front desk example: four screens under its title, and three rules on t
     const dml = toDml(app);
     assert.equal(toDml(fromDml(dml).app), dml);
     assert.equal(app.serverNames, undefined);
+    assert.match(readmeFor(app, { serverName: () => 'Front desk (demo)' }), /\n- Front desk \(demo\): https:\/\/frontdesk\.demo\.invalid\/mcp, a demo server built into MCP Browser Client, which Import adds for you\n/);
+});
 
-    const alone = frontDeskApp({ shell: { servers: {} }, name: 'Front desk' });
-    assert.deepEqual([...new Set(alone.flow.map(rule => rule.call.serverUrl))], ['http://127.0.0.1:8081']);
-    assert.deepEqual(alone.serverNames, { 'http://127.0.0.1:8081': 'Mock server' }, 'without the tools, its rules call the mock server, which they offer to add');
+test("an app's calls move to another server with the same tools, and one that can't take them says why", () => {
+    const DESK = DEMO_SERVERS.frontdesk.url;
+    const app = frontDeskApp({ name: 'Front desk' });
+    assert.deepEqual(serverCalls(app), [{ url: DESK, tools: [
+        { name: 'find_visit', sends: ['visitor', 'host'] },
+        { name: 'check_in', sends: ['visitor', 'host'] },
+        { name: 'call_front_desk', sends: ['visitor', 'reason'] },
+    ] }]);
+    const [{ tools }] = serverCalls(app);
+    assert.deepEqual(whyNotInstead(tools, { url: MOCK, tools: DEMO_SERVERS.frontdesk.tools }), [], 'the mock server has the same tools');
+    assert.deepEqual(whyNotInstead(tools, { url: 'https://other.example/mcp', tools: [{ name: 'find_visit' }] }), ['it has no check_in', 'it has no call_front_desk']);
+    const strict = DEMO_SERVERS.frontdesk.tools.map(tool => (tool.name === 'call_front_desk' ? { ...tool, inputSchema: { ...tool.inputSchema, required: ['visitor', 'badge'] } } : tool));
+    assert.deepEqual(whyNotInstead(tools, { url: 'https://strict.example/mcp', tools: strict }), ['its call_front_desk needs badge']);
+    const moved = withCallsTo(app, DESK, MOCK);
+    assert.deepEqual(serverCalls(moved).map(server => server.url), [MOCK]);
+    assert.equal(app.flow[0].call.serverUrl, DESK, 'the app it was given is left as it was');
+
+    const sample = sampleApp();
+    sample.flow.push(newRule({ element: 'ask', serverUrl: MOCK, toolName: 'echo', args: { text: '{{question}}', extra: 1 } }));
+    assert.deepEqual(serverCalls(sample)[0].tools.map(tool => `${tool.name}: ${tool.sends.join(', ')}`), [
+        'search_notes: query, limit, include_archived, tags, snippet, nothing', 'echo: text', 'chat: message',
+    ], 'a tool called twice sends what both calls do');
+    const elsewhere = withCallsTo(sample, MOCK, 'https://new.example/mcp');
+    assert.equal(elsewhere.screen.components.find(component => component.type === 'part').from.serverUrl, 'https://new.example/mcp', "a part's call moves too");
+    const html = { screen: { kind: 'html', html: '', from: { serverUrl: MOCK, toolName: 'make_screen', args: {} } }, flow: [] };
+    assert.equal(withCallsTo(html, MOCK, 'https://new.example/mcp').screen.from.serverUrl, 'https://new.example/mcp', "and an HTML screen's");
+});
+
+test("the model found is Glean's chat, else another chat tool, and the demo model only when there's no other", () => {
+    const chat = { name: 'chat', inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } };
+    const demo = { url: DEMO_SERVERS.model.url, tools: DEMO_SERVERS.model.tools };
+    const glean = 'https://acme-be.glean.com/mcp/default';
+    assert.equal(foundModel({ [demo.url]: demo }).serverUrl, demo.url);
+    assert.equal(foundModel({ [demo.url]: demo, [MOCK]: { url: MOCK, tools: [chat] } }).serverUrl, MOCK);
+    assert.equal(foundModel({ [demo.url]: demo, [MOCK]: { url: MOCK, tools: [chat] }, [glean]: { url: glean, tools: [chat] } }).serverUrl, glean);
+    assert.deepEqual(demoModel(), { serverUrl: demo.url, toolName: 'chat', messageField: 'message', conversationField: 'history' });
+    assert.equal(modelName(demoModel(), {}), 'the demo model');
 });
