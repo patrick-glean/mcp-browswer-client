@@ -528,6 +528,14 @@ app-try {
     line-height: 1.375rem;
 }
 
+/* An id moves to the next line whole, rather than breaking at its hyphen. */
+.app-found code {
+    display: inline-block;
+    max-width: 100%;
+    line-height: 1.125rem;
+    overflow-wrap: anywhere;
+}
+
 .app-kind {
     color: var(--theme-text-secondary);
 }
@@ -1355,6 +1363,21 @@ app-canvas[data-mode='run'] .app-screen-overlay {
     font-weight: 600;
 }
 
+/* Pointed at, a name too long for the gutter shows in full, over the screen's edge. */
+.app-gutter-row:hover {
+    left: auto;
+    z-index: 1;
+}
+
+.app-gutter-row:hover .app-gutter-label {
+    overflow: visible;
+    padding: 1px 5px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-md);
+    color: var(--theme-text-primary);
+}
+
 .app-port {
     --port: var(--theme-text-secondary);
     flex: none;
@@ -1470,8 +1493,12 @@ app-canvas[data-mode='run'] .app-port {
 }
 
 .app-node-title {
+    min-width: 0;
+    overflow: hidden;
     font-size: 0.8125rem;
     font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .app-node-server {

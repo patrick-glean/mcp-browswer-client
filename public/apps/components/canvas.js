@@ -20,6 +20,10 @@ import { TraceList } from './trace.js';
 // The canvas's geometry, which the styles read as custom properties. A wide screen (a
 // dashboard's) runs at `wide` instead of `width`.
 const SCREEN = { x: 24, y: 76, width: 300, wide: 600, bar: 30, gutter: 112 };
+// The gutter widens for its longest name up to this; past it, a name shows in full when pointed at.
+const GUTTER_MAX = 220;
+// Beside a name in the gutter: the lead from the screen, the gap and the port.
+const GUTTER_ROOM = 38;
 // Room between the screen's ports and the tools for a transform's label on a wire.
 const TOOLS_GAP = 120;
 const TOOL_WIDTH = 220;
@@ -44,6 +48,7 @@ export class AppCanvas extends AppElement {
         this.signal = signal;
         this.mode = 'design';
         this.layout = { height: 0, rects: {} };
+        this.gutterWidth = SCREEN.gutter;
         this.trace = new TraceList();
         this.runner = new AppRunner({
             shell: this.shell,
@@ -180,6 +185,7 @@ export class AppCanvas extends AppElement {
             </section>`;
         this.dataset.mode = this.mode;
         this.markMode();
+        this.gutterWidth = SCREEN.gutter;
         for (const [name, value] of Object.entries({ '--screen-x': SCREEN.x, '--screen-y': SCREEN.y, '--screen-bar': SCREEN.bar, '--gutter-w': SCREEN.gutter, '--tool-w': TOOL_WIDTH })) {
             this.style.setProperty(name, `${value}px`);
         }
@@ -308,7 +314,7 @@ export class AppCanvas extends AppElement {
 
     // Where the tools' column starts, right of the screen and its ports.
     toolsX() {
-        return SCREEN.x + this.screenWidth() + SCREEN.gutter + TOOLS_GAP;
+        return SCREEN.x + this.screenWidth() + this.gutterWidth + TOOLS_GAP;
     }
 
     // Where each rule's tool is: where it was put (never over the screen, which may have grown
@@ -356,13 +362,26 @@ export class AppCanvas extends AppElement {
         const goTitle = element => (GO_PLACES[element.go] ? `. When clicked: ${GO_PLACES[element.go].toLowerCase()}` : '');
         const screens = elements.some(element => element.kind === 'screen');
         const portTitle = element => `${element.id}: drag to a tool's Run or one of its fields, or from a tool's Answer to here${element.kind === 'button' && screens ? ", or to a screen's ● for where it goes" : ''}`;
-        this.$('[data-gutter]').innerHTML = `
+        const gutter = this.$('[data-gutter]');
+        gutter.innerHTML = `
             <svg class="app-leads" aria-hidden="true">${Object.values(slots).map(slot => `<path d="M 0 ${SCREEN.bar + slot.at} C 9 ${SCREEN.bar + slot.at}, 7 ${SCREEN.bar + slot.y}, 16 ${SCREEN.bar + slot.y}"/>`).join('')}</svg>
             ${elements.filter(element => slots[element.id]).map(element => `
                 <div class="app-gutter-row" style="--y: ${SCREEN.bar + slots[element.id].y}px" data-gutter-row="${escapeHtml(element.id)}">
                     <span class="app-gutter-label mono" title="${escapeHtml(`${element.label} (${element.id})${goTitle(element)}`)}">${escapeHtml(shortId(element) + goes(element))}</span>
                     <span class="app-port app-port-element app-port-${element.kind}" data-port="${escapeHtml(elementPort(element.id))}" title="${escapeHtml(portTitle(element))}"></span>
                 </div>`).join('')}`;
+        this.fitGutter(gutter);
+    }
+
+    // The gutter fits its longest name, up to GUTTER_MAX. A hidden canvas has nothing to measure,
+    // so the gutter keeps its width until it shows.
+    fitGutter(gutter) {
+        if (!gutter.offsetParent) return;
+        const widest = Math.max(0, ...[...gutter.querySelectorAll('.app-gutter-label')].map(label => label.scrollWidth));
+        const width = Math.min(GUTTER_MAX, Math.max(SCREEN.gutter, Math.ceil(widest) + GUTTER_ROOM));
+        if (width === this.gutterWidth) return;
+        this.gutterWidth = width;
+        this.style.setProperty('--gutter-w', `${width}px`);
     }
 
     renderOverlay() {
@@ -386,15 +405,17 @@ export class AppCanvas extends AppElement {
                 : 'nothing yet';
             const issues = problems.get(rule.id) || [];
             const status = this.statuses?.get(rule.id);
+            // Text a node shortens to fit has a title with all of it.
+            const full = text => (text ? ` title="${escapeHtml(text)}"` : '');
             return `
                 <div class="app-node${issues.length ? ' app-node-incomplete' : ''}" data-node="${escapeHtml(rule.id)}" tabindex="0" style="--x: ${at.x}px; --y: ${at.y}px" aria-label="${escapeHtml(`${rule.call?.toolName || 'A tool'} on ${server ? serverLabel(server) : 'no server'}`)}" title="${escapeHtml(issues.join(' '))}">
                     <div class="app-node-head" data-drag-node>
-                        <span class="app-node-title mono">${escapeHtml(rule.call?.toolName || 'Choose a tool')}</span>
-                        <span class="app-node-server">${escapeHtml(server ? serverLabel(server) : rule.call?.serverUrl ? 'not added' : '')}</span>
+                        <span class="app-node-title mono"${full(rule.call?.toolName)}>${escapeHtml(rule.call?.toolName || 'Choose a tool')}</span>
+                        <span class="app-node-server"${full(server ? `${serverLabel(server)}: ${rule.call.serverUrl}` : rule.call?.serverUrl)}>${escapeHtml(server ? serverLabel(server) : rule.call?.serverUrl ? 'not added' : '')}</span>
                     </div>
                     <div class="app-node-row app-node-run">
                         <span class="app-port app-port-run" data-port="run:${escapeHtml(rule.id)}" title="Run: wire a button, a field or Start here to start it"></span>
-                        <span class="app-node-name">▶ Run</span><span class="app-node-value">when ${escapeHtml(when)}</span>
+                        <span class="app-node-name">▶ Run</span><span class="app-node-value"${full(`When ${when}`)}>when ${escapeHtml(when)}</span>
                     </div>
                     ${this.shownArgs(rule).map(arg => {
                         const value = rule.call?.args?.[arg];
@@ -402,7 +423,7 @@ export class AppCanvas extends AppElement {
                         return `
                     <div class="app-node-row">
                         <span class="app-port app-port-arg" data-port="arg:${escapeHtml(rule.id)}:${escapeHtml(arg)}" title="${escapeHtml(`${arg}: wire a field here to fill it`)}"></span>
-                        <span class="app-node-name">${escapeHtml(arg)}</span><span class="app-node-value mono">${escapeHtml(shown.length > 28 ? `${shown.slice(0, 27)}…` : shown || '—')}</span>
+                        <span class="app-node-name">${escapeHtml(arg)}</span><span class="app-node-value mono"${full(shown && `${arg} = ${shown}`)}>${escapeHtml(shown.length > 28 ? `${shown.slice(0, 27)}…` : shown || '—')}</span>
                     </div>`;
                     }).join('')}
                     <div class="app-node-split"></div>
