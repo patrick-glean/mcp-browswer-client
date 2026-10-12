@@ -1265,6 +1265,22 @@ wb-response {
     font-size: 0.75rem;
 }
 
+.wb-sent {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+}
+
+.wb-sent dt {
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.wb-sent dd {
+    margin: 0 0 8px;
+}
+
 .collection-run-summary {
     padding-bottom: 10px;
     font-size: 0.8125rem;

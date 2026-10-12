@@ -242,20 +242,31 @@ export class WbResponse extends WbElement {
     }
 
     // The arguments as they went out, as history keeps them: {{variables}} filled in, and for a call
-    // an app made, its screen's values and what it added to its prompt.
+    // an app made, its screen's values and what it added to its prompt. Each argument shows on its
+    // own, text as it was sent and anything else as JSON with its type.
     async renderSent(body, run) {
         body.innerHTML = '<p class="text-secondary">Loading…</p>';
         const record = await store.getRun(run.id);
         if (this.view.message?.run?.id !== run.id || this.tab !== 'sent') return;
-        const text = record?.sentArgs ? JSON.stringify(record.sentArgs, null, 2) : record?.sentArgsText;
-        if (!text) {
+        const args = record?.sentArgs;
+        if (!args && !record?.sentArgsText) {
             body.innerHTML = `<p class="text-secondary">${record ? "This run didn't keep what it sent." : 'This run is no longer in history, so neither is what it sent.'}</p>`;
             return;
         }
         const asked = record.source === 'reply' ? ", as a model's reply asked" : '';
         const variables = record.environmentName ? `, with variables from ${record.environmentName}` : '';
-        const cut = record.sentArgs ? '' : '<p class="tool-notice">It was too big to keep in full, so history has its first 256 KB.</p>';
-        body.innerHTML = `<p class="wb-sent-head text-secondary">${escapeHtml(`What ${SENT_BY[record.source] || 'was sent'} to ${record.toolName}${asked}${variables}:`)}</p>${cut}<pre class="wb-json">${escapeHtml(text)}</pre>`;
+        const head = `<p class="wb-sent-head text-secondary">${escapeHtml(`What ${SENT_BY[record.source] || 'was sent'} to ${record.toolName}${asked}${variables}:`)}</p>`;
+        if (!args) {
+            body.innerHTML = `${head}<p class="tool-notice">It was too big to keep in full, so history has the start of its JSON.</p><pre class="wb-json">${escapeHtml(record.sentArgsText)}</pre>`;
+            return;
+        }
+        const entries = Object.entries(args);
+        const type = value => (value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value);
+        body.innerHTML = head + (entries.length
+            ? `<dl class="wb-sent">${entries.map(([name, value]) => `
+                <dt><span class="mono">${escapeHtml(name)}</span>${typeof value === 'string' ? '' : ` <span class="text-secondary">(${type(value)})</span>`}</dt>
+                <dd><pre class="wb-json">${escapeHtml(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre></dd>`).join('')}</dl>`
+            : '<p class="text-secondary">No arguments.</p>');
     }
 
     // Every stored run of the same request, newest first.

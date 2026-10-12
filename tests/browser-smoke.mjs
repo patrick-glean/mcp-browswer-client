@@ -877,12 +877,12 @@ async function main() {
             })()`, 5000);
             await page.run(`document.querySelector('#responsePane [data-response-tab="sent"]').click()`);
             const sentShown = await page.waitFor(`(() => {
-                const sent = document.querySelector('#responsePane [data-response-body] pre');
-                return sent ? document.querySelector('#responsePane .wb-sent-head').textContent + ' ' + sent.textContent.replace(/\\s+/g, ' ') : null;
+                const sent = [...document.querySelectorAll('#responsePane .wb-sent dt')].map(name => name.textContent.trim() + ' = ' + name.nextElementSibling.textContent);
+                return sent.length ? document.querySelector('#responsePane .wb-sent-head').textContent + ' ' + sent.join(', ') : null;
             })()`, 5000);
             check("Apps: Open in the Workbench, beside an answer in What happened, opens the call with what the app sent, ready to run again, and what came back",
                 openedCall === "echo | hello from an app | 0 errors | Opened the app's call, with what it sent: the app filled in {{input}}. Run sends it again. | from history"
-                    && sentShown === 'What the app sent to echo: { "text": "hello from an app" }',
+                    && sentShown === 'What the app sent to echo: text = hello from an app',
                 `${openedCall}; ${sentShown}`);
             await page.run(`document.querySelector('[data-mode="apps"]').click()`);
             await page.run(`(() => {
