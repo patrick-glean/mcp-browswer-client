@@ -67,14 +67,14 @@ An app is a **screen** and a **flow**. The screen is what people see. The flow i
 
 An app opens on the canvas, where you wire the screen to tools much as you'd wire an interface to code in Xcode:
 
-- **The screen** runs as people will see it, with a ● beside each of its elements (buttons, fields and outputs, by id).
+- **The screen** runs as people will see it, with a ● beside each of its elements (buttons, fields and outputs, by id). The names there widen their column to fit, and one too long for it shows in full when you point at it.
 - **Start**, above it, is where the app begins. Wire it to a tool to call that tool when the app opens, such as one that fills a dashboard.
 - **Each rule is a tool** to the right: ▶ Run (what starts it), a row for each of its fields, ↗ Sent, ✓ Answer and ! Error.
 - **Wires** join them. Drag from a ● to another: from a button to a tool's Run to call the tool when the button is clicked, from a field to one of the tool's fields to fill it with what the field holds, and from a tool's Answer or Error back to an element to show it there. Sent goes to the screen as the call goes out, before there's an answer: it shows what was sent (a chat's message, in its conversation), or clears a field. The ●s a wire can reach light up while you drag, and a drop that can't connect says why. Each wire is one part of its rule, so removing it (Delete, or Remove in the Inspector) takes that part away.
 - **Transforms** sit on the wires from a tool, labeled with what of the answer shows (`text` at first). Pick one to change it: one value from the answer (the Inspector lists the last answer's values, a click each), your own words around values, the whole result as JSON, or the HTML in the answer, shown as HTML.
 - **The Library** adds components, your servers' tools and transforms: click one, or drag it onto the canvas. A Screen starts another step of the app, with a tab of its own above the screen (see [Screens](#screens-an-app-in-steps)).
 - **The Inspector** changes what's picked: an element's id and label, a tool's rule as a sentence with its fields, a wire, or Start. With nothing picked, it's the screen.
-- **Design and Run.** In Design, clicks on the screen pick its elements. In Run, the screen takes them, and wires light up as their rules run. What happened, below, lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App, and Open in the Workbench shows it there. Restart runs the app from the start; Tidy up puts every tool beside what it's wired to.
+- **Design and Run.** In Design, clicks on the screen pick its elements. In Run, the screen takes them, and wires light up as their rules run. What happened, below, lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App. Open in the Workbench, beside an answer, opens that call there: the tool filled in with what the app sent (its screen's values where the rule says `{{message}}`, and what it added to the prompt), ready to run again, and what came back, with the arguments as sent under Sent. Restart runs the app from the start; Tidy up puts every tool beside what it's wired to.
 
 **Outline**, beside Canvas at the top, shows the same app as cards: the screen's components, the rules as sentences to edit in place, and Try it, the app running beside them.
 
@@ -100,7 +100,7 @@ A screen built from components can hold **HTML parts**: a dashboard, a card or a
 - **Ask a model.** Say what to make, such as "a ticket dashboard with a search field, a Refresh button and a list", and choose Make it. The model is the one under Model, beside it (see [The agent loop](#the-agent-loop)). It's asked for HTML whose buttons, fields and outputs have ids, and the builder takes the HTML from its answer. Change it sends the HTML there is now with what to change, so you can work on a part the way you'd talk it through.
 - **Call a tool** that returns HTML (an embedded `text/html` resource, `structuredContent.html`, or HTML in its text, as a model writes it in a ```` ```html ```` block) and choose Get the HTML.
 
-Either way, or with HTML pasted in, the part keeps the HTML without its scripts, `on…` handlers, frames and forms. Its ids get the part's id in front, so `refresh` in the part `dashboard` is `dashboard.refresh` and two parts can't clash, and its styles reach only inside it. Its elements get ●s like the rest, listed under the part's own by the rest of their id (`.refresh`), so the flow takes over the part's buttons and fields: wire `dashboard.refresh` to a tool's Run, and the tool's Answer to `dashboard.details`. A whole screen can be HTML too: choose HTML for the screen in the Inspector, then ask a model, call a tool or paste it in.
+Either way, or with HTML pasted in, the part keeps the HTML without its scripts, `on…` handlers, frames and forms. Its ids get the part's id in front, so `refresh` in the part `dashboard` is `dashboard.refresh` and two parts can't clash, and its styles reach only inside it. It's laid out as its own styles say: the screen's font and the look of its buttons and fields reach in, but not where the screen puts its own, so a calculator's keys fill their grid. Its elements get ●s like the rest, listed under the part's own by the rest of their id (`.refresh`), so the flow takes over the part's buttons and fields: wire `dashboard.refresh` to a tool's Run, and the tool's Answer to `dashboard.details`. A whole screen can be HTML too: choose HTML for the screen in the Inspector, then ask a model, call a tool or paste it in.
 
 ### Dashboards: boxes that write the prompt
 
@@ -217,7 +217,7 @@ Its layout, from left to right:
 - **The server bar**, across the top: the selected server's status and protocol, sign-in, Connect, Refresh (its tools, resources and prompts) and Info.
 - **Tools, Resources and Prompts**: what the selected server offers, a tab each, with a filter (and, for tools, annotation filters). Resources and Prompts open when the server declares them; see [Resources and prompts](#resources-and-prompts).
 - **The request pane**: the tool's arguments, the required ones filled with test data and each with Fill beside its name, with Pre-fill, Save and Run, and tabs for Sends (the arguments as they'll go out) and Schema.
-- **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON and Runs (every run of this request).
+- **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON, Sent (the arguments as the call sent them) and Runs (every run of this request).
 - **The dock**, along the bottom: Log, Trace (every HTTP request and response) and Runs (every call). Collapse it, or drag its top edge.
 
 Drag the edges between the rail, the tool list and the request and response panes to resize them, or focus one and use the arrow keys; double-click an edge to put it back. The sizes are kept for next time.
@@ -252,14 +252,14 @@ The top bar switches between the Workbench and Apps, picks the environment and o
   - `_meta` is ignored, since servers put request IDs and timings there.
 - **Run all** runs a collection's requests in the order they were saved. The response pane fills in a report as they run, then sums up how many were the same, changed or failed. Each row opens that run.
 - **History**: the rail shows the latest runs, and the dock's Runs every tool call, wherever it came from: the Workbench, Run all, the apps you build, and the tool calls a model writes in its answers to them.
-  - Open one to see its arguments and result, then run it again or save it.
+  - Open one to see its arguments and result, then run it again or save it. A Workbench run opens with its arguments as you wrote them, `{{variables}}` and all. A call an app made opens with what it sent, since its `{{names}}` are the app's screen's; Sent has the arguments as they went out, for either.
   - Only the selected server narrows the dock's list.
 - **Export and Import**, in the ⋯ menu beside Saved, move saved requests, collections and environments as one JSON file. History isn't exported.
 
 Everything stays in this browser, in IndexedDB (`mcp_sandbox`, its name from when the Workbench was called the Sandbox), shared by its tabs.
 
 - History keeps the newest 500 calls with their results, which include whatever the servers sent back. Results over 256 KB keep only their start. Clear history, in the dock's Runs, deletes it.
-- Tokens never go into the Workbench's store: arguments are stored as written, and credentials travel separately. Variables are plain text, so keep secrets out of them.
+- Tokens never go into the Workbench's store: arguments are stored as written and as sent, and credentials travel separately. Variables are plain text, so keep secrets out of them.
 
 ### Inspecting a server
 
@@ -485,6 +485,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── apps.test.mjs      # The app builder's DML, zip, flow and screen, the examples and the agent loop
 │   ├── demo-servers.test.mjs # The demo servers built in: both protocol eras, their tools, the demo model
+│   ├── workbench.test.mjs # What opening a run from history fills in: as written, or as an app sent it
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
 ├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS

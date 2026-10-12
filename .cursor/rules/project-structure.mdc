@@ -42,7 +42,7 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`
-- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs), [tests/apps.test.mjs](mdc:tests/apps.test.mjs), [tests/demo-servers.test.mjs](mdc:tests/demo-servers.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, resource template URIs against RFC 6570's examples, the app builder's DML, zips, flow, graph, parts, screens, examples and agent loop, and the demo servers built in
+- `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs), [tests/apps.test.mjs](mdc:tests/apps.test.mjs), [tests/demo-servers.test.mjs](mdc:tests/demo-servers.test.mjs), [tests/workbench.test.mjs](mdc:tests/workbench.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, resource template URIs against RFC 6570's examples, the app builder's DML, zips, flow, graph, parts, screens, examples and agent loop, the demo servers built in, and what opening a run fills in
 - `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
 
 ## Naming
