@@ -92,7 +92,7 @@ export class AppsStart extends AppElement {
                 </li>`).join('')}
             </ul>
             <div class="apps-start-model">
-                <p class="app-note text-secondary">Chat and Project pulse call this model; without Glean, the mock server's chat tool stands in for one. Front desk calls no model, only the mock server's front desk tools.</p>
+                <p class="app-note text-secondary">Chat and Project pulse call this model: Glean's chat if you've added Glean, else a server's chat tool, else the demo model, built in, which makes up its answers. Front desk calls no model: it comes with a demo server of its own. Both run in this page, so the examples work with nothing to install.</p>
                 <div data-model-picker></div>
             </div>`;
         this.picker = new ModelPicker({ shell: this.shell, apps: this.apps, container: this.$('[data-model-picker]'), signal: this.signal });

@@ -2,6 +2,7 @@
 // menus that choose another, a server's tool and the field the prompt goes in. On the start page
 // and under Ask a model; whoever shows it renders it again on the Apps state's 'model' event.
 
+import { DEMO_SERVERS } from '../../demo-servers/index.js';
 import { escapeHtml, schemaOf, serverLabel } from '../../workbench/util.js';
 import { modelName, modelOf } from '../apps.js';
 
@@ -12,6 +13,7 @@ export class ModelPicker {
         container.addEventListener('change', event => this.changed(event.target), { signal });
         container.addEventListener('click', event => {
             if (event.target.closest('[data-model-found]')) this.apps.setModel(null);
+            if (event.target.closest('[data-add-demo-model]')) this.apps.addDemoServer('model');
         }, { signal });
         container.addEventListener('toggle', event => {
             if (event.target.matches('[data-model-details]')) this.open = event.target.open;
@@ -43,8 +45,9 @@ export class ModelPicker {
                 </div>
                 <p class="app-note text-secondary">${model?.chosen
                     ? `You chose it. <button type="button" class="link-button" data-model-found>Use the one found instead</button>`
+                    : model?.serverUrl === DEMO_SERVERS.model.url ? "The demo model, built in: it runs in this page and makes up its answers. Add Glean, or another server with a chat tool, and it's used instead; or choose a tool here."
                     : model ? "Found among your servers: Glean's chat if you've added Glean, else a server's chat tool. Choose another here."
-                    : 'None of your servers has a chat tool. Add Glean, or the mock server, whose chat stands in for a model; or choose a tool that answers here.'}</p>
+                    : 'None of your servers has a chat tool, so the examples use the demo model, built in, which makes up its answers. <button type="button" class="link-button" data-add-demo-model>Add the demo model</button>, add Glean, or choose a tool that answers here.'}</p>
             </details>`;
         if (focused) this.container.querySelector(`[${focused}]`)?.focus();
     }

@@ -16,8 +16,9 @@
 //   restart    run the shown app again from the start
 //   highlight  point these elements out on the screen           { elements }
 
+import { DEMO_SERVERS, demoServerAt } from '../demo-servers/index.js';
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
-import { conversationFieldOf, serverWithTool } from './agent.js';
+import { conversationFieldOf } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
@@ -95,26 +96,34 @@ export function modelOf(server, tool) {
 }
 
 // The model, unless you choose another: Glean's chat if you've added Glean, else a server's chat
-// tool. Null when no server has one.
+// tool, else the demo model's, a stand-in. Null when no server has one.
 export function foundModel(servers) {
     const list = Object.values(servers || {});
     const chatOf = server => (server.tools || []).find(tool => tool.name === 'chat');
-    const server = list.find(candidate => isGlean(candidate) && chatOf(candidate)) || list.find(chatOf);
+    const real = list.filter(server => !demoServerAt(server.url));
+    const server = real.find(candidate => isGlean(candidate) && chatOf(candidate)) || real.find(chatOf) || list.find(chatOf);
     return server ? modelOf(server, chatOf(server)) : null;
 }
+
+// The built-in demo model, as a model the examples call when there's no other.
+export const demoModel = () => modelOf(DEMO_SERVERS.model, DEMO_SERVERS.model.tools[0]);
+
+// A server's tool, from the tools it listed, or for a demo server the ones it lists once connected.
+const toolOn = (shell, url, name) => [...(shell.servers[url]?.tools || []), ...(demoServerAt(url)?.tools || [])].find(tool => tool.name === name) || null;
 
 // What an example's rule calls: the model, with `prompt` in its message field (see modelArgs).
 // Without a model, the rule is left for you to choose a tool.
 function modelRuleCall({ shell, workbench, model, ...asked }) {
-    const tool = model && (shell.servers[model.serverUrl]?.tools || []).find(candidate => candidate.name === model.toolName);
+    const tool = model && toolOn(shell, model.serverUrl, model.toolName);
     if (!tool || !model.messageField) return { call: { serverUrl: model?.serverUrl || Object.values(shell.servers)[0]?.url || '', toolName: model?.toolName || '', args: {} }, prompt: null };
     const schema = schemaOf(tool);
     const args = modelArgs(model, { ...asked, schema, base: workbench?.testDataFor(schema).args || {} });
     return { call: { serverUrl: model.serverUrl, toolName: model.toolName, args }, prompt: model.messageField };
 }
 
-// How an example names its model: Glean, or the tool and its server.
+// How an example names its model: Glean, the demo model, or the tool and its server.
 export function modelName(model, servers = {}) {
+    if (model?.serverUrl === DEMO_SERVERS.model.url && model.toolName === 'chat') return 'the demo model';
     const server = servers[model?.serverUrl];
     if (!model?.toolName || !server) return 'a model';
     return isGlean(server) && model.toolName === 'chat' ? 'Glean' : `${model.toolName} on ${serverLabel(server)}`;
@@ -181,19 +190,15 @@ export function dashboardApp({ shell, workbench, model, name }) {
     return newApp({ name, screen: { kind: 'components', size: 'wide', components }, flow: [rule] });
 }
 
-// The mock server, as the Guide adds it: where the Front desk example's tools are.
-const MOCK_URL = 'http://127.0.0.1:8081';
 const VISIT_SHOWN = '{{structured.visitor}}, {{structured.company}}\nHere to see {{structured.host}} at {{structured.time}}, in {{structured.room}}';
 
 // The Front desk example: a visitor kiosk over four screens, with no model in it. Welcome asks who
 // you are; find_visit looks for today's visit, and the app goes to Confirm with it, or to Not found
 // with why. Confirm's Yes checks you in (check_in) and goes to Checked in; Not me goes to Welcome.
 // Checked in's Done starts over for the next visitor; Not found goes back to try again, or calls
-// the front desk. Its tools are on the server that has find_visit, else on the mock server, to add.
-export function frontDeskApp({ shell, name }) {
-    const server = serverWithTool(shell.servers, 'find_visit')?.server;
-    const serverUrl = server?.url || MOCK_URL;
-    const call = (toolName, args) => ({ serverUrl, toolName, args });
+// the front desk. It calls its own demo server, built in, until you move it to yours.
+export function frontDeskApp({ name }) {
+    const call = (toolName, args) => ({ serverUrl: DEMO_SERVERS.frontdesk.url, toolName, args });
     const add = (type, props) => newComponent(type, [], props);
     const components = [
         add('title', { id: 'title', text: name }),
@@ -239,16 +244,16 @@ export function frontDeskApp({ shell, name }) {
             { if: 'error', show: '{{error}}', into: 'missing', how: 'replace' },
         ],
     };
-    const app = newApp({ name, screen: { kind: 'components', components }, flow: [find, checkIn, desk] });
-    return server ? app : { ...app, serverNames: { [MOCK_URL]: 'Mock server' } };
+    return newApp({ name, screen: { kind: 'components', components }, flow: [find, checkIn, desk] });
 }
 
-// What create() starts from: the examples, and a blank app. Each with the name its app gets, and
-// what it is in a few words (`kind`) and in a sentence (`about`).
+// What create() starts from: the examples, and a blank app. Each with the name its app gets, what
+// it is in a few words (`kind`) and in a sentence (`about`), the demo servers it calls
+// (`servers`), and whether it calls the model (`model`), the demo model when there's no other.
 export const EXAMPLES = {
-    chat: { name: 'Chat', make: chatApp, kind: 'agent loop', about: "A conversation with a model, which can call your servers' tools" },
-    dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
-    frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, with the mock server's tools" },
+    chat: { name: 'Chat', make: chatApp, kind: 'agent loop', model: true, about: "A conversation with a model, which can call your servers' tools" },
+    dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', model: true, about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
+    frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', servers: ['frontdesk'], about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, on a demo server of its own" },
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 
@@ -313,7 +318,7 @@ ${agent.join(' ')}
 
 ## Run it
 
-Open MCP Browser Client (${APP_URL}), choose Apps, then Import, and pick this zip. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}, which you add under Servers in the Workbench:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}`).join('\n')}` : "It doesn't call any servers yet."}
+Open MCP Browser Client (${APP_URL}), choose Apps, then Import, and pick this zip. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}, which you add under Servers in the Workbench:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}${demoServerAt(url) ? ", a demo server built into MCP Browser Client, which Import adds for you" : ''}`).join('\n')}` : "It doesn't call any servers yet."}
 `;
 }
 
@@ -568,14 +573,30 @@ export class Apps {
 
     // --- The list ---
 
+    // Adds one of the demo servers built in (DEMO_SERVERS) to your servers, where you are, and
+    // connects to it; one already there connects again if it isn't connected.
+    addDemoServer(id) {
+        const { url, name } = DEMO_SERVERS[id];
+        const server = this.shell.servers[url];
+        if (!server) this.shell.addServer(url, name, { show: false });
+        else if (server.status !== 'connected' && server.status !== 'connecting') this.shell.connectMcpServer(url);
+    }
+
     // A new app from an example (EXAMPLES): `chat`, `dashboard`, `frontdesk`, or `blank` (a text
-    // box, a button and an output). Chat and the dashboard call the model.
+    // box, a button and an output). Chat and the dashboard call the model, the demo model when
+    // you have none; Front desk calls its demo server. Both are added for it.
     async create(example = 'blank') {
-        const { name: base, make } = EXAMPLES[example] || EXAMPLES.blank;
+        const { name: base, make, servers = [], model: callsModel = false } = EXAMPLES[example] || EXAMPLES.blank;
         const taken = new Set(this.list.map(app => app.name));
         let name = base;
         for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
-        const app = make({ shell: this.shell, workbench: this.workbench, model: this.model(), name });
+        servers.forEach(id => this.addDemoServer(id));
+        let model = this.model();
+        if (!model && callsModel) {
+            this.addDemoServer('model');
+            model = demoModel();
+        }
+        const app = make({ shell: this.shell, workbench: this.workbench, model, name });
         await store.saveApp(app);
         this.list.push(app);
         this.emit('list');
@@ -612,7 +633,7 @@ export class Apps {
 
     serverName(url) {
         const server = this.shell.servers[url];
-        return server ? serverLabel(server, url) : this.app?.serverNames?.[url] || url;
+        return server ? serverLabel(server, url) : this.app?.serverNames?.[url] || demoServerAt(url)?.name || url;
     }
 
     // Each download is a version: the first is 1, and one after any change is the next number.
@@ -681,6 +702,11 @@ export class Apps {
             this.list = existing ? this.list.map(candidate => (candidate.id === app.id ? app : candidate)) : [...this.list, app];
             this.emit('list');
             this.show(app.id);
+            // The demo servers it calls are built in, so they're added for it.
+            for (const url of serversOf(app)) {
+                const demo = demoServerAt(url);
+                if (demo) this.addDemoServer(demo.id);
+            }
             const missing = serversOf(app).filter(url => !this.shell.servers[url]);
             this.status(`${existing ? 'Replaced' : 'Imported'} ${app.name}${app.version ? `, version ${app.version}` : ''}.${missing.length ? ` It calls ${missing.length === 1 ? 'a server' : `${missing.length} servers`} you haven't added; its rules say which.` : ''}`);
             return app;

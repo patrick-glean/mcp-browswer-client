@@ -35,7 +35,7 @@ export function modelArgs(model, { prompt, goal = prompt, conversation, schema =
 // saying what to set up when there's no model yet.
 export function modelCall(model, prompt, { schema = null, goal = prompt } = {}) {
     if (!model?.serverUrl || !model.toolName) {
-        throw new FlowError('There is no model to ask yet. Add a server with a chat tool (Glean, or the mock), or choose one under Model.');
+        throw new FlowError('There is no model to ask yet. Add a server with a chat tool (Glean, or the demo model, built in), or choose one under Model.');
     }
     if (!model.messageField) throw new FlowError(`Choose the field of ${model.toolName} the request goes in, under Model.`);
     return { serverUrl: model.serverUrl, toolName: model.toolName, args: modelArgs(model, { prompt, goal, conversation: [], schema }) };
