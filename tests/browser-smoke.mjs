@@ -865,6 +865,26 @@ async function main() {
             })`, 5000);
             check('Apps: the call is a run from the app, with its arguments as written and as sent',
                 appRun === JSON.stringify({ args: { text: '{{input}}' }, sentArgs: { text: 'hello from an app' }, outcome: 'ok' }), appRun);
+            // Open in the Workbench, beside the answer, opens the call there: filled in with what the
+            // app sent, since {{input}} is the app's and no variable, and what came back, with Sent.
+            await page.run(`document.querySelector('app-try [data-trace] [data-open-run]').click()`);
+            const openedCall = await page.waitFor(`(() => {
+                const note = document.querySelector('#requestPane .wb-request-note')?.textContent || '';
+                if (document.body.dataset.mode !== 'workbench' || !note.startsWith('Opened')) return null;
+                return [document.querySelector('#requestPane .wb-crumb-tool')?.textContent, document.querySelector('#requestForm [name="text"]')?.value,
+                    document.querySelectorAll('#requestForm .wb-resolved.text-error').length + ' errors', note,
+                    document.querySelector('#responsePane .run-summary')?.textContent.includes('From history · App') ? 'from history' : 'not from history'].join(' | ');
+            })()`, 5000);
+            await page.run(`document.querySelector('#responsePane [data-response-tab="sent"]').click()`);
+            const sentShown = await page.waitFor(`(() => {
+                const sent = document.querySelector('#responsePane [data-response-body] pre');
+                return sent ? document.querySelector('#responsePane .wb-sent-head').textContent + ' ' + sent.textContent.replace(/\\s+/g, ' ') : null;
+            })()`, 5000);
+            check("Apps: Open in the Workbench, beside an answer in What happened, opens the call with what the app sent, ready to run again, and what came back",
+                openedCall === "echo | hello from an app | 0 errors | Opened the app's call, with what it sent: the app filled in {{input}}. Run sends it again. | from history"
+                    && sentShown === 'What the app sent to echo: { "text": "hello from an app" }',
+                `${openedCall}; ${sentShown}`);
+            await page.run(`document.querySelector('[data-mode="apps"]').click()`);
             await page.run(`(() => {
                 const show = document.querySelector('app-flow [data-route="0"] [data-route-show]');
                 show.value = 'You said {{input}}, and it said {{text}}';
@@ -1299,6 +1319,43 @@ async function main() {
                     && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
                 `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
             rmSync(appDownloads, { recursive: true, force: true });
+
+            // A part with a grid of keys and long ids, as a model writes a calculator: the keys fill
+            // their grid as its CSS says, the screen's own buttons' place in its layout staying out of
+            // it, and beside the screen each name fits, or past the room there is, shows in full
+            // when pointed at.
+            await fromLibrary('[data-library-item="component"][data-type="part"]');
+            await page.waitFor(`!!document.querySelector('app-inspector [data-part-source] [data-html]')`, 5000);
+            await page.run(`(() => {
+                const html = document.querySelector('app-inspector [data-html]');
+                html.value = ${JSON.stringify('<style>.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .keys button { padding: 10px 0; border-radius: 6px; }</style>\n<div class="keys"><button id="seven">7</button><button id="eight">8</button><button id="nine">9</button><button id="multiply-by">×</button></div>\n<output id="running-total-of-the-calculations">0</output>')};
+                html.dispatchEvent(new Event('input', { bubbles: true }));
+                html.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const keys = await frameWaitFor(`(() => {
+                const grid = document.querySelector('[data-part="part2"] .keys');
+                const widths = [...(grid?.children || [])].map(key => key.getBoundingClientRect().width);
+                if (widths.length !== 4) return null;
+                return Math.abs(widths.reduce((sum, width) => sum + width, 0) + 18 - grid.getBoundingClientRect().width) < 2 ? 'fill their grid' : widths.map(Math.round).join(', ') + ' px wide';
+            })()`);
+            const longName = `document.querySelector('app-canvas [data-gutter-row="part2.running-total-of-the-calculations"] .app-gutter-label')`;
+            const names = await page.waitFor(`(() => {
+                const labels = [...document.querySelectorAll('app-canvas .app-gutter-label')];
+                if (!labels.some(label => label.textContent === '.multiply-by') || !${longName}) return null;
+                const cut = labels.filter(label => label.scrollWidth > label.clientWidth + 1).map(label => label.textContent);
+                return cut.join(', ') + ' cut, in a gutter ' + document.querySelector('app-canvas [data-gutter]').offsetWidth + ' px wide';
+            })()`, 10000);
+            const pointAt = await page.run(`(() => {
+                ${longName}.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = ${longName}.getBoundingClientRect();
+                return [box.right - 4, box.top + box.height / 2];
+            })()`);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pointAt[0], y: pointAt[1] });
+            const pointedAt = await page.waitFor(`${longName}.scrollWidth <= ${longName}.clientWidth + 1 ? 'in full' : null`, 3000);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+            check("Apps: a part's keys fill their grid, each name beside the screen fits, and one too long for the room there shows in full when pointed at",
+                keys === 'fill their grid' && names === '.running-total-of-the-calculations cut, in a gutter 220 px wide' && pointedAt === 'in full',
+                `${keys}; ${names}; ${pointedAt}`);
 
             // A dashboard: boxes that say what they show and what goes in them ask one tool for
             // their pieces of its answer, in its prompt. Project pulse, under Examples, calls the
