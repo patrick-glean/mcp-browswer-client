@@ -17,7 +17,7 @@
 //     </flow>
 //
 // A <when> names its first trigger, and <or> each other one; x and y are where its tool sits on
-// the canvas. A box is an <output> that says what it shows (show="bar") and, as its text, what
+// the canvas, as they are on a <screen> for its card. A box is an <output> that says what it shows (show="bar") and, as its text, what
 // goes in it; its rule asks for it in the <arg role="prompt">, and takes it as {{json.<id>}}.
 // That prompt also gets the rule's <instructions> and, with tools="yes" on its <when>, the tools
 // its model may call; a <then if="sent"> runs as the call is sent, before there's an answer.
@@ -65,6 +65,9 @@ function writeNode([name, attributes = {}, ...children], depth = 0) {
 }
 
 const orUndefined = value => (value === '' || value === null || value === undefined ? undefined : value);
+
+// Where something sits on the canvas, as attributes.
+const placeAttributes = position => (position ? { x: Math.round(position.x), y: Math.round(position.y) } : {});
 
 // A call as markup; `prompt` names the argument that also asks for what the rule's boxes need.
 function callNode(name, call, { prompt = null } = {}) {
@@ -123,7 +126,7 @@ function componentNodes(components, { standalone }) {
     let group = null;
     for (const component of components) {
         if (component.type === 'screen') {
-            group = ['screen', { id: component.id, label: component.label ?? '' }];
+            group = ['screen', { id: component.id, label: component.label ?? '', ...placeAttributes(component.position) }];
             nodes.push(group);
         } else {
             (group || nodes).push(componentNode(component, { standalone }));
@@ -151,11 +154,11 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
     const src = standalone ? undefined : 'index.html';
     const size = screen.size === 'wide' ? 'wide' : undefined;
     const screenNode = screen.kind === 'html'
-        ? ['screen', { src, size },
+        ? ['screen', { src, size, ...placeAttributes(screen.position) },
             ...(screen.ask ? [['ask', {}, screen.ask]] : []),
             ...(screen.from ? [callNode('from', screen.from)] : []),
             ...(standalone ? [['html', {}, { cdata: screen.html || '' }]] : [])]
-        : ['screen', { src, 'built-from': 'components', size }, ...componentNodes(screen.components || [], { standalone })];
+        : ['screen', { src, 'built-from': 'components', size, ...placeAttributes(screen.position) }, ...componentNodes(screen.components || [], { standalone })];
     const servers = serversOf(app);
     const triggerAttributes = candidate => (candidate
         ? { element: candidate.event === 'open' ? undefined : candidate.element, event: candidate.event }
@@ -164,8 +167,7 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
         'when',
         {
             ...triggerAttributes(triggersOf(rule)[0]),
-            x: rule.position ? Math.round(rule.position.x) : undefined,
-            y: rule.position ? Math.round(rule.position.y) : undefined,
+            ...placeAttributes(rule.position),
             tools: rule.tools ? 'yes' : undefined,
         },
         ...triggersOf(rule).slice(1).map(candidate => ['or', triggerAttributes(candidate)]),
@@ -322,6 +324,13 @@ export function fromDml(source, { files = {} } = {}) {
     const fail = (node, message) => {
         throw new DmlError(`Line ${root.lineAt(node.at)}: ${message}`);
     };
+    // x and y, both or neither: where `what` sits on the canvas.
+    const readPosition = (node, what) => {
+        if (node.attrs.x === undefined && node.attrs.y === undefined) return null;
+        const position = { x: Number(node.attrs.x), y: Number(node.attrs.y) };
+        if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) fail(node, `x and y are numbers together: where ${what} sits on the canvas.`);
+        return position;
+    };
     const one = (node, name, { required = true } = {}) => {
         const found = elementsIn(node, name);
         if (found.length > 1) fail(found[1], `<${node.name}> has more than one <${name}>.`);
@@ -420,7 +429,8 @@ export function fromDml(source, { files = {} } = {}) {
                 readComponent(node);
                 continue;
             }
-            components.push({ id: takeId(node), type: 'screen', label: node.attrs.label ?? '' });
+            const position = readPosition(node, 'its card');
+            components.push({ id: takeId(node), type: 'screen', label: node.attrs.label ?? '', ...(position ? { position } : {}) });
             screens++;
             for (const child of elementsIn(node)) {
                 if (child.name === 'screen') fail(child, "A <screen> can't hold another: put it after this one.");
@@ -448,6 +458,8 @@ export function fromDml(source, { files = {} } = {}) {
     const size = screenNode.attrs.size;
     if (size !== undefined && size !== 'narrow' && size !== 'wide') fail(screenNode, `size="${size}" is narrow or wide.`);
     if (size) screen.size = size;
+    const screenAt = readPosition(screenNode, 'the screen');
+    if (screenAt) screen.position = screenAt;
 
     // A trigger's attributes. A <when> may have none yet: nothing starts its rule.
     const readTrigger = (node, { optional = false } = {}) => {
@@ -460,11 +472,7 @@ export function fromDml(source, { files = {} } = {}) {
     const flow = [];
     for (const node of elementsIn(one(root, 'flow'), 'when')) {
         const when = [readTrigger(node, { optional: true }), ...elementsIn(node, 'or').map(or => readTrigger(or))].filter(Boolean);
-        let position = null;
-        if (node.attrs.x !== undefined || node.attrs.y !== undefined) {
-            position = { x: Number(node.attrs.x), y: Number(node.attrs.y) };
-            if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) fail(node, 'x and y are numbers together: where its tool sits on the canvas.');
-        }
+        const position = readPosition(node, 'its tool');
         const then = elementsIn(node, 'then').map(route => {
             const how = route.attrs.how || 'replace';
             if (!Object.hasOwn(ROUTE_HOW, how)) fail(route, `how="${how}" isn't one of ${Object.keys(ROUTE_HOW).join(', ')}.`);
