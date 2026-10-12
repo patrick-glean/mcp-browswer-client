@@ -348,6 +348,11 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system
 .app > .w-third, .screen > .w-third { grid-column: span 2; }
 .screen { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .screen[hidden] { display: none; }
+.screen[data-enter='forward'] { animation: screen-in-forward 0.3s ease-out; }
+.screen[data-enter='back'] { animation: screen-in-back 0.3s ease-out; }
+@keyframes screen-in-forward { from { opacity: 0; transform: translateX(28px); } }
+@keyframes screen-in-back { from { opacity: 0; transform: translateX(-28px); } }
+@media (prefers-reduced-motion: reduce) { .screen[data-enter] { animation: none; } }
 @media (max-width: 520px) { .app > *, .screen > *, .app > .w-two-thirds, .app > .w-half, .app > .w-third, .screen > .w-two-thirds, .screen > .w-half, .screen > .w-third { grid-column: 1 / -1; } }
 h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
 .text { margin: 0; color: var(--muted); white-space: pre-wrap; }

@@ -52,20 +52,29 @@ export function frameRuntime({ config, token, roles = {} }) {
     const waitsFor = (id, event) => watch.some(entry => entry.element === id && entry.event === event);
     const report = (element, event) => send({ type: 'event', element: element.id, event, values: values() });
 
-    // The screens, one showing at a time, and the ones gone through, for Back.
+    // The screens, one showing at a time, and the ones gone through, for Back. A screen comes in
+    // from the right, or going back, from the left; `instant` skips that.
     const screens = [...document.querySelectorAll('[data-screen]')];
     const shownScreen = () => screens.find(screen => !screen.hidden)?.id || '';
     const history = [];
-    const showScreen = (id, { button = null, back = false } = {}) => {
+    const showScreen = (id, { button = null, back = false, instant = false } = {}) => {
         const target = screens.find(screen => screen.id === id);
         const current = shownScreen();
         if (!target || target.id === current) return;
         if (!back && current) history.push(current);
         for (const screen of screens) screen.hidden = screen !== target;
+        if (!instant && !config.still) {
+            target.dataset.enter = back ? 'back' : 'forward';
+            target.addEventListener('animationend', () => {
+                delete target.dataset.enter;
+                layout();
+            }, { once: true });
+        }
         scrollTo(0, 0);
         send({ type: 'screen', id, button });
         layout();
     };
+    if (config.still) document.documentElement.setAttribute('data-still', '');
     // Where a button with somewhere to go takes people: a screen, back, or a fresh start.
     const go = (where, button) => {
         if (where === 'start') send({ type: 'restart', button });
@@ -103,6 +112,14 @@ export function frameRuntime({ config, token, roles = {} }) {
     }, true);
     document.addEventListener('submit', event => event.preventDefault(), true);
 
+    // How tall what's on the screen is, whatever the frame's height: the document scrolls at least
+    // as far as the frame is tall, so a frame sized to that could never shrink.
+    const contentHeight = () => {
+        const bottoms = [...document.body.children].filter(element => !['SCRIPT', 'STYLE'].includes(element.tagName)).map(element => element.getBoundingClientRect().bottom);
+        if (!bottoms.length) return document.documentElement.scrollHeight;
+        const body = getComputedStyle(document.body);
+        return Math.ceil(Math.max(...bottoms) + scrollY + (parseFloat(body.paddingBottom) || 0) + (parseFloat(body.marginBottom) || 0));
+    };
     // Where each tracked element is, after things settle.
     let layoutTimer = null;
     const layout = () => {
@@ -113,7 +130,7 @@ export function frameRuntime({ config, token, roles = {} }) {
                 const box = byId(id)?.getBoundingClientRect();
                 if (box && (box.width || box.height)) rects[id] = { top: box.top + scrollY, left: box.left + scrollX, width: box.width, height: box.height };
             }
-            send({ type: 'layout', height: document.documentElement.scrollHeight, rects });
+            send({ type: 'layout', height: contentHeight(), rects, screen: shownScreen() });
         }, 30);
     };
 
@@ -201,7 +218,7 @@ export function frameRuntime({ config, token, roles = {} }) {
             ({ watch, read, track = [] } = message.config);
             layout();
         } else if (message.type === 'show') show(message);
-        else if (message.type === 'screen') showScreen(message.id);
+        else if (message.type === 'screen') showScreen(message.id, { instant: !!message.instant });
         else if (message.type === 'busy') busy(message.elements || [], message.busy);
         else if (message.type === 'highlight') highlight(message.elements);
     });
@@ -221,11 +238,15 @@ const randomToken = () => crypto.randomUUID().replaceAll('-', '');
 const scriptJson = value => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 // The frame's document: the screen's HTML without its scripts, under a policy that lets nothing
-// load from the network and only the runtime run.
-export function frameDocument(html, { config, token }) {
+// load from the network and only the runtime run. With `screen`, it shows that one of the app's
+// screens from the start.
+export function frameDocument(html, { config, token, screen = null }) {
     const nonce = randomToken();
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
     doc.querySelectorAll('script, base, meta[http-equiv]').forEach(node => node.remove());
+    if (screen && doc.getElementById(screen)?.hasAttribute('data-screen')) {
+        doc.querySelectorAll('[data-screen]').forEach(section => { section.hidden = section.id !== screen; });
+    }
     const policy = doc.createElement('meta');
     policy.httpEquiv = 'Content-Security-Policy';
     policy.content = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'`;
@@ -242,6 +263,14 @@ export function frameDocument(html, { config, token }) {
 
 const PAST = { click: 'was clicked', enter: 'got Enter', change: 'changed' };
 
+// A frame's layout message as its owner gets it: { height, rects, screen }, `screen` the one of
+// the app's screens it shows, or ''.
+const layoutOf = message => ({
+    height: message.height,
+    rects: message.rects && typeof message.rects === 'object' ? message.rects : {},
+    screen: typeof message.screen === 'string' ? message.screen : '',
+});
+
 const shortText = (text, max = 80) => {
     const line = String(text).replace(/\s+/g, ' ').trim();
     return line.length > max ? `${line.slice(0, max - 1)}…` : line;
@@ -249,10 +278,11 @@ const shortText = (text, max = 80) => {
 
 // Runs one app in one frame. `getApp` returns the app as it is now, so edits to the flow apply to
 // the next event. It tells its owner what happens: `onTrace` each step in words, `onLayout` where
-// the screen's elements are, `onActivity` a rule starting its call ({ ruleId, phase: 'call',
-// trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error', routes }), `onAnswer` each
-// rule's answer, for picking values from it, `onScreen` which of the app's screens shows, and
-// `onEscape` Escape pressed on the screen.
+// the screen's elements are ({ height, rects, screen }), `onActivity` a rule starting its call
+// ({ ruleId, phase: 'call', trigger }) and finishing it ({ ruleId, phase: 'ok' | 'error',
+// routes }), `onAnswer` each rule's answer, for picking values from it, `onScreen` which of the
+// app's screens shows (with { button } when a button went there), and `onEscape` Escape pressed
+// on the screen.
 export class AppRunner {
     constructor({ shell, workbench, getApp, onTrace = () => {}, onLayout = () => {}, onActivity = () => {}, onAnswer = () => {}, onScreen = () => {}, onEscape = () => {}, signal }) {
         Object.assign(this, { shell, workbench, getApp, onTrace, onLayout, onActivity, onAnswer, onScreen, onEscape });
@@ -294,7 +324,7 @@ export class AppRunner {
         const elements = elementsOf(app.screen);
         this.screenAfterLoad = !start && elements.some(element => element.id === screen && element.kind === 'screen') ? screen : null;
         this.elementIds = elements.map(element => element.id);
-        frame.srcdoc = frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token });
+        frame.srcdoc = frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token, screen: this.screenAfterLoad });
     }
 
     // Shows one of the app's screens, as a button that goes there would.
@@ -335,14 +365,15 @@ export class AppRunner {
         } else if (message.type === 'event' && typeof message.element === 'string' && PAST[message.event]) {
             this.fire(message.element, message.event, message.values || {});
         } else if (message.type === 'layout' && Number.isFinite(message.height)) {
-            this.onLayout({ height: message.height, rects: message.rects && typeof message.rects === 'object' ? message.rects : {} });
+            this.onLayout(layoutOf(message));
         } else if (message.type === 'open' && typeof message.url === 'string') {
             this.open(message.url);
         } else if (message.type === 'escape') {
             this.onEscape();
         } else if (message.type === 'screen' && typeof message.id === 'string') {
-            if (typeof message.button === 'string') this.trace({ kind: 'route', text: `${message.button} went to ${this.screenName(message.id)}` });
-            this.onScreen(message.id);
+            const button = typeof message.button === 'string' ? message.button : null;
+            if (button) this.trace({ kind: 'route', text: `${button} went to ${this.screenName(message.id)}` });
+            this.onScreen(message.id, { button });
         } else if (message.type === 'restart') {
             if (typeof message.button === 'string') this.trace({ kind: 'note', text: `${message.button} started the app over.` });
             this.load(this.frame, { start: true });
@@ -554,5 +585,44 @@ export class AppRunner {
             this.trace({ kind: 'route', text: text ? `Put “${shortText(text)}” into ${route.into}${empty}` : `Cleared ${route.into}${empty}` });
         }
         return taken.map(([, index]) => index);
+    }
+}
+
+// One of the app's screens as it is before anyone uses it, in a frame of its own: the canvas
+// shows every screen the app isn't on as one of these. It runs no rules and takes no input; it
+// only says where its elements are (`onLayout`, as AppRunner's), and points them out.
+export class ScreenStill {
+    constructor({ getApp, onLayout = () => {}, signal }) {
+        Object.assign(this, { getApp, onLayout });
+        this.frame = null;
+        this.token = null;
+        this.ready = false;
+        window.addEventListener('message', event => this.received(event), { signal });
+    }
+
+    load(frame, screen) {
+        const app = this.getApp();
+        this.frame = frame;
+        this.token = randomToken();
+        this.ready = false;
+        this.screen = screen;
+        const track = elementsOf(app.screen).map(element => element.id);
+        frame.srcdoc = frameDocument(screenHtml(app), { config: { watch: [], read: [], track, still: true }, token: this.token, screen });
+    }
+
+    stop() {
+        this.frame = null;
+        this.token = null;
+        this.ready = false;
+    }
+
+    highlight(elements) {
+        if (this.ready && this.frame?.contentWindow) this.frame.contentWindow.postMessage({ type: 'highlight', elements, token: this.token }, '*');
+    }
+
+    received(event) {
+        if (!this.frame || event.source !== this.frame.contentWindow || event.data?.token !== this.token) return;
+        if (event.data.type === 'ready') this.ready = true;
+        else if (event.data.type === 'layout' && Number.isFinite(event.data.height)) this.onLayout(layoutOf(event.data));
     }
 }
