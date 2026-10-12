@@ -540,6 +540,33 @@ async function main() {
         check('the guide closes, reopens from the header and offers servers to add',
             guide.closed && guide.reopened && guide.servers.length >= 5 && guide.command === 'python3 test_mcp_server.py',
             `${guide.servers.length} servers; ${guide.command}`);
+        // What to type for Glean reads in full: a label, a placeholder that fits its field, the
+        // endpoint's shape, and a link to the settings page where Glean shows it.
+        const placeholderFits = `field => {
+            const context = document.createElement('canvas').getContext('2d');
+            const style = getComputedStyle(field);
+            context.font = style.font;
+            return context.measureText(field.placeholder).width <= field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        }`;
+        const gleanField = await page.run(`(() => {
+            const fits = ${placeholderFits};
+            document.getElementById('guideBtn').click();
+            const input = document.getElementById('gleanUrl');
+            const hint = document.getElementById(input.getAttribute('aria-describedby'));
+            const link = hint.querySelector('a');
+            const guideSays = [input.labels[0]?.textContent, fits(input) ? 'its placeholder fits' : 'its placeholder is cut', hint.querySelector('.guide-example')?.textContent, link.href, link.target, link.rel];
+            document.getElementById('closeGuide').click();
+            ${showWorkbench};
+            document.getElementById('addServerToggle').click();
+            const add = document.getElementById('serverUrl');
+            const addLink = document.getElementById(add.getAttribute('aria-describedby'))?.querySelector('a');
+            const railSays = [fits(add) ? 'its placeholder fits' : 'its placeholder is cut', addLink?.href, addLink?.target];
+            document.querySelector('#addServerForm [data-cancel-add]').click();
+            return guideSays.join(' | ') + ' / ' + railSays.join(' | ');
+        })()`);
+        check("Glean's field in the Guide and + beside Servers say what to type in full, and link to where Glean shows the endpoint",
+            gleanField === 'Work email or MCP endpoint | its placeholder fits | https://your-company-be.glean.com/mcp/default | https://app.glean.com/settings/connected-apps | _blank | noopener'
+                + ' / its placeholder fits | https://app.glean.com/settings/connected-apps | _blank', gleanField);
         const loaded = await page.waitFor(`${entries}.some(e => e.source === 'worker' && e.message.startsWith(${JSON.stringify(`Loaded the ${CLIENT.label} (`)}))`, 5000);
         check('logs: the worker reports the client build it loaded', !!loaded);
 
@@ -2016,7 +2043,8 @@ async function main() {
         const unknown = await lookUp('someone@unknown.test', gleanError);
         check('Glean by email: a domain Glean doesn\'t know is reported', /doesn't know a deployment for unknown\.test/.test(unknown || ''), unknown);
         const blockedLookup = await lookUp('someone@blocked.test', gleanError);
-        check('Glean by email: a lookup the browser blocks falls back to pasting the URL', /Paste your MCP server URL/.test(blockedLookup || ''), blockedLookup);
+        check('Glean by email: a lookup the browser blocks falls back to pasting the endpoint, from Glean\'s settings',
+            /Paste your MCP endpoint instead, from Third party apps and MCP in Glean's settings\.$/.test(blockedLookup || ''), blockedLookup);
         const gleanUrl = `${HOST}:${PORTS.oauth}/mcp/default`;
         const foundAndSignedIn = await lookUp('someone@oauth-mock.test', `appShell.servers[${JSON.stringify(gleanUrl)}]?.status === 'connected'`);
         const filled = await page.run(`document.getElementById('gleanUrl').value + ' | ' + document.getElementById('gleanStatus').textContent`);
