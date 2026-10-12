@@ -1,6 +1,6 @@
 // The response pane: a run's outcome, how long it took and whether its result changed since the
-// last run of the same request, with the result, the lines that changed, the raw JSON and the
-// request's other runs. It also shows the report of a Run all as it fills in.
+// last run of the same request, with the result, the lines that changed, the raw JSON, what the
+// call sent and the request's other runs. It also shows the report of a Run all as it fills in.
 
 import { hunks, lineDiff } from '../diff.js';
 import { comparedValue, normalize } from '../runs.js';
@@ -8,8 +8,10 @@ import * as store from '../store.js';
 import { escapeHtml, formatMs, plural, SOURCE_LABELS, timeAgo, verdictChip, verdictOf } from '../util.js';
 import { WbElement } from './base.js';
 
-const TABS = [['result', 'Result'], ['changes', 'Changes'], ['json', 'JSON'], ['runs', 'Runs']];
+const TABS = [['result', 'Result'], ['changes', 'Changes'], ['json', 'JSON'], ['sent', 'Sent'], ['runs', 'Runs']];
 const BASE64 = /^[A-Za-z0-9+/=\s]+$/;
+// Who sent a run's arguments, when it wasn't the Workbench.
+const SENT_BY = { app: 'the app sent', chat: 'the Chat app sent', reply: 'the app sent' };
 
 // The CallToolResult inside a tool_result message (older workers wrapped it once more).
 function toolResultOf(message) {
@@ -155,7 +157,7 @@ export class WbResponse extends WbElement {
                 <div class="run-summary" ${run ? `data-run-id="${escapeHtml(run.id)}"` : ''}>${parts.join('')}</div>
                 <div class="wb-tabs" role="tablist" aria-label="Response">
                     ${TABS.map(([id, label]) => {
-                        const disabled = (id === 'changes' && !run?.previousRunId) || (id === 'runs' && !run);
+                        const disabled = (id === 'changes' && !run?.previousRunId) || ((id === 'runs' || id === 'sent') && !run);
                         return `<button type="button" role="tab" class="wb-tab" data-response-tab="${id}" aria-selected="${id === this.tab}" ${disabled ? 'disabled' : ''}>${label}</button>`;
                     }).join('')}
                 </div>
@@ -185,6 +187,7 @@ export class WbResponse extends WbElement {
         if (!body || !message) return;
         const run = message.run?.id ? message.run : null;
         if (this.tab === 'changes' && run) return this.renderChanges(body, run);
+        if (this.tab === 'sent' && run) return this.renderSent(body, run);
         if (this.tab === 'runs' && run) return this.renderRuns(body, run);
         if (this.tab === 'json') {
             const raw = message.result ?? message.resultText ?? { error: message.error, errorKind: message.errorKind };
@@ -236,6 +239,23 @@ export class WbResponse extends WbElement {
             }).join('');
             body.innerHTML = `${head}<pre class="diff">${shown}</pre>`;
         }
+    }
+
+    // The arguments as they went out, as history keeps them: {{variables}} filled in, and for a call
+    // an app made, its screen's values and what it added to its prompt.
+    async renderSent(body, run) {
+        body.innerHTML = '<p class="text-secondary">Loading…</p>';
+        const record = await store.getRun(run.id);
+        if (this.view.message?.run?.id !== run.id || this.tab !== 'sent') return;
+        const text = record?.sentArgs ? JSON.stringify(record.sentArgs, null, 2) : record?.sentArgsText;
+        if (!text) {
+            body.innerHTML = `<p class="text-secondary">${record ? "This run didn't keep what it sent." : 'This run is no longer in history, so neither is what it sent.'}</p>`;
+            return;
+        }
+        const asked = record.source === 'reply' ? ", as a model's reply asked" : '';
+        const variables = record.environmentName ? `, with variables from ${record.environmentName}` : '';
+        const cut = record.sentArgs ? '' : '<p class="tool-notice">It was too big to keep in full, so history has its first 256 KB.</p>';
+        body.innerHTML = `<p class="wb-sent-head text-secondary">${escapeHtml(`What ${SENT_BY[record.source] || 'was sent'} to ${record.toolName}${asked}${variables}:`)}</p>${cut}<pre class="wb-json">${escapeHtml(text)}</pre>`;
     }
 
     // Every stored run of the same request, newest first.

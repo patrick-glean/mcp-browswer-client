@@ -1441,6 +1441,17 @@
                 }
             }
 
+            // A text input drops line breaks, so text that has them goes in a box of several lines
+            // instead. Returns the control that holds the text.
+            keepLines(input, text) {
+                if (input.tagName !== 'INPUT' || !text.includes('\n')) return input;
+                const box = document.createElement('textarea');
+                for (const { name, value } of [...input.attributes]) if (name !== 'type') box.setAttribute(name, value);
+                box.rows = Math.min(8, text.split('\n').length);
+                input.replaceWith(box);
+                return box;
+            }
+
             // A labelled field for one schema property; objects nest their properties' fields. The
             // card's data-field is the field's path, as its inputs' names use it.
             renderInputField(key, prop, isRequired, path = key) {
@@ -1465,7 +1476,9 @@
                         const item = document.createElement('div');
                         item.className = 'array-item';
                         item.innerHTML = `${this.renderValueInput(prop.items, `${path}[]`, false)}<button type="button" class="btn-icon btn-tertiary btn-sm remove-array-item" aria-label="Remove item"><span class="icon icon-x" aria-hidden="true"></span></button>`;
-                        item.querySelector('[name]').value = value === null || value === undefined ? '' : String(value);
+                        const text = value === null || value === undefined ? '' : String(value);
+                        const field = item.querySelector('[name]');
+                        (this.fieldKind(prop.items) === 'string' ? this.keepLines(field, text) : field).value = text;
                         item.querySelector('.remove-array-item').onclick = () => {
                             const form = item.closest('form');
                             item.remove();
@@ -1696,7 +1709,8 @@
                         if (kind === 'json') {
                             input.value = value === undefined ? '' : isWholePlaceholder(value) ? value : JSON.stringify(value, null, 2);
                         } else {
-                            input.value = value === undefined || value === null ? '' : String(value);
+                            const text = value === undefined || value === null ? '' : String(value);
+                            (kind === 'string' ? this.keepLines(input, text) : input).value = text;
                         }
                     }
                 });

@@ -39,7 +39,7 @@ export class TraceList {
             <li class="app-trace-entry app-trace-${escapeHtml(entry.kind)}">
                 <time class="app-trace-time">${clock(entry.time)}</time>
                 <span class="app-trace-mark" aria-hidden="true">${MARKS[entry.kind] || '·'}</span>
-                <span class="app-trace-text">${escapeHtml(entry.text)}${entry.runId ? ` <button type="button" class="link-button" data-open-run="${escapeHtml(entry.runId)}">Open in the Workbench</button>` : ''}</span>
+                <span class="app-trace-text">${escapeHtml(entry.text)}${entry.runId ? ` <button type="button" class="link-button" data-open-run="${escapeHtml(entry.runId)}" title="The call in the Workbench: what it sent, ready to run again, and what came back">Open in the Workbench</button>` : ''}</span>
             </li>`;
     }
 

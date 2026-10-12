@@ -302,7 +302,7 @@ export class WbRequest extends WbElement {
     defaultRequestName(args) {
         const tool = this.workbench.tool;
         const first = Object.values(args || {}).find(value => typeof value === 'string' && value.trim());
-        const name = first ? `${tool.name}: ${first.trim()}` : tool.name;
+        const name = first ? `${tool.name}: ${first.trim().split('\n')[0]}` : tool.name;
         return name.length > 60 ? `${name.slice(0, 57)}…` : name;
     }
 

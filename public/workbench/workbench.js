@@ -43,6 +43,26 @@ const FIELD_SOURCES = {
 // What identifies a resource, a resource template or a prompt in its list.
 export const itemKey = (kind, item) => (kind === 'resource' ? item.uri : kind === 'template' ? item.uriTemplate : item.name);
 
+// Runs from calls an app made, whose {{names}} the app filled in (its screen's values), and what
+// opening one calls it.
+const MADE_BY_APPS = { app: "the app's call", chat: "the Chat app's call", reply: "the call a model's reply asked for" };
+
+// What opening a stored run puts in the request pane, and what to say about it: { args, text }. A
+// Workbench run comes back as it was written, {{variables}} and all. A call an app made comes
+// back as it was sent, since the Workbench doesn't have the app's screen to fill its names from.
+export function openedRun(run) {
+    const made = MADE_BY_APPS[run.source];
+    if (!made) {
+        return run.args
+            ? { args: run.args, text: `Opened the ${SOURCE_LABELS[run.source] || run.source} run from ${timeAgo(run.startedAt)}.` }
+            : { args: {}, text: 'The arguments were too big to keep, so the fields are empty.' };
+    }
+    if (!run.sentArgs) return { args: {}, text: `What ${made} sent was too big to keep in full, so the fields are empty. Sent, in the response, shows its start.` };
+    const names = [...variablesIn(run.args || {})].map(name => `{{${name}}}`);
+    const filled = names.length && run.source !== 'reply' ? `: the app filled in ${listOf(names)}` : '';
+    return { args: run.sentArgs, text: `Opened ${made}, with what it sent${filled}. Run sends it again.` };
+}
+
 // A stored run in the shape of the worker's tool_result, for the response pane.
 export function messageFromRun(run) {
     return {
@@ -440,7 +460,7 @@ export class Workbench {
 
     // --- Runs ---
 
-    // Shows a stored run: its tool with the arguments as written, and its result.
+    // Shows a stored run: its tool, ready to run again (see openedRun), and its result.
     async openRun(id) {
         const run = await store.getRun(id);
         if (!run) {
@@ -450,9 +470,7 @@ export class Workbench {
         const tool = this.showTool(run.serverUrl, run.toolName);
         if (tool) {
             this.setOpenRequest(run.requestId ? (await store.getRequest(run.requestId)) || null : null);
-            this.emit('fill', run.args
-                ? { args: run.args, text: `Opened the ${SOURCE_LABELS[run.source] || run.source} run from ${timeAgo(run.startedAt)}.` }
-                : { args: {}, text: 'The arguments were too big to keep, so the fields are empty.' });
+            this.emit('fill', openedRun(run));
         }
         this.emit('show', { message: messageFromRun(run) });
     }

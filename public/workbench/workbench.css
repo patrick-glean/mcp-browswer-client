@@ -1259,7 +1259,8 @@ wb-response {
     max-height: none;
 }
 
-.wb-pane .diff-head {
+.wb-pane .diff-head,
+.wb-sent-head {
     margin-bottom: 8px;
     font-size: 0.75rem;
 }
