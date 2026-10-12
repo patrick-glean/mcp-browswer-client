@@ -18,7 +18,7 @@ Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.
 
 Runtime, in the top bar, shows which MCP client library is running and switches it. The Workbench is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed. Apps holds the apps you build. Its examples, Chat (an agent loop over your servers' tools), Project pulse (a dashboard) and Front desk (a visitor kiosk over four screens), and New app each start one that already works.
 
-For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your Glean MCP server URL) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
+For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your MCP endpoint, which the Guide shows you where to copy in Glean's settings) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
 
 ## MCP client libraries
 
@@ -536,7 +536,7 @@ They're third-party services, so their behavior can change; `npm run test:public
 
 ### Glean
 
-Glean's MCP server signs you in with your work account through dynamic client registration, which the client handles. Its URL looks like `https://your-company-be.glean.com/mcp/default`. You don't need to look it up: enter your work email in the Guide's Glean field, and the page asks `app.glean.com/config/search` which deployment your email belongs to, the way Glean's own sign-in page does. It then uses that deployment's default MCP server. Only the email's domain is logged. That endpoint isn't a documented API, so you can also paste the URL yourself, from Glean's Your settings, then Third party apps and MCP, on the "Connect to your AI apps with Glean MCP" card. Use the pasted URL if your company uses a server other than `default`.
+Glean's MCP server signs you in with your work account through dynamic client registration, which the client handles. Its URL looks like `https://your-company-be.glean.com/mcp/default`. You don't need to look it up: enter your work email in the Guide's Glean field, and the page asks `app.glean.com/config/search` which deployment your email belongs to, the way Glean's own sign-in page does. It then uses that deployment's default MCP server. Only the email's domain is logged. That endpoint isn't a documented API, so you can also paste your MCP endpoint yourself. Glean shows it at [app.glean.com/settings/connected-apps](https://app.glean.com/settings/connected-apps) (Your settings, then Third party apps and MCP), which the Guide links to: on the "Connect to your AI apps with Glean MCP" card, pick the server (Default Tools is `mcp/default`) and copy its Endpoint. Paste the endpoint if your company uses a server other than `default`.
 
 Glean only sends CORS headers to page origins on its allowlist, so from an origin that isn't on it every request fails as "Couldn't reach". Glean's own deployment allows `http://127.0.0.1:8888` (and not `localhost:8888`), so:
 
@@ -547,7 +547,7 @@ npx --yes http-server public -a 127.0.0.1 -p 8888 -c-1   # the same, without ins
 
 Avoid `python3 -m http.server` for the app: it resets connections when the page and the worker load their modules at the same time, which can stop the service worker from starting.
 
-Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in, or enter it under + beside Servers. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. Glean shows the client under Third party apps and MCP as "MCP Browser Client", where you can revoke it.
+Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in, or enter it under + beside Servers. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. The same settings page then lists the client under Connected apps, as "Mcp Browser Client", with when its access was granted, when it expires and when it was last used; you can revoke it there.
 
 What to expect in the log: `server/discover` is blocked (Glean's CORS policy doesn't allow the 2026-07-28 headers), so the client connects with the 2025 handshake; the 401's challenge isn't readable, so the client finds `/.well-known/oauth-protected-resource/mcp/default`, registers, and signs in with `https://your-company-be.glean.com/oauth` for `mcp offline_access`.
 
