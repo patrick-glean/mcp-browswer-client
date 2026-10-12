@@ -196,6 +196,25 @@
                 <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>. The same settings page then lists this client under Connected apps, as Mcp Browser Client, with when its access expires; you can revoke it there.</p>
             </div>
 
+            <p class="guide-label">Built in: demo servers that run in this page</p>
+            <ul class="guide-servers">
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Front desk (demo)</strong> <span class="guide-meta">made-up visits</span>
+                        <p>Try <code>find_visit</code> with visitor <code>Ada</code>. The Front desk example in Apps comes with it.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://frontdesk.demo.invalid/mcp" data-alias="Front desk (demo)">Add and connect</button>
+                </li>
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Demo model</strong> <span class="guide-meta">a stand-in</span>
+                        <p>Try <code>chat</code> with message <code>hello</code>. The Chat and Project pulse examples use it until you add Glean or another model.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://model.demo.invalid/mcp" data-alias="Demo model">Add and connect</button>
+                </li>
+            </ul>
+            <p class="guide-note">They answer from inside the client's service worker, so nothing is sent anywhere. An app can move from one to your own server that has the same tools.</p>
+
             <p class="guide-label">Public servers, nothing to install</p>
             <ul class="guide-servers">
                 <li>
