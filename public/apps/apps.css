@@ -1829,3 +1829,66 @@ app-inspector .app-route-where [data-route-into] {
 .app-inspector-actions {
     gap: 6px;
 }
+
+/* ---------- The servers an app calls, and which of yours could take its calls instead ---------- */
+
+.app-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-server-use {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+}
+
+.app-server-use-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-server-use-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.app-server-use-tools {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.app-server-use .btn-sm {
+    align-self: flex-start;
+}
+
+.app-flow-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.app-flow-servers-title {
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-flow-servers .app-servers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}

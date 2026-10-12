@@ -1,11 +1,13 @@
-// The Outline's Flow: the app's rules, top to bottom, each a rule card (RuleEditor). Each says
-// when (something happens on the screen), what to call (a tool, with values from the screen) and
-// then where its answer goes, if it works and if it fails, with what to show there.
+// The Outline's Flow: the servers the app calls, which it can call others instead of, and its
+// rules, top to bottom, each a rule card (RuleEditor). Each says when (something happens on the
+// screen), what to call (a tool, with values from the screen) and then where its answer goes, if
+// it works and if it fails, with what to show there.
 
 import { schemaOf } from '../../workbench/util.js';
 import { newRule, triggersOf } from '../flow.js';
 import { AppElement } from './base.js';
 import { RuleEditor } from './rule-editor.js';
+import { ServerSwitch } from './server-switch.js';
 
 export class AppFlow extends AppElement {
     setup(signal) {
@@ -19,7 +21,10 @@ export class AppFlow extends AppElement {
         }, signal);
         this.apps.on('answer', ({ ruleId }) => this.editors.find(editor => editor.ruleId === ruleId)?.renderPicks(), signal);
         const serversChanged = () => {
-            if (this.contains(document.activeElement)) return this.editors.forEach(editor => editor.update());
+            if (this.contains(document.activeElement)) {
+                this.servers?.refresh();
+                return this.editors.forEach(editor => editor.update());
+            }
             this.render();
         };
         this.shell.on('tools', serversChanged, signal);
@@ -47,6 +52,7 @@ export class AppFlow extends AppElement {
 
     render() {
         this.editors = [];
+        this.servers = null;
         if (!this.apps.app || this.apps.view !== 'outline') {
             this.innerHTML = '';
             return;
@@ -59,8 +65,14 @@ export class AppFlow extends AppElement {
                     <button type="button" class="btn-sm" data-add-rule><span class="icon icon-plus" aria-hidden="true"></span>Add a rule</button>
                 </header>
                 <p class="app-section-note text-secondary">Rules that wait for the same thing run top to bottom. In a call, <code>{{id}}</code> is what that element holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned.</p>
+                <div class="app-flow-servers">
+                    <h4 class="app-flow-servers-title">Servers it calls</h4>
+                    <div data-server-switch></div>
+                </div>
                 ${flow.length ? `<ol class="app-rules">${flow.map(rule => `<li data-rule-card="${rule.id}"></li>`).join('')}</ol>` : '<p class="wb-list-note">No rules yet, so nothing happens when people use the screen. Add a rule.</p>'}
             </section>`;
+        this.servers = new ServerSwitch({ shell: this.shell, apps: this.apps, container: this.querySelector('[data-server-switch]'), signal: this.signal });
+        this.servers.render();
         flow.forEach((rule, index) => {
             const editor = new RuleEditor({
                 shell: this.shell,

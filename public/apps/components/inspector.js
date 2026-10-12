@@ -12,6 +12,7 @@ import { AppElement } from './base.js';
 import { HtmlSourceEditor } from './html-source.js';
 import { propField, propValue, setProp } from './props.js';
 import { RuleEditor } from './rule-editor.js';
+import { ServerSwitch } from './server-switch.js';
 
 export class AppInspector extends AppElement {
     setup(signal) {
@@ -34,7 +35,9 @@ export class AppInspector extends AppElement {
         this.shell.on('tools', () => {
             this.ruleEditor?.refresh();
             this.source?.refresh();
+            this.servers?.refresh();
         }, signal);
+        this.shell.on('servers', () => this.servers?.refresh(), signal);
         this.apps.on('model', () => this.source?.modelChanged(), signal);
         this.addEventListener('click', event => this.clicked(event), { signal });
         this.addEventListener('input', event => {
@@ -74,6 +77,7 @@ export class AppInspector extends AppElement {
     render() {
         this.ruleEditor = null;
         this.source = null;
+        this.servers = null;
         if (!this.app || this.apps.view !== 'canvas') {
             this.innerHTML = '';
             return;
@@ -111,6 +115,8 @@ export class AppInspector extends AppElement {
                 <button type="button" class="wb-chip" data-screen-size="wide" aria-pressed="${screen.size === 'wide'}" title="Room for boxes side by side, as a dashboard has">Wide</button>
             </div>
             ${html ? '<div data-screen-source></div>' : `<p class="text-secondary">${count} components${screens ? ` on ${screens} screens` : ''}. Add more from the Library: boxes for what a tool answers (a chart, a list, a number), a part a model or a tool makes, or another screen.</p>`}
+            <h4 class="app-inspector-section">Servers it calls</h4>
+            <div data-server-switch></div>
             <h4 class="app-inspector-section">How it works</h4>
             <ul class="app-inspector-tips">
                 <li>Drag from an element's ● to a tool's <b>Run</b> to start the tool, or to one of its fields to fill that field with what the element holds.</li>
@@ -120,6 +126,8 @@ export class AppInspector extends AppElement {
                 <li><b>Start</b> begins the app. Wire it to a tool's Run to call the tool when the app opens, such as to fill a dashboard.</li>
                 <li><b>Run</b> lets you use the screen; the wires light up as their rules run, and What happened says each step.</li>
             </ul>`;
+        this.servers = new ServerSwitch({ shell: this.shell, apps: this.apps, container: this.$('[data-server-switch]'), signal: this.signal });
+        this.servers.render();
         if (html) {
             this.source = new HtmlSourceEditor({
                 shell: this.shell, workbench: this.workbench, apps: this.apps, container: this.$('[data-screen-source]'), signal: this.signal,
@@ -312,7 +320,7 @@ export class AppInspector extends AppElement {
 
     clicked(event) {
         const button = event.target.closest('button');
-        if (!button || button.disabled || button.closest('[data-rule-editor], [data-part-source], [data-screen-source]')) return;
+        if (!button || button.disabled || button.closest('[data-rule-editor], [data-part-source], [data-screen-source], [data-server-switch]')) return;
         const { dataset } = button;
         if (dataset.screenKind) return this.apps.setScreenKind(dataset.screenKind);
         if (dataset.screenSize) return this.apps.setScreenSize(dataset.screenSize);

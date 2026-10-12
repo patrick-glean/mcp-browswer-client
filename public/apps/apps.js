@@ -25,6 +25,7 @@ import { fromDml, partFile, serversOf, toDml } from './dml.js';
 import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
 import { componentsHtml, elementsOf, htmlFromResult, movedComponents, newComponent, sanitizePart, screenHtml, withNewScreen, withoutComponent } from './screen.js';
+import { withCallsTo } from './servers.js';
 import * as store from './store.js';
 import { unzip, zip } from './zip.js';
 
@@ -535,6 +536,15 @@ export class Apps {
         this.change(app => { app.flow = disconnect(app.flow, wire, { required: schemaOf(tool)?.required || [] }); }, { part: 'flow' });
         this.select({ kind: 'rule', id: wire.ruleId });
         return wire;
+    }
+
+    // Every call the app makes to one server goes to another instead, such as your own server in
+    // place of a demo one (servers.js).
+    callInstead(from, to) {
+        if (!this.app || !from || !to || from === to) return;
+        const was = this.serverName(from);
+        this.change(app => { Object.assign(app, withCallsTo(app, from, to)); }, { part: 'flow' });
+        this.status(`${this.app.name} calls ${this.serverName(to)} now, instead of ${was}.`);
     }
 
     // A component a place up (-1) or down (1); a screen moves with what's on it (screen.js).
