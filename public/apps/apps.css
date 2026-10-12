@@ -973,17 +973,77 @@ app-try {
 
 /* ---------- The canvas ---------- */
 
+/* The Inspector's splitter fills the gap beside it and sets its width. */
 .app-canvas-view {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) 16px clamp(260px, var(--inspector-width, 300px), 45vw);
     align-items: start;
 }
 
 @media (max-width: 1180px) {
     .app-canvas-view {
         grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
     }
+
+    .app-canvas-view > apps-splitter {
+        display: none;
+    }
+}
+
+/* ---------- The splitters: the list of apps', the Inspector's and the canvas's ---------- */
+
+apps-splitter {
+    position: relative;
+    z-index: 5;
+    display: block;
+    align-self: stretch;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+}
+
+apps-splitter::before,
+apps-splitter::after {
+    position: absolute;
+    inset: 0 -4px;
+    content: '';
+}
+
+.app-canvas-view > apps-splitter::before,
+.app-canvas-view > apps-splitter::after {
+    inset: 0 4px;
+}
+
+apps-splitter::after {
+    inset: 0 -1px;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+.app-canvas-view > apps-splitter::after {
+    inset: 0 7px;
+}
+
+apps-splitter:hover::after,
+apps-splitter:focus-visible::after,
+apps-splitter[data-dragging]::after {
+    background: var(--theme-link);
+}
+
+apps-splitter[data-pane='canvas'] {
+    height: 6px;
+    border-top: 1px solid var(--theme-border-light);
+    cursor: row-resize;
+}
+
+apps-splitter[data-pane='canvas']::before {
+    inset: -4px 0;
+}
+
+apps-splitter[data-pane='canvas']::after {
+    inset: -1px 0 auto;
+    height: 3px;
 }
 
 app-canvas,
@@ -1024,20 +1084,49 @@ app-inspector:empty {
 }
 
 .app-canvas-scroll {
-    height: clamp(420px, calc(100vh - 300px), 1100px);
+    height: var(--canvas-height, clamp(420px, calc(100vh - 300px), 1100px));
     overflow: auto;
     outline: none;
 }
 
-.app-surface {
+/* The surface is scaled to the zoom; the box around it is its size once scaled, which the
+   scroll area scrolls. */
+.app-zoom {
     position: relative;
-    width: var(--surface-w, 100%);
     min-width: 100%;
-    height: var(--surface-h, 100%);
     min-height: 100%;
+}
+
+.app-surface {
+    position: absolute;
+    top: 0;
+    left: 0;
     background-image: radial-gradient(var(--theme-border-dark) 1px, transparent 1px);
     background-size: 18px 18px;
+    transform-origin: 0 0;
     user-select: none;
+}
+
+app-canvas.app-panning,
+app-canvas.app-panning * {
+    cursor: grabbing !important;
+}
+
+.app-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.app-zoom-controls .btn-icon {
+    min-width: 28px;
+    padding: 0;
+    font-size: 1rem;
+}
+
+.app-zoom-level {
+    min-width: 52px;
+    font-variant-numeric: tabular-nums;
 }
 
 .app-wires {
@@ -1068,15 +1157,13 @@ app-inspector:empty {
 .app-arrow-error path { fill: var(--theme-error); }
 .app-arrow-go path { fill: var(--theme-text-primary); }
 
-/* Where a button goes is a dashed line to the screen's tab; so is a wire whose element is on a
-   screen that isn't shown, which ends at that screen's tab. */
-.app-wire-go .app-wire-line,
-.app-wire-elsewhere .app-wire-line {
-    stroke-dasharray: 5 4;
+/* A way to another screen, from a button or a tool's answer, is a thicker arrow into its card. */
+.app-wire-transition .app-wire-line {
+    stroke-width: 3;
 }
 
-.app-wire-elsewhere .app-wire-line {
-    opacity: 0.6;
+.app-wire-transition:hover .app-wire-line {
+    stroke-width: 4;
 }
 
 .app-wire-hit {
@@ -1128,10 +1215,11 @@ app-inspector:empty {
 
 .app-start {
     position: absolute;
-    top: 20px;
-    left: var(--screen-x);
-    z-index: 3;
+    top: 0;
+    left: 0;
+    z-index: 6;
     gap: 6px;
+    transform: translate(var(--x, 24px), var(--y, 20px));
     height: 30px;
     min-height: 30px;
     padding: 0 18px 0 12px;
@@ -1160,13 +1248,27 @@ app-inspector:empty {
     transform: translateY(-50%);
 }
 
-/* Above the wires, so the ports in its gutter take clicks before the wires that leave them. */
+/* The cards are above the wires, so the ports in their gutters take clicks before the wires that
+   leave them. Above the cards, in order: the running app, the boxes that pick elements in
+   Design, the tools, and the transforms on the wires. */
+.app-cards {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+
 .app-screen-card {
     position: absolute;
-    top: var(--screen-y);
-    left: var(--screen-x);
-    z-index: 3;
+    top: 0;
+    left: 0;
     display: flex;
+    transform: translate(var(--x), var(--y));
+    pointer-events: auto;
+}
+
+.app-screen-card[data-front] {
+    z-index: 1;
 }
 
 .app-screen-window {
@@ -1178,16 +1280,55 @@ app-inspector:empty {
     box-shadow: var(--shadow-md);
 }
 
+.app-screen-card[data-live] .app-screen-window {
+    border-color: var(--theme-link);
+}
+
 .app-screen-bar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     height: var(--screen-bar);
     padding: 0 10px;
     border-bottom: 1px solid var(--theme-border-light);
     background: var(--theme-background-light);
     color: var(--theme-text-secondary);
     font-size: 0.75rem;
+    cursor: grab;
+    outline: none;
+}
+
+.app-screen-bar:active {
+    cursor: grabbing;
+}
+
+.app-screen-bar:focus-visible,
+.app-screen-bar.app-selected {
+    box-shadow: inset 0 0 0 2px var(--theme-link);
+    color: var(--theme-text-primary);
+}
+
+.app-screen-card[data-live] .app-screen-bar {
+    color: var(--theme-text-primary);
+    font-weight: 600;
+}
+
+.app-screen-opens {
+    flex: none;
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background-mid);
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 400;
+}
+
+/* A screen's ● is where the ways there end, at the start of its card's title. */
+.app-screen-bar .app-port-screen {
+    --port: var(--theme-text-primary);
+    position: relative;
+    margin-left: -16px;
 }
 
 .app-screen-dots {
@@ -1206,85 +1347,70 @@ app-inspector:empty {
     white-space: nowrap;
 }
 
-/* An app with several screens has a tab for each in its title bar, with the ● that goes there. */
-.app-screen-bar[data-tabbed] {
-    padding: 0 2px;
-}
-
-.app-screen-bar[data-tabbed] .app-screen-dots,
-.app-screen-bar[data-tabbed] .app-screen-name {
-    display: none;
-}
-
-/* Narrow, so a phone-sized screen fits four names before they shorten. */
-.app-screen-tabs {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    min-width: 0;
-    height: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-}
-
-.app-screen-tab {
-    flex: 0 1 auto;
-    gap: 3px;
-    min-width: 40px;
-    height: 22px;
-    min-height: 22px;
-    padding: 0 3px 0 5px;
-    border-color: transparent;
-    border-radius: var(--radius-200);
-    background: transparent;
-    color: var(--theme-text-secondary);
-    font-size: 0.6875rem;
-}
-
-.app-screen-tab:hover:not(:disabled) {
-    background: var(--theme-hover);
-}
-
-.app-screen-tab[aria-selected='true'] {
-    flex-shrink: 0;
-    border-color: var(--theme-border-light);
-    background: var(--theme-background);
-    color: var(--theme-text-primary);
-    font-weight: 600;
-}
-
-.app-screen-tab.app-selected {
-    border-color: var(--theme-link);
-}
-
-.app-screen-tab-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.app-screen-tab .app-port-screen {
-    --port: var(--theme-text-primary);
-    position: relative;
-    width: 9px;
-    height: 9px;
-    border-width: 1.5px;
-}
-
 .app-screen-body {
     position: relative;
+    height: var(--body-h);
 }
 
 .app-canvas-frame {
     display: block;
     width: 100%;
-    height: var(--frame-h, 360px);
+    height: 100%;
     border: none;
+    background: var(--theme-background);
+}
+
+/* A still shows its screen and takes no input; under the running app, it's hidden. */
+.app-still {
+    pointer-events: none;
+}
+
+.app-still[data-covered] {
+    visibility: hidden;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-still {
+    opacity: 0.55;
+}
+
+/* The running app, over the body of its card. It slides to the next card when it goes there. */
+.app-player {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 4;
+    width: var(--screen-w);
+    height: var(--h);
+    border-bottom-right-radius: var(--radius-300);
+    border-bottom-left-radius: var(--radius-300);
+    transform: translate(var(--x), var(--y));
+}
+
+.app-player-moving {
+    transition: transform 0.45s ease, height 0.45s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-player-moving {
+        transition: none;
+    }
+}
+
+.app-overlays {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
 }
 
 .app-screen-overlay {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: var(--screen-w);
+    height: var(--h);
+    transform: translate(var(--x), var(--y));
+    pointer-events: auto;
 }
 
 app-canvas[data-mode='run'] .app-screen-overlay {
@@ -1445,11 +1571,11 @@ app-canvas[data-mode='run'] .app-port {
 }
 
 .app-nodes {
-    z-index: 3;
+    z-index: 6;
 }
 
 .app-pills {
-    z-index: 4;
+    z-index: 7;
 }
 
 .app-node {

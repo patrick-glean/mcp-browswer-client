@@ -109,6 +109,7 @@
                 <!-- public/apps/: the rail of examples and apps, and the builder for the ones you make;
                      with no app to show, the examples to start from. -->
                 <apps-rail class="apps-rail" role="navigation" aria-label="Apps"></apps-rail>
+                <apps-splitter data-pane="rail"></apps-splitter>
                 <div class="apps-main">
                     <apps-start id="appsStart" role="region" aria-label="Start an app" hidden></apps-start>
                     <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
@@ -117,6 +118,7 @@
                              Preview: the app as it is when it's launched, over the whole window. -->
                         <div class="app-canvas-view" data-app-view="canvas">
                             <app-canvas></app-canvas>
+                            <apps-splitter data-pane="inspector"></apps-splitter>
                             <app-inspector role="region" aria-label="Inspector"></app-inspector>
                         </div>
                         <div class="app-builder-body" data-app-view="outline" hidden>

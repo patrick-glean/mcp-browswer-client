@@ -122,7 +122,8 @@ export class AppInspector extends AppElement {
                 <li>Drag from an element's ● to a tool's <b>Run</b> to start the tool, or to one of its fields to fill that field with what the element holds.</li>
                 <li>Drag from a tool's <b>Answer</b> or <b>Error</b> to an element to show it there. The label on the wire is its transform: what of the answer shows.</li>
                 <li>A <b>box</b> says what it shows and what goes in it. Wired to a tool's Answer, it adds to the tool's prompt what it needs, so the layout writes the format of the answer.</li>
-                <li>A <b>screen</b> is one step of the app, with a tab above it. Wire a button to a screen's ● to go there when it's clicked, or a tool's Answer or Error to go there when the tool answers.</li>
+                <li>A <b>screen</b> is one step of the app, a card of its own, in the order people get to it. Wire a button to a screen's ● to go there when it's clicked, or a tool's Answer or Error to go there when the tool answers; the arrow shows the way.</li>
+                <li><b>Move</b> a card or a tool by its title, and the canvas by its background; <b>zoom</b> with − and +, or Ctrl or ⌘ and the wheel. Where you put them stays, and Tidy up puts them back in order.</li>
                 <li><b>Start</b> begins the app. Wire it to a tool's Run to call the tool when the app opens, such as to fill a dashboard.</li>
                 <li><b>Run</b> lets you use the screen; the wires light up as their rules run, and What happened says each step.</li>
             </ul>`;
@@ -169,7 +170,7 @@ export class AppInspector extends AppElement {
         const on = this.apps.elements().filter(element => element.screen === id && element.id !== id && !element.part);
         return on.length
             ? `<ul class="app-connections">${on.map(element => `<li><button type="button" class="app-connection" data-select-element="${escapeHtml(element.id)}">${escapeHtml(`${ELEMENT_KINDS[element.kind]} ${element.id}${element.label !== element.id ? `: ${element.label}` : ''}`)}</button></li>`).join('')}</ul>`
-            : '<p class="text-secondary">Nothing yet. With its tab picked, add components from the Library.</p>';
+            : '<p class="text-secondary">Nothing yet. With it picked, add components from the Library, or drag them onto its card.</p>';
     }
 
     // How people get to a screen: the app opening, the buttons that go there, and the rules that do.
@@ -185,7 +186,7 @@ export class AppInspector extends AppElement {
         ];
         return items.length
             ? `<ul class="app-connections">${items.join('')}</ul>`
-            : "<p class=\"text-secondary\">Nothing goes here yet. Drag from a button's ● beside the screen, or from a tool's Answer or Error, to this screen's ● on its tab.</p>";
+            : "<p class=\"text-secondary\">Nothing goes here yet. Drag from a button's ● beside a screen, or from a tool's Answer or Error, to this screen's ● at the start of its card's title.</p>";
     }
 
     renderElement(id) {

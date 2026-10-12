@@ -331,6 +331,10 @@ body.wb-resizing-rows * {
         grid-template-rows: auto minmax(0, 1fr);
     }
 
+    .wb-apps > apps-splitter {
+        display: none;
+    }
+
     .wb-dock-head {
         flex-wrap: wrap;
         height: auto;
@@ -1560,10 +1564,12 @@ wb-palette {
 
 /* ---------- Apps (the builder's own styles are in apps/apps.css) ---------- */
 
+/* The list of apps' splitter (apps-splitter) sits in a zero-width track and sets its width;
+   clamp keeps a width saved on a wide screen from crowding a narrow one. */
 .wb-apps {
     display: grid;
     flex: 1;
-    grid-template-columns: clamp(180px, 16vw, 232px) minmax(0, 1fr);
+    grid-template-columns: clamp(160px, var(--apps-rail-width, clamp(180px, 16vw, 232px)), 30vw) 0 minmax(0, 1fr);
     min-height: 0;
 }
 

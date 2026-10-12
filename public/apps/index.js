@@ -11,11 +11,13 @@ import { AppInspector } from './components/inspector.js';
 import { AppPreview } from './components/preview.js';
 import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
+import { AppsSplitter } from './components/splitter.js';
 import { AppTry } from './components/try.js';
 
 const COMPONENTS = {
     'apps-rail': AppsRail,
     'apps-start': AppsStart,
+    'apps-splitter': AppsSplitter,
     'app-header': AppHeader,
     'app-canvas': AppCanvas,
     'app-inspector': AppInspector,
