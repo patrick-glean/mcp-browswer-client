@@ -1559,9 +1559,29 @@ async function main() {
             check('Apps: a card moves by its title and stays where it\'s put with the others where they were, Tidy up puts the screens back in order, and the zoom stays for the app',
                 movedRight && othersStayed && tidied === 'back in order' && !!zoomKept, `${kept}; ${tidied}; ${zoomKept}`);
 
-            // In Run, the app moves to the card of the screen it goes to.
+            // In Run, a click on a card the app isn't on takes it there, and the app moves to the card
+            // of the screen it goes to.
+            await page.run(`document.querySelector('app-canvas [data-card-bar="done"]').click()`);
+            await page.waitFor(`${player}.dataset.on === 'done'`, 5000);
             await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
-            await page.run(`document.querySelector('app-canvas [data-card-bar="welcome"]').click()`);
+            // Picking a card may scroll the canvas to it, smoothly: the click waits for that to end.
+            const scrolled = `(() => { const scroller = document.querySelector('app-canvas [data-canvas-scroll]'); return scroller.scrollLeft + ',' + scroller.scrollTop; })()`;
+            for (let last = null, tries = 0; tries < 20; tries++) {
+                await sleep(150);
+                const now = await page.run(scrolled);
+                if (now === last) break;
+                last = now;
+            }
+            const welcomeBody = JSON.parse(await page.run(`(() => {
+                const body = document.querySelector('app-canvas [data-card="welcome"] .app-screen-body');
+                body.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = body.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + Math.min(40, box.height / 2) });
+            })()`));
+            for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+                await page.send('Input.dispatchMouseEvent', { type, x: welcomeBody.x, y: welcomeBody.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+            }
+            const broughtBack = await page.waitFor(`${player}.dataset.on === 'welcome' ? 'the app on welcome' : null`, 5000);
             await frameWaitFor(`!document.getElementById('welcome').hidden && !document.getElementById('find').disabled`);
             await frameRun(`(() => {
                 document.getElementById('visitor').value = 'ada';
@@ -1571,8 +1591,8 @@ async function main() {
             const followed = await page.waitFor(`${player}.dataset.on === 'confirm' && document.querySelector('app-canvas [data-card="confirm"]').hasAttribute('data-live') ? 'the app on confirm' : null`, 10000);
             const visitShown = await frameWaitFor(`!document.getElementById('confirm').hidden ? document.getElementById('visit').textContent.split('\\n')[0] : null`);
             await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
-            check('Apps: in Run, when the app goes to another screen, it moves to that screen\'s card',
-                followed === 'the app on confirm' && visitShown === 'Ada Lovelace, Analytical Engines', `${followed}; ${visitShown}`);
+            check('Apps: in Run, a click on another screen\'s card takes the app there, and when the app goes to another screen, it moves to that screen\'s card',
+                broughtBack === 'the app on welcome' && followed === 'the app on confirm' && visitShown === 'Ada Lovelace, Analytical Engines', `${broughtBack}; ${followed}; ${visitShown}`);
 
             // The Outline lists each screen with what's on it set in under it.
             await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
