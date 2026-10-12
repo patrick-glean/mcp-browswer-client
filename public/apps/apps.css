@@ -1010,9 +1010,8 @@ apps-splitter::after {
     content: '';
 }
 
-.app-canvas-view > apps-splitter::before,
-.app-canvas-view > apps-splitter::after {
-    inset: 0 4px;
+.app-canvas-view > apps-splitter::before {
+    inset: 0;
 }
 
 apps-splitter::after {
@@ -1371,6 +1370,14 @@ app-canvas.app-panning * {
 
 app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-still {
     opacity: 0.55;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-screen-body {
+    cursor: pointer;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-screen-body:hover .app-still {
+    opacity: 0.8;
 }
 
 /* The running app, over the body of its card. It slides to the next card when it goes there. */

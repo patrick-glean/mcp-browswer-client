@@ -530,6 +530,7 @@ export class AppCanvas extends AppElement {
             card.element.style.setProperty('--y', `${at.y}px`);
             card.element.style.setProperty('--body-h', `${this.bodyHeight(id)}px`);
             card.element.toggleAttribute('data-live', id === live);
+            card.element.querySelector('.app-screen-body').title = id === live ? '' : 'The app isn\'t on this screen. In Run, click to show it here.';
             const bar = card.element.querySelector('[data-card-bar]');
             if (id === ONE) {
                 bar.innerHTML = `<span class="app-screen-dots" aria-hidden="true"></span><span class="app-screen-name">${escapeHtml(this.app.name || 'App')}</span>`;
@@ -1546,6 +1547,9 @@ export class AppCanvas extends AppElement {
         if (target.closest('[data-port]')) return;
         const bar = target.closest('[data-card-bar]');
         if (bar) return this.pickCard(bar.dataset.cardBar);
+        // In Run, the app is only on its own card: a click on another screen's card takes it there.
+        const still = target.closest('.app-screen-body')?.closest('[data-card]')?.dataset.card;
+        if (this.mode === 'run' && still !== undefined && still !== this.activeCard()) return this.showScreen(still);
         if (button?.dataset.selectStart !== undefined) return this.apps.select({ kind: 'start' });
         if (button?.dataset.elementBox) return this.apps.select({ kind: 'element', id: button.dataset.elementBox });
         if (button?.dataset.pill) return this.apps.select({ kind: 'wire', id: button.dataset.pill, ruleId: button.dataset.pill.split(':')[1] });
