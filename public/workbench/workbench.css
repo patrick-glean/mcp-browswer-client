@@ -738,6 +738,10 @@ wb-rail {
     color: var(--theme-error);
 }
 
+.wb-add-note a {
+    color: var(--theme-link);
+}
+
 wb-rail .saved-group + .saved-group {
     margin-top: 2px;
     padding-top: 0;

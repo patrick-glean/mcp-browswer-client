@@ -183,15 +183,17 @@
             <h3>1. Pick a server</h3>
             <p class="guide-label">Glean, signed in with your work account</p>
             <div class="guide-glean">
-                <p>Enter your work email and the client asks Glean where your company's Glean is. Or paste your MCP server URL, from Glean's Your settings, then Third party apps and MCP, then the <em>Connect to your AI apps with Glean MCP</em> card.</p>
+                <p>Enter your work email, and the client asks Glean where your company's Glean is. Or paste your MCP endpoint, which Glean shows you.</p>
+                <label class="guide-field-label" for="gleanUrl">Work email or MCP endpoint</label>
                 <div class="guide-glean-row">
-                    <input type="text" id="gleanUrl" class="guide-input" placeholder="you@company.com or https://your-company-be.glean.com/mcp/default" spellcheck="false" autocomplete="email" aria-label="Work email or Glean MCP server URL">
+                    <input type="text" id="gleanUrl" class="guide-input" placeholder="you@company.com" spellcheck="false" autocomplete="email" aria-describedby="gleanUrlHint">
                     <button type="button" class="btn-sm" id="gleanAddBtn">Add and sign in</button>
                 </div>
+                <p id="gleanUrlHint" class="guide-note">An endpoint looks like <code class="guide-example">https://your-company-be.glean.com/mcp/default</code> To find yours, open <a id="gleanSettingsLink" class="guide-external" href="https://app.glean.com/settings/connected-apps" target="_blank" rel="noopener">Third party apps and MCP<span class="icon icon-external-link" aria-hidden="true"></span></a> in Glean's settings. On <em>Connect to your AI apps with Glean MCP</em>, pick the server (<em>Default Tools</em> is <code>mcp/default</code>) and copy its Endpoint.</p>
                 <p id="gleanStatus" class="guide-note" hidden></p>
                 <p id="gleanUrlError" class="guide-note text-error" hidden></p>
                 <p id="gleanOriginNote" class="guide-note" hidden>Glean answers only pages from origins on its allowlist. If this page's origin isn't on yours, connecting fails with a network (CORS) error. If your Glean allows <code>http://127.0.0.1:8888</code>, run <code>npm run start:glean</code> in a clone and open the client there; otherwise ask a Glean admin to add this origin.</p>
-                <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>.</p>
+                <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>. The same settings page then lists this client under Connected apps, as Mcp Browser Client, with when its access expires; you can revoke it there.</p>
             </div>
 
             <p class="guide-label">Public servers, nothing to install</p>
@@ -1802,7 +1804,7 @@
             gleanNote('gleanUrlError', null);
             gleanNote('gleanStatus', null);
             if (!isEmail && !/^https:\/\/[^/\s]+\/\S*$/i.test(value)) {
-                gleanNote('gleanUrlError', 'Enter your work email, or the full https:// address of your Glean MCP server.');
+                gleanNote('gleanUrlError', 'Enter your work email, or your MCP endpoint: its full https:// address.');
                 gleanUrlInput.focus();
                 return;
             }
@@ -1823,6 +1825,7 @@
         // a documented API, so when it fails people can still paste the URL. It answers the same
         // page origins as Glean's MCP servers.
         const GLEAN_CONFIG_URL = 'https://app.glean.com/config/search';
+        const PASTE_ENDPOINT = "Paste your MCP endpoint instead, from Third party apps and MCP in Glean's settings.";
         async function findGleanServer(email) {
             const domain = email.split('@').pop().toLowerCase();
             let response;
@@ -1833,10 +1836,10 @@
                     body: JSON.stringify({ email, isGleanApp: 'true' })
                 });
             } catch {
-                throw new Error(`Couldn't ask app.glean.com where ${domain}'s Glean is; it only answers pages from the origins it allows. Paste your MCP server URL instead.`);
+                throw new Error(`Couldn't ask app.glean.com where ${domain}'s Glean is; it only answers pages from the origins it allows. ${PASTE_ENDPOINT}`);
             }
             if (!response.ok) {
-                throw new Error(`app.glean.com answered HTTP ${response.status} when asked where ${domain}'s Glean is. Paste your MCP server URL instead.`);
+                throw new Error(`app.glean.com answered HTTP ${response.status} when asked where ${domain}'s Glean is. ${PASTE_ENDPOINT}`);
             }
             const config = (await response.json().catch(() => null))?.search_config || {};
             const parse = value => { try { return new URL(value); } catch { return null; } };
@@ -1845,7 +1848,7 @@
             // For a domain it doesn't know, Glean answers with its central deployment.
             const central = parse(config.centralURL);
             if (!secure || (!config.isMultiTenant && central && central.href === base.href)) {
-                throw new Error(`Glean doesn't know a deployment for ${domain}. Check the address, or paste your MCP server URL.`);
+                throw new Error(`Glean doesn't know a deployment for ${domain}. Check the address, or paste your MCP endpoint, from Third party apps and MCP in Glean's settings.`);
             }
             return { domain, queryUrl: base.href, mcpUrl: new URL('mcp/default', base).href };
         }
