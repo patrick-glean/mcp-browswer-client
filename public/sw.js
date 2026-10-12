@@ -2,6 +2,7 @@ let mcpClient = null;
 let isRunning = true;
 
 import * as authStore from './authStore.js';
+import { installDemoServers } from './demo-servers/index.js';
 import { MCP_CLIENTS } from './mcp-clients.js';
 import { formatDuration, logger, setLogSink } from './logger.js';
 import { canonicalJson, compareKeyFor, comparedValue, sha256, stored } from './workbench/runs.js';
@@ -18,6 +19,8 @@ import {
     setBroadcast as setClientBroadcast
 } from './client-runtime.js';
 
+// Before any library loads, so its requests to a demo server's address are answered here.
+installDemoServers();
 setClientBroadcast(broadcastToClients);
 setLogSink(entry => broadcastToClients({ type: 'log', content: entry }));
 
