@@ -367,10 +367,12 @@ async function signIn(page, until, ms = 20000) {
 
 // An app's screen runs in a sandboxed frame, which Chrome keeps in a process of its own, so it's a
 // DevTools target of its own. This evaluates in each such frame and returns the first answer that
-// isn't empty (null when there's none).
+// isn't empty (null when there's none). The canvas's stills of the screens the app isn't on
+// (data-still) never answer: only the running app does.
 async function frameRun(expression) {
     const frames = (await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json())
         .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl);
+    expression = `(document.documentElement.hasAttribute('data-still') ? null : (${expression}))`;
     for (const frame of frames) {
         const ws = new WebSocket(frame.webSocketDebuggerUrl);
         try {
@@ -1434,41 +1436,46 @@ async function main() {
             check('Apps: without the boxes\' request, the answer isn\'t JSON, and the boxes say so',
                 notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
 
-            // Front desk, under Examples: a visitor kiosk over four screens, which the canvas shows
-            // one at a time, each with a tab above it, calling the mock's front desk tools. The link
-            // opened above is a tab in front of this one, where the canvas couldn't draw its wires.
+            // Front desk, under Examples: a visitor kiosk over four screens, which the canvas lays out
+            // as a storyboard, a card for each screen in the order people go through them and an
+            // arrow for each way from one to the next. The app runs on the card of the screen it's
+            // on; the other cards show theirs as they are before anyone uses them. The link opened
+            // above is a tab in front of this one, where the canvas couldn't draw its wires.
             await page.send('Page.bringToFront');
             await page.run(`document.querySelector('apps-rail [data-example="frontdesk"]').click()`);
-            const tabs = `[...document.querySelectorAll('app-canvas [data-screen-tab]')]`;
-            const gutter = `[...document.querySelectorAll('app-canvas [data-gutter-row]')].map(row => row.dataset.gutterRow).join(' ')`;
+            const cardsAt = `Object.fromEntries([...document.querySelectorAll('app-canvas [data-card]')].map(card => [card.dataset.card, { x: parseFloat(card.style.getPropertyValue('--x')), y: parseFloat(card.style.getPropertyValue('--y')) }]))`;
+            const player = `document.querySelector('app-canvas [data-player]')`;
             const deskCanvas = `(() => {
-                const names = ${tabs}.map(tab => tab.textContent.trim() + (tab.getAttribute('aria-selected') === 'true' ? '*' : '')).join(', ');
-                return [names, ${gutter}, document.querySelectorAll('app-canvas .app-wire-elsewhere').length + ' wires end at another screen\\'s tab'].join(' / ');
+                const at = ${cardsAt};
+                if (Object.keys(at).join(' ') !== 'welcome confirm done notfound') return Object.keys(at).join(' ');
+                const order = at.welcome.x < at.confirm.x && at.confirm.x === at.notfound.x && at.confirm.y < at.notfound.y && at.notfound.x < at.done.x ? 'in the order people go through them' : JSON.stringify(at);
+                const gutters = [...document.querySelectorAll('app-canvas [data-gutter]')].map(gutter => gutter.dataset.gutter + ': ' + [...gutter.querySelectorAll('[data-gutter-row]')].map(row => row.dataset.gutterRow).join(' ')).join(' | ');
+                const ways = document.querySelectorAll('app-canvas .app-wire-transition').length + ' ways between screens';
+                return [order, gutters, ways, 'the app on ' + ${player}.dataset.on, document.querySelectorAll('app-canvas [data-still]').length + ' stills'].join(' / ');
             })()`;
-            const deskOpened = 'Welcome*, Confirm, Checked in, Not found / title intro visitor host find / 8 wires end at another screen\'s tab';
+            const deskOpened = 'in the order people go through them / welcome: title intro visitor host find | confirm: visit yes notme | done: badge next | notfound: missing retry desk / 4 ways between screens / the app on welcome / 4 stills';
             const deskShown = await page.waitFor(`document.getElementById('appName')?.value === 'Front desk' && ${deskCanvas} === ${JSON.stringify(deskOpened)} ? 'shown' : null`, 10000)
                 && await page.run(deskCanvas);
             const firstScreen = await frameWaitFor(`(() => {
                 const screens = [...document.querySelectorAll('[data-screen]')];
                 return screens.length === 4 ? screens.map(screen => screen.id + (screen.hidden ? '' : '*')).join(' ') : null;
             })()`);
-            check("Apps: Front desk, under Examples, has four screens, each a tab on the canvas, and opens on the first; wires to the others' elements end at their tabs",
+            check("Apps: Front desk, under Examples, has four screens, each a card on the canvas in the order people go through them, with an arrow for each way between them, and runs on the first",
                 deskShown === deskOpened && firstScreen === 'welcome* confirm done notfound', `${deskShown || await page.run(deskCanvas)}; ${firstScreen}`);
 
-            // A tab shows its screen and picks it; a button that goes to a screen has a wire to its tab.
-            const showTab = id => page.run(`${tabs}.find(tab => tab.dataset.screenTab === ${JSON.stringify(id)}).click()`);
-            await showTab('confirm');
+            // Picking a card picks its screen and shows the app there; a button that goes to a
+            // screen has an arrow into its card.
+            await page.run(`document.querySelector('app-canvas [data-card-bar="confirm"]').click()`);
             const confirmShown = await frameWaitFor(`!document.getElementById('confirm').hidden && document.getElementById('welcome').hidden ? 'confirm' : null`);
             const confirmPicked = await page.waitFor(`(() => {
                 const title = document.querySelector('app-inspector .app-inspector-title')?.textContent;
                 const ways = [...document.querySelectorAll('app-inspector .app-connections')].at(-1)?.textContent.replace(/\\s+/g, ' ').trim();
-                return ${gutter} === 'title visit yes notme' && document.querySelector('app-canvas [data-go-wire="notme"]') && title === 'confirm' ? [${gutter}, ways].join(' / ') : null;
+                return ${player}.dataset.on === 'confirm' && document.querySelector('app-canvas [data-go-wire="notme"]') && title === 'confirm' ? ['the app on confirm', ways].join(' / ') : null;
             })()`, 5000);
-            check("Apps: a screen's tab shows it on the canvas and picks it, the Inspector says how people get there, and a button that goes to a screen has a wire to its tab",
-                confirmShown === 'confirm' && confirmPicked === 'title visit yes notme / ← When find_visit works', `${confirmShown}; ${confirmPicked}`);
+            check("Apps: picking a screen's card picks it and shows the app there, the Inspector says how people get there, and a button that goes to a screen has an arrow into its card",
+                confirmShown === 'confirm' && confirmPicked === 'the app on confirm / ← When find_visit works', `${confirmShown}; ${confirmPicked}`);
 
-            // Dragging a button to a screen's tab makes it go there; its menu in the Inspector changes it.
-            await showTab('done');
+            // Dragging a button to a screen's ● makes it go there; its menu in the Inspector changes it.
             await page.waitFor(`!!${port('el:next')}`, 5000);
             await drag('el:next', 'el:confirm');
             const goneTo = await page.waitFor(`document.querySelector('app-canvas [data-go-wire="next"]') ? document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
@@ -1478,27 +1485,94 @@ async function main() {
                 go.dispatchEvent(new Event('input', { bubbles: true }));
             })()`);
             const startsOver = await page.waitFor(`!document.querySelector('app-canvas [data-go-wire="next"]') && document.querySelector('app-canvas [data-gutter-row="next"] .app-gutter-label')?.textContent === 'next ⟲' ? 'next ⟲' : null`, 5000);
-            check("Apps: dragging a button to a screen's tab makes it go there, and its When clicked, goes to menu puts it back",
+            check("Apps: dragging a button to a screen's ● makes it go there, and its When clicked, goes to menu puts it back",
                 goneTo === "Connected: next goes to Confirm (confirm) when it's clicked." && startsOver === 'next ⟲', `${goneTo}; ${startsOver}`);
 
-            // The Library adds a screen after the others, and shows it; what's added then goes on it.
+            // The Library adds a screen as a card right of the others, and shows the app there;
+            // what's added then goes on it.
             await fromLibrary('[data-library-item="component"][data-type="screen"]');
-            const screenAdded = await page.waitFor(`${tabs}.length === 5 && ${tabs}.at(-1).getAttribute('aria-selected') === 'true' ? ${tabs}.at(-1).dataset.screenTab + ': ' + document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            const screenAdded = await page.waitFor(`(() => {
+                const at = ${cardsAt};
+                const others = Object.entries(at).filter(([id]) => id !== 'screen5');
+                return at.screen5 && others.length === 4 && others.every(([, card]) => card.x < at.screen5.x) && ${player}.dataset.on === 'screen5'
+                    ? 'screen5, right of the others: ' + document.querySelector('app-canvas [data-canvas-hint]').textContent : null;
+            })()`, 5000);
             const emptyScreen = await frameWaitFor(`document.getElementById('screen5') && !document.getElementById('screen5').hidden ? document.getElementById('screen5').children.length + ' on it' : null`);
             await fromLibrary('[data-library-item="component"][data-type="button"]');
             const onIt = await frameWaitFor(`document.querySelector('#screen5 > button')?.id || null`);
-            await showTab('screen5');
+            await page.run(`document.querySelector('app-canvas [data-card-bar="screen5"]').click()`);
             await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'screen5'`, 5000);
             const screenContents = await page.run(`document.querySelector('app-inspector .app-connections')?.textContent.replace(/\\s+/g, ' ').trim()`);
             const remove = `document.querySelector('app-inspector [data-remove-component]')`;
             await page.run(`${remove}.click()`);
             const confirming = await page.run(`${remove}.textContent`);
             await page.run(`${remove}.click()`);
-            const screensLeft = await page.waitFor(`${tabs}.length === 4 && !document.querySelector('app-canvas [data-gutter-row="button"]') ? ${tabs}.map(tab => tab.dataset.screenTab).join(' ') : null`, 5000);
-            check('Apps: the Library adds a screen after the others and shows it, a component added then goes on it, and deleting the screen, on a second click, takes that along',
-                screenAdded === "screen5: Added screen5. Add components to it from the Library, and wire a button or a tool's Answer to its ● to go there."
+            const screensLeft = await page.waitFor(`!document.querySelector('app-canvas [data-gutter-row="button"]') && Object.keys(${cardsAt}).length === 4 ? Object.keys(${cardsAt}).join(' ') : null`, 5000);
+            check('Apps: the Library adds a screen as a card right of the others and shows the app there, a component added then goes on it, and deleting the screen, on a second click, takes that along',
+                screenAdded === "screen5, right of the others: Added screen5. Add components to it from the Library, and wire a button or a tool's Answer to its ● to go there."
                     && emptyScreen === '0 on it' && onIt === 'button' && screenContents === 'Button button: Button' && confirming === 'Click again to confirm' && screensLeft === 'welcome confirm done notfound',
                 `${screenAdded}; ${emptyScreen}; ${onIt}; ${screenContents}; ${confirming}; ${screensLeft}`);
+
+            // A card moves by its title and stays where it's put, with the others where they were;
+            // Tidy up puts the screens back in order. The zoom and the scroll stay for the app too.
+            const storedCards = `new Promise((resolve, reject) => {
+                const open = indexedDB.open('mcp_apps');
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const all = open.result.transaction('apps').objectStore('apps').getAll();
+                    all.onsuccess = () => {
+                        const desk = all.result.find(app => app.id === localStorage.getItem('appsShown'));
+                        resolve(desk ? JSON.stringify(Object.fromEntries(desk.screen.components.filter(component => component.type === 'screen').map(screen => [screen.id, screen.position || null]))) : null);
+                    };
+                };
+            })`;
+            const shownBefore = JSON.parse(await page.run(`JSON.stringify(${cardsAt})`));
+            const zoom = await page.run(`parseFloat(document.querySelector('app-canvas [data-zoom-reset]').textContent) / 100`);
+            const bar = JSON.parse(await page.run(`(() => {
+                const bar = document.querySelector('app-canvas [data-card-bar="confirm"]');
+                bar.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = bar.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+            })()`));
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y });
+            await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bar.x, y: bar.y, button: 'left', buttons: 1, clickCount: 1 });
+            for (let step = 1; step <= 6; step++) await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x + 10 * step, y: bar.y + 15 * step, button: 'left', buttons: 1 });
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bar.x + 60, y: bar.y + 90, button: 'left', buttons: 0, clickCount: 1 });
+            const kept = await page.waitFor(`${storedCards}.then(text => {
+                const kept = JSON.parse(text || '{}');
+                return kept.confirm && kept.welcome ? text : null;
+            })`, 5000);
+            const keptCards = JSON.parse(kept || '{}');
+            const movedRight = keptCards.confirm && Math.abs(keptCards.confirm.x - shownBefore.confirm.x - 60 / zoom) <= 2 && Math.abs(keptCards.confirm.y - shownBefore.confirm.y - 90 / zoom) <= 2;
+            const othersStayed = ['welcome', 'done', 'notfound'].every(id => keptCards[id]?.x === shownBefore[id].x && keptCards[id]?.y === shownBefore[id].y);
+            await page.run(`document.querySelector('app-canvas [data-tidy]').click()`);
+            const tidied = await page.waitFor(`${storedCards}.then(text => {
+                const kept = JSON.parse(text || '{}');
+                return kept.confirm && kept.confirm.x === kept.notfound.x && kept.confirm.y < kept.notfound.y && kept.welcome.x < kept.confirm.x ? 'back in order' : null;
+            })`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-zoom-step="-1"]').click()`);
+            const zoomKept = await page.waitFor(`(() => {
+                const shown = document.querySelector('app-canvas [data-zoom-reset]').textContent;
+                const view = JSON.parse(localStorage.getItem('appsCanvasViews') || '{}')[localStorage.getItem('appsShown')];
+                return view && Math.round(view.zoom * 100) + '%' === shown && parseFloat(shown) / 100 < ${zoom} ? 'zoomed out to ' + shown + ', and kept' : null;
+            })()`, 5000);
+            check('Apps: a card moves by its title and stays where it\'s put with the others where they were, Tidy up puts the screens back in order, and the zoom stays for the app',
+                movedRight && othersStayed && tidied === 'back in order' && !!zoomKept, `${kept}; ${tidied}; ${zoomKept}`);
+
+            // In Run, the app moves to the card of the screen it goes to.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await page.run(`document.querySelector('app-canvas [data-card-bar="welcome"]').click()`);
+            await frameWaitFor(`!document.getElementById('welcome').hidden && !document.getElementById('find').disabled`);
+            await frameRun(`(() => {
+                document.getElementById('visitor').value = 'ada';
+                document.getElementById('find').click();
+                return true;
+            })()`);
+            const followed = await page.waitFor(`${player}.dataset.on === 'confirm' && document.querySelector('app-canvas [data-card="confirm"]').hasAttribute('data-live') ? 'the app on confirm' : null`, 10000);
+            const visitShown = await frameWaitFor(`!document.getElementById('confirm').hidden ? document.getElementById('visit').textContent.split('\\n')[0] : null`);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            check('Apps: in Run, when the app goes to another screen, it moves to that screen\'s card',
+                followed === 'the app on confirm' && visitShown === 'Ada Lovelace, Analytical Engines', `${followed}; ${visitShown}`);
 
             // The Outline lists each screen with what's on it set in under it.
             await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);

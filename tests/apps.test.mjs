@@ -23,6 +23,7 @@ import {
     scopeCss, screenOfEach, screensOf, withNewScreen, withoutComponent,
 } from '../public/apps/screen.js';
 import { serverCalls, whyNotInstead, withCallsTo } from '../public/apps/servers.js';
+import { homeScreen, placeStoryboard, screenColumns, screenFinder, screenLinks } from '../public/apps/storyboard.js';
 import { crc32, unzip, zip } from '../public/apps/zip.js';
 
 const MOCK = 'http://127.0.0.1:8081/';
@@ -891,6 +892,59 @@ test('the Front desk example: four screens under its title, and three rules on i
     assert.equal(toDml(fromDml(dml).app), dml);
     assert.equal(app.serverNames, undefined);
     assert.match(readmeFor(app, { serverName: () => 'Front desk (demo)' }), /\n- Front desk \(demo\): https:\/\/frontdesk\.demo\.invalid\/mcp, a demo server built into MCP Browser Client, which Import adds for you\n/);
+});
+
+test('the storyboard puts Front desk\'s screens in the order people go through them, and each tool beside the screen that starts it', () => {
+    const app = frontDeskApp({ name: 'Front desk' });
+    const elements = elementsOfComponents(app.screen.components);
+    const [find, checkIn, desk] = app.flow;
+    const links = screenLinks(app.flow, elements);
+    assert.deepEqual(links.map(link => `${link.from} → ${link.to} (${link.kind === 'go' ? link.button : link.ruleId === find.id ? 'find_visit' : 'check_in'})`), [
+        'confirm → welcome (notme)', 'welcome → confirm (find_visit)', 'welcome → notfound (find_visit)', 'confirm → done (check_in)',
+    ], 'check_in reads visitor from Welcome, which is no way people go: only where a rule starts counts');
+    const { column, order } = screenColumns(['welcome', 'confirm', 'done', 'notfound'], links);
+    assert.deepEqual(Object.fromEntries(column), { welcome: 0, confirm: 1, notfound: 1, done: 2 });
+    assert.deepEqual(order, ['welcome', 'confirm', 'notfound', 'done']);
+    const screenOf = screenFinder(elements);
+    assert.deepEqual([screenOf('title'), screenOf('visit'), screenOf('done')], ['welcome', 'confirm', 'done'], 'what is on every screen counts as the first');
+    assert.deepEqual(app.flow.map(rule => homeScreen(rule, screenOf, 'welcome')), ['welcome', 'confirm', 'notfound']);
+    const heights = { welcome: 400, confirm: 300, done: 260, notfound: 300 };
+    const cards = ['welcome', 'confirm', 'done', 'notfound'].map(id => ({ id, height: heights[id] }));
+    const homeOf = rule => homeScreen(rule, screenOf, 'welcome');
+    const anchor = rule => ({ [find.id]: 200, [checkIn.id]: 120, [desk.id]: 150 })[rule.id];
+    const placed = placeStoryboard({ cards, links, rules: app.flow, homeOf, anchor });
+    assert.deepEqual(Object.fromEntries(placed.cards), {
+        welcome: { x: 24, y: 76 }, confirm: { x: 896, y: 76 }, done: { x: 1768, y: 76 }, notfound: { x: 896, y: 462 },
+    }, 'a column of screens, its lane of tools, then the next column');
+    assert.deepEqual(Object.fromEntries(placed.tools), {
+        [find.id]: { x: 556, y: 200 }, [checkIn.id]: { x: 1428, y: 120 }, [desk.id]: { x: 1428, y: 304 },
+    }, 'tools in the same lane stay clear of each other');
+
+    // Cards someone put somewhere stay; a new screen goes right of them, and a placed tool stays put.
+    const moved = placeStoryboard({
+        cards: [...cards.map(card => ({ ...card, position: { welcome: { x: 40, y: 40 }, confirm: { x: 700, y: 40 }, done: { x: 1400, y: 40 }, notfound: { x: 700, y: 500 } }[card.id] })), { id: 'screen5', height: 200 }],
+        links, rules: [{ ...find, position: { x: 380, y: 60 } }, checkIn, desk], homeOf, anchor,
+    });
+    assert.deepEqual([moved.cards.get('welcome'), moved.cards.get('screen5')], [{ x: 40, y: 40 }, { x: 1400 + 300 + 112 + 120, y: 76 }]);
+    assert.deepEqual([moved.tools.has(find.id), moved.tools.get(checkIn.id)], [false, { x: 700 + 300 + 112 + 120, y: 120 }]);
+
+    // An app with one screen is one card, with its tools in the lane beside it.
+    const one = placeStoryboard({ cards: [{ id: '', height: 300 }], rules: [{ id: 'a', when: [] }, { id: 'b', when: [] }], anchor: rule => (rule.id === 'a' ? 100 : null), toolHeight: () => 160 });
+    assert.deepEqual([one.cards.get(''), one.tools.get('a'), one.tools.get('b')], [{ x: 24, y: 76 }, { x: 556, y: 100 }, { x: 556, y: 284 }]);
+});
+
+test('where each screen\'s card sits travels in the DML, as x and y on its <screen>', () => {
+    const components = twoScreens().map(component => (component.id === 'first' ? { ...component, position: { x: 24, y: 76 } } : component.id === 'second' ? { ...component, position: { x: 896.4, y: 120 } } : component));
+    const app = { id: 'app-steps', name: 'Steps', description: '', version: 0, screen: { kind: 'components', components }, flow: [] };
+    const dml = toDml(app);
+    assert.match(dml, /<screen id="first" label="First" x="24" y="76">/);
+    assert.match(dml, /<screen id="second" label="Second" x="896" y="120">/);
+    const back = fromDml(dml).app.screen.components.filter(component => component.type === 'screen');
+    assert.deepEqual(back.map(screen => screen.position), [{ x: 24, y: 76 }, { x: 896, y: 120 }]);
+    const single = { ...sampleApp(), screen: { ...sampleApp().screen, position: { x: 60, y: 90 } } };
+    assert.match(toDml(single), /<screen src="index\.html" built-from="components" x="60" y="90">/);
+    assert.deepEqual(fromDml(toDml(single, { standalone: true })).app.screen.position, { x: 60, y: 90 });
+    assert.throws(() => fromDml(dml.replace('x="896"', 'x="far"')), /x and y are numbers together: where its card sits on the canvas\./);
 });
 
 test("an app's calls move to another server with the same tools, and one that can't take them says why", () => {
