@@ -17,6 +17,7 @@
 //   highlight  point these elements out on the screen           { elements }
 //   runOnOpen  whether an app runs what Start calls as it opens  { id, choice }
 //              changed
+//   offer      ask whether to add a copy of an example           { example }
 
 import { DEMO_SERVERS, demoServerAt } from '../demo-servers/index.js';
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
@@ -659,26 +660,51 @@ export class Apps {
         else if (server.status !== 'connected' && server.status !== 'connecting') this.shell.connectMcpServer(url);
     }
 
-    // A new app from an example (EXAMPLES): `chat`, `dashboard`, `frontdesk`, or `blank` (a text
-    // box, a button and an output). Chat and the dashboard call the model, the demo model when
-    // you have none; Front desk calls its demo server. Both are added for it.
-    async create(example = 'blank') {
-        const { name: base, make, servers = [], model: callsModel = false } = EXAMPLES[example] || EXAMPLES.blank;
+    // The app an example makes (EXAMPLES), with a name no app of yours has, without adding it:
+    // what create() adds, and what asking first (offerExample) says it will be. An example's app
+    // says which it came from (`example`).
+    exampleApp(example = 'blank') {
+        const { name: base, make, model: callsModel = false } = EXAMPLES[example] || EXAMPLES.blank;
         const taken = new Set(this.list.map(app => app.name));
         let name = base;
         for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
-        servers.forEach(id => this.addDemoServer(id));
-        let model = this.model();
-        if (!model && callsModel) {
-            this.addDemoServer('model');
-            model = demoModel();
-        }
+        const model = this.model() || (callsModel ? demoModel() : null);
         const app = make({ shell: this.shell, workbench: this.workbench, model, name });
+        return EXAMPLES[example] && example !== 'blank' ? { ...app, example } : app;
+    }
+
+    // A new app from an example: `chat`, `dashboard`, `frontdesk`, or `blank` (a text box, a
+    // button and an output). Chat and the dashboard call the model, the demo model when you have
+    // none; Front desk calls its demo server. Both are added for it. `runOnOpen` answers, for an
+    // app that calls tools as it opens, whether opening it runs them.
+    async create(example = 'blank', { runOnOpen = null } = {}) {
+        const { servers = [], model: callsModel = false } = EXAMPLES[example] || EXAMPLES.blank;
+        const app = this.exampleApp(example);
+        servers.forEach(id => this.addDemoServer(id));
+        if (callsModel && !this.model()) this.addDemoServer('model');
+        if (runOnOpen) this.setRunOnOpen(runOnOpen, app.id);
         await store.saveApp(app);
         this.list.push(app);
         this.emit('list');
         this.show(app.id);
         return app;
+    }
+
+    // An example becomes one of your apps once you've said so (AppsAddDialog asks), so looking
+    // at one doesn't add another copy each time. New app makes a blank one at once.
+    offerExample(example) {
+        if (!EXAMPLES[example] || example === 'blank') return this.create(example);
+        this.emit('offer', { example });
+    }
+
+    // Your apps made from an example, the newest first.
+    copiesOf(example) {
+        return this.list.filter(app => app.example === example).sort((a, b) => b.createdAt - a.createdAt);
+    }
+
+    // The servers an app calls, in words: "Front desk (demo), built in".
+    callsText(app = this.app) {
+        return listed(serversOf(app).map(url => (demoServerAt(url) && !this.shell.servers[url] ? `${demoServerAt(url).name}, built in` : this.serverName(url, app))));
     }
 
     async duplicate() {

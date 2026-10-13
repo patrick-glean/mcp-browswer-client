@@ -90,6 +90,64 @@ apps-start[hidden] {
     gap: 6px;
 }
 
+/* ---------- Adding an example: a copy, once you've said so ---------- */
+
+.apps-dialog {
+    width: min(480px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-modal);
+    color: var(--theme-text-primary);
+}
+
+.apps-dialog::backdrop {
+    background: rgb(0 0 0 / 35%);
+}
+
+.apps-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px 22px 18px;
+    font-size: 0.8125rem;
+}
+
+.apps-dialog-body h2 {
+    font-size: 1.0625rem;
+}
+
+.apps-dialog-body p {
+    margin: 0;
+}
+
+.apps-dialog-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.apps-dialog-check input {
+    flex: none;
+    margin-top: 2px;
+}
+
+.apps-dialog-have {
+    padding: 8px 10px;
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+}
+
+.apps-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
+}
+
 /* ---------- Preview: the app as it is when it's launched, over the whole window ---------- */
 
 /* Above the top bar and the Guide; Go to and status messages stay above it. */

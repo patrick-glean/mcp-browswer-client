@@ -1,5 +1,6 @@
-// The Apps page's left rail: the examples to start from, the apps you've built, and New app and
-// Import. With no app shown, AppsStart offers the examples on the page itself.
+// The Apps page's left rail: the examples to start from (each asks before adding a copy), the
+// apps you've built, and New app and Import. With no app shown, AppsStart offers the examples on
+// the page itself.
 
 import { escapeHtml } from '../../workbench/util.js';
 import { EXAMPLES } from '../apps.js';
@@ -19,7 +20,7 @@ export class AppsRail extends AppElement {
             const button = event.target.closest('button');
             if (!button) return;
             if (button.dataset.showApp) this.apps.show(button.dataset.showApp);
-            if (button.dataset.example) this.apps.create(button.dataset.example);
+            if (button.dataset.example) this.apps.offerExample(button.dataset.example);
             if (button.id === 'newAppBtn') this.apps.create();
             if (button.id === 'importAppBtn') this.$('#importAppInput').click();
         }, { signal });
@@ -45,7 +46,7 @@ export class AppsRail extends AppElement {
                 <header class="wb-section-head"><h2 id="appsExamples">Examples</h2></header>
                 <ul class="wb-list">${SHOWN_EXAMPLES.map(example => {
                     const { name, kind, about } = EXAMPLES[example];
-                    return row(`data-example="${example}"`, name, kind, `${about}. Makes one you can change, under Your apps.`);
+                    return row(`data-example="${example}"`, name, kind, `${about}. Asks before adding a copy under Your apps, to look at and change.`);
                 }).join('')}</ul>
             </section>
             <section class="wb-section" aria-labelledby="appsYours">
@@ -73,7 +74,7 @@ export class AppsStart extends AppElement {
         this.shell.on('servers', () => this.picker?.refresh(), signal);
         this.addEventListener('click', event => {
             const button = event.target.closest('[data-example]');
-            if (button) this.apps.create(button.dataset.example);
+            if (button) this.apps.offerExample(button.dataset.example);
         }, { signal });
     }
 

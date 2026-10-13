@@ -4,6 +4,7 @@
 
 import { app } from '../workbench/app.js';
 import { Apps } from './apps.js';
+import { AppsAddDialog } from './components/add-dialog.js';
 import { AppCanvas } from './components/canvas.js';
 import { AppFlow } from './components/flow.js';
 import { AppHeader } from './components/header.js';
@@ -18,6 +19,7 @@ import { AppTry } from './components/try.js';
 const COMPONENTS = {
     'apps-rail': AppsRail,
     'apps-start': AppsStart,
+    'apps-add-dialog': AppsAddDialog,
     'apps-splitter': AppsSplitter,
     'app-header': AppHeader,
     'app-open-ask': AppOpenAsk,
