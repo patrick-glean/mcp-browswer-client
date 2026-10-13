@@ -279,14 +279,14 @@
 
         <section class="guide-section">
             <h3>4. Chat with a model</h3>
-            <p>Open Apps in the top bar and choose Chat under Examples. It makes an app like any other: a conversation, a message field and Send, wired to a model, which is an MCP tool: Glean's chat if you've added Glean, else the mock's <code>chat</code>. Each message goes with the conversation so far, and as it's sent, it joins the conversation.</p>
+            <p>Open Apps in the top bar, choose Chat under Examples, then Add a copy. It makes an app like any other: a conversation, a message field and Send, wired to a model, which is an MCP tool: Glean's chat if you've added Glean, else the mock's <code>chat</code>. Each message goes with the conversation so far, and as it's sent, it joins the conversation.</p>
             <p>The rule's Prompt, in the Inspector, adds its instructions and your servers' tools to each message. A tool call the model writes in its answer runs, and the result joins the conversation, which the model gets with your next message. With the mock, say <code>call echo with hello</code>.</p>
         </section>
 
         <section class="guide-section">
             <h3>5. Build an app</h3>
             <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, wired to a tool. It opens on the canvas, the screen running beside its tools: drag from a ● to another to wire them, from a button to a tool's Run and from the tool's Answer back to the screen. The label on a wire says what of the answer shows; pick it to change it in the Inspector. Choose Run to use the app, and What happened shows each step.</p>
-            <p>The Library adds components, tools, boxes and HTML parts. A box (a chart, a list, a number) says what goes in it, and the tool wired to it is asked for that, in the shape the box draws, so the layout writes the format of the answer: Project pulse, under Examples, starts one that asks Glean. A part is HTML a model writes or a tool returns; its buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Download saves the app as a zip: <code>app.dml</code> is the flow, <code>index.html</code> the screen. With the mock as the model, Ask a model writes a ticket dashboard when you ask for one.</p>
+            <p>The Library adds components, tools, boxes and HTML parts. A box (a chart, a list, a number) says what goes in it, and the tool wired to it is asked for that, in the shape the box draws, so the layout writes the format of the answer: Project pulse, under Examples, starts one that asks Glean. A part is HTML a model writes or a tool returns; its buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Launch runs the app on its own in a new tab, and Download saves it as a zip: <code>index.html</code> runs it, <code>app.dml</code> is the flow and <code>screen.html</code> the screen. With the mock as the model, Ask a model writes a ticket dashboard when you ask for one.</p>
         </section>
 
         <section class="guide-section">
