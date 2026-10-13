@@ -306,10 +306,16 @@ export class AppRunner {
     load(frame, { start = false, screen = null } = {}) {
         const app = this.getApp();
         if (this.frame !== frame) {
+            // The load after this document's ready is its own; one with no ready before it, once
+            // the document was ready, is another page's. A load of a document this one replaced
+            // can come late, before this one is ready, and doesn't count.
             frame.addEventListener('load', () => {
-                if (this.frame !== frame) return;
-                this.loads++;
-                if (this.loads > 1 && !this.navigated) {
+                if (this.frame !== frame || !this.ready) return;
+                if (this.readySinceLoad) {
+                    this.readySinceLoad = false;
+                    return;
+                }
+                if (!this.navigated) {
                     this.navigated = true;
                     this.trace({ kind: 'error', text: 'The screen went to another page, so the app stopped. Choose Restart to run it again.' });
                 }
@@ -317,8 +323,8 @@ export class AppRunner {
         }
         this.frame = frame;
         this.token = randomToken();
-        this.loads = 0;
         this.ready = false;
+        this.readySinceLoad = false;
         this.navigated = false;
         this.starting = start;
         const elements = elementsOf(app.screen);
@@ -352,6 +358,7 @@ export class AppRunner {
         const message = event.data;
         if (message.type === 'ready') {
             this.ready = true;
+            this.readySinceLoad = true;
             // The flow may have changed while the frame loaded.
             this.flowChanged();
             const wanted = this.screenAfterLoad;
