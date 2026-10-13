@@ -13,8 +13,10 @@
 //              or to Preview (view 'preview') and back
 //   select     what's selected on the canvas changed            { selection }
 //   answer     a rule got an answer, for picking values from it { ruleId }
-//   restart    run the shown app again from the start
+//   restart    run the shown app again from the start           { note }
 //   highlight  point these elements out on the screen           { elements }
+//   runOnOpen  whether an app runs what Start calls as it opens  { id, choice }
+//              changed
 
 import { DEMO_SERVERS, demoServerAt } from '../demo-servers/index.js';
 import { download, schemaOf, serverLabel } from '../workbench/util.js';
@@ -22,7 +24,7 @@ import { conversationFieldOf } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
-import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger } from './flow.js';
+import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger, triggersOf } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
 import { componentsHtml, elementsOf, htmlFromResult, movedComponents, newComponent, sanitizePart, screenHtml, withNewScreen, withoutComponent } from './screen.js';
 import { withCallsTo } from './servers.js';
@@ -32,6 +34,8 @@ import { unzip, zip } from './zip.js';
 const SHOWN_KEY = 'appsShown';
 const VIEW_KEY = 'appsView';
 const MODEL_KEY = 'appsModel';
+// Whether each app runs what Start calls when it opens: { [app id]: 'yes' | 'no' }.
+const RUN_ON_OPEN_KEY = 'appsRunOnOpen';
 export const VIEWS = { canvas: 'Canvas', outline: 'Outline' };
 // The app as it is when it's launched: the window is its screen, and nothing of the builder shows.
 // A view like the two above, so their components stop while it runs, but never the one kept.
@@ -39,6 +43,18 @@ export const PREVIEW = 'preview';
 
 // An app as the builder keeps it, whatever shape it was saved in.
 export const normalizeApp = app => ({ ...app, flow: (app.flow || []).map(normalizeRule) });
+
+// The rules that run as the app opens: what Start calls.
+export const openRules = app => (app?.flow || []).filter(rule => triggersOf(rule).some(candidate => candidate.event === 'open'));
+
+function readChoices() {
+    try {
+        const choices = JSON.parse(localStorage.getItem(RUN_ON_OPEN_KEY) || '{}');
+        return choices && typeof choices === 'object' ? choices : {};
+    } catch {
+        return {};
+    }
+}
 const APP_URL = 'https://patrick-glean.github.io/mcp-browswer-client/';
 
 export const slug = name => String(name || 'app').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60) || 'app';
@@ -341,6 +357,8 @@ export class Apps {
         this.selection = null;
         // Each rule's last answer, while the page is open: Map<ruleId, answer>.
         this.answers = new Map();
+        // The shown app opened without running what Start calls (startsOnOpen), and it hasn't run since.
+        this.startHeld = false;
     }
 
     on(type, listener, signal) {
@@ -374,9 +392,58 @@ export class Apps {
         this.elementsCache = null;
         this.selection = null;
         this.answers.clear();
+        this.startHeld = !!this.app && !this.startsOnOpen();
         if (this.shownId) localStorage.setItem(SHOWN_KEY, this.shownId);
         else localStorage.removeItem(SHOWN_KEY);
         this.emit('shown', { id: this.shownId });
+    }
+
+    // --- What Start calls, as the app opens ---
+
+    // Whether opening an app runs what Start calls: 'yes', 'no', or null when nobody has said.
+    runOnOpen(id = this.shownId) {
+        const choice = readChoices()[id];
+        return choice === 'yes' || choice === 'no' ? choice : null;
+    }
+
+    // Keeps the answer for an app (null forgets it, so it asks again).
+    setRunOnOpen(choice, id = this.shownId) {
+        if (!id) return;
+        const choices = readChoices();
+        if (choice === 'yes' || choice === 'no') choices[id] = choice;
+        else delete choices[id];
+        localStorage.setItem(RUN_ON_OPEN_KEY, JSON.stringify(choices));
+        this.emit('runOnOpen', { id, choice: this.runOnOpen(id) });
+    }
+
+    // Opening an app runs what Start calls when it calls nothing as it opens, or someone said yes.
+    // Otherwise it waits: asking, when nobody has said, or until Restart.
+    startsOnOpen(app = this.app) {
+        return !openRules(app).length || this.runOnOpen(app?.id) === 'yes';
+    }
+
+    // What the app calls as it opens, in words: "chat on Glean and search on Glean".
+    openCallsText(app = this.app) {
+        return listed(openRules(app).map(rule => `${rule.call?.toolName || 'a tool'} on ${this.serverName(rule.call?.serverUrl, app)}`));
+    }
+
+    // What What happened says when the app opened without running what Start calls.
+    heldStartNote() {
+        if (!this.startHeld) return '';
+        return this.runOnOpen() === 'no'
+            ? `What Start calls (${this.openCallsText()}) didn't run as the app opened, as you chose for this app. Restart runs it.`
+            : `What Start calls (${this.openCallsText()}) hasn't run: say above whether to run it when you open this app.`;
+    }
+
+    // The answer to the question the app asks as it opens; yes runs what Start calls now, if it hasn't run.
+    answerRunOnOpen(choice) {
+        this.setRunOnOpen(choice);
+        if (choice === 'yes' && this.startHeld) this.emit('restart', { note: `Ran what Start calls, as it will each time you open ${this.app?.name || 'the app'}.` });
+    }
+
+    // Start's calls ran: the app was restarted, or started over.
+    ranStart() {
+        this.startHeld = false;
     }
 
     showView(view) {
@@ -641,9 +708,9 @@ export class Apps {
 
     // --- Download and import ---
 
-    serverName(url) {
+    serverName(url, app = this.app) {
         const server = this.shell.servers[url];
-        return server ? serverLabel(server, url) : this.app?.serverNames?.[url] || demoServerAt(url)?.name || url;
+        return server ? serverLabel(server, url) : app?.serverNames?.[url] || demoServerAt(url)?.name || url;
     }
 
     // Each download is a version: the first is 1, and one after any change is the next number.

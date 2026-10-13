@@ -26,14 +26,16 @@ export class AppTry extends AppElement {
         this.apps.on('shown', () => {
             this.trace.entries = [];
             this.screenId = null;
-            this.render({ start: true });
+            this.render({ start: !this.apps.startHeld });
+            const held = this.apps.heldStartNote();
+            if (held) this.trace.add({ time: Date.now(), kind: 'note', text: held });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
         this.apps.on('app', ({ part }) => {
             if (part === 'screen') this.reloadSoon();
             if (part === 'flow') this.runner.flowChanged();
         }, signal);
-        this.apps.on('restart', () => this.restart(), signal);
+        this.apps.on('restart', ({ note }) => this.restart(note), signal);
         this.apps.on('highlight', ({ elements }) => this.runner.highlight(elements), signal);
         this.shell.on('mode', ({ mode }) => {
             if (mode === 'apps' && this.waiting) this.load(this.waiting);
@@ -87,9 +89,10 @@ export class AppTry extends AppElement {
         this.runner.load(this.frame, { start, screen: this.screenId });
     }
 
-    restart() {
+    restart(note = 'Restarted the app.') {
         if (this.apps.view !== 'outline') return;
-        this.trace.add({ time: Date.now(), kind: 'note', text: 'Restarted the app.' });
+        this.trace.add({ time: Date.now(), kind: 'note', text: note });
+        this.apps.ranStart();
         this.load({ start: true });
     }
 }

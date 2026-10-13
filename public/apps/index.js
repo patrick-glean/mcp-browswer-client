@@ -8,6 +8,7 @@ import { AppCanvas } from './components/canvas.js';
 import { AppFlow } from './components/flow.js';
 import { AppHeader } from './components/header.js';
 import { AppInspector } from './components/inspector.js';
+import { AppOpenAsk } from './components/open-ask.js';
 import { AppPreview } from './components/preview.js';
 import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
@@ -19,6 +20,7 @@ const COMPONENTS = {
     'apps-start': AppsStart,
     'apps-splitter': AppsSplitter,
     'app-header': AppHeader,
+    'app-open-ask': AppOpenAsk,
     'app-canvas': AppCanvas,
     'app-inspector': AppInspector,
     'app-screen': AppScreen,

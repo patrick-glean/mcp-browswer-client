@@ -117,7 +117,9 @@ export class AppCanvas extends AppElement {
             this.trace.entries = [];
             this.mode = 'design';
             this.screenId = null;
-            this.render({ start: true });
+            this.render({ start: !this.apps.startHeld });
+            const held = this.apps.heldStartNote();
+            if (held) this.trace.add({ time: Date.now(), kind: 'note', text: held });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
         this.apps.on('app', ({ part, by }) => {
@@ -135,7 +137,7 @@ export class AppCanvas extends AppElement {
             this.followSelection();
             this.markSelection();
         }, signal);
-        this.apps.on('restart', () => this.restart(), signal);
+        this.apps.on('restart', ({ note }) => this.restart(note), signal);
         this.apps.on('highlight', ({ elements }) => {
             this.runner.highlight(elements);
             for (const card of this.cards.values()) card.still?.highlight(elements);
@@ -381,9 +383,10 @@ export class AppCanvas extends AppElement {
         this.revealCard(element.kind === 'screen' ? element.id : this.cardOf(element.id));
     }
 
-    restart() {
+    restart(note = 'Restarted the app.') {
         if (this.apps.view !== 'canvas') return;
-        this.trace.add({ time: Date.now(), kind: 'note', text: 'Restarted the app.' });
+        this.trace.add({ time: Date.now(), kind: 'note', text: note });
+        this.apps.ranStart();
         this.load({ start: true });
     }
 

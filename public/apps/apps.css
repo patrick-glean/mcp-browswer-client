@@ -299,6 +299,40 @@ app-try {
     right: 0;
 }
 
+/* ---------- The question an app asks as it opens: run what Start calls? ---------- */
+
+app-open-ask {
+    display: block;
+}
+
+app-open-ask[hidden] {
+    display: none;
+}
+
+.app-open-ask {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px 14px;
+    border: 1px solid var(--theme-border-light);
+    border-left: 3px solid var(--theme-info-foreground);
+    border-radius: var(--radius-200);
+    background: var(--theme-info-background);
+    font-size: 0.8125rem;
+}
+
+.app-open-ask-text {
+    flex: 1 1 320px;
+    margin: 0;
+}
+
+.app-open-ask-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
 .app-intro {
     max-width: 860px;
     margin-top: 6px;

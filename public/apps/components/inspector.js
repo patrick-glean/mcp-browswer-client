@@ -4,6 +4,7 @@
 // of its rule it is; or Start.
 
 import { confirmThen, escapeHtml } from '../../workbench/util.js';
+import { openRules } from '../apps.js';
 import { BOX_KINDS } from '../boxes.js';
 import { elementIdProblem, EVENTS, routeSummary } from '../flow.js';
 import { wiresOf } from '../graph.js';
@@ -31,6 +32,9 @@ export class AppInspector extends AppElement {
         }, signal);
         this.apps.on('answer', ({ ruleId }) => {
             if (this.ruleEditor?.ruleId === ruleId) this.ruleEditor.renderPicks();
+        }, signal);
+        this.apps.on('runOnOpen', () => {
+            if (this.apps.selection?.kind === 'start') this.render();
         }, signal);
         this.shell.on('tools', () => {
             this.ruleEditor?.refresh();
@@ -297,10 +301,18 @@ export class AppInspector extends AppElement {
     }
 
     renderStart() {
+        const choice = this.apps.runOnOpen();
+        const choices = [['', 'Ask', 'The app asks, as it opens, whether to run what Start calls'], ['yes', 'Run it', 'Opening the app runs what Start calls'], ['no', "Don't run it", 'Opening the app runs nothing until you choose Restart']];
         this.innerHTML = `
             ${this.head('Start', 'Where the app begins', 'The app opens on this screen. Tools wired to Start are called as it opens, top to bottom, such as one that fills a dashboard.')}
             <h4 class="app-inspector-section">What it calls</h4>
-            ${this.connections(null)}`;
+            ${this.connections(null)}
+            ${openRules(this.app).length ? `
+            <h4 class="app-inspector-section">When you open the app</h4>
+            <div class="wb-chips" role="group" aria-label="When you open the app">
+                ${choices.map(([value, label, title]) => `<button type="button" class="wb-chip" data-run-on-open-choice="${value}" aria-pressed="${(choice ?? '') === value}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`).join('')}
+            </div>
+            <p class="text-secondary">Opening it here, or from a link to it, runs what Start calls only when this says so; it's kept for this app, in this browser. Restart, Preview and Launch always run it.</p>` : ''}`;
     }
 
     rename(input) {
@@ -323,6 +335,7 @@ export class AppInspector extends AppElement {
         const button = event.target.closest('button');
         if (!button || button.disabled || button.closest('[data-rule-editor], [data-part-source], [data-screen-source], [data-server-switch]')) return;
         const { dataset } = button;
+        if (dataset.runOnOpenChoice !== undefined) return this.apps.setRunOnOpen(dataset.runOnOpenChoice || null);
         if (dataset.screenKind) return this.apps.setScreenKind(dataset.screenKind);
         if (dataset.screenSize) return this.apps.setScreenSize(dataset.screenSize);
         if (dataset.selectWire) return this.apps.select({ kind: 'wire', id: dataset.selectWire, ruleId: dataset.rule });
