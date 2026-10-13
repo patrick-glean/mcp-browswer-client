@@ -20,11 +20,11 @@
 //   offer      ask whether to add a copy of an example           { example }
 
 import { DEMO_SERVERS, demoServerAt } from '../demo-servers/index.js';
-import { download, schemaOf, serverLabel } from '../workbench/util.js';
+import { download, escapeHtml, schemaOf, serverLabel } from '../workbench/util.js';
 import { conversationFieldOf } from './agent.js';
 import { askPrompt, modelArgs, modelCall } from './ask.js';
 import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
-import { fromDml, partFile, serversOf, toDml } from './dml.js';
+import { fromDml, partFile, SCREEN_FILE, serversOf, toDml } from './dml.js';
 import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger, triggersOf } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
 import { clientRoot, runLink, unpackApp } from './link.js';
@@ -281,8 +281,40 @@ export const EXAMPLES = {
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 
-// The README that travels in an app's zip: what's in it, the flow in words, and how to run it.
-export function readmeFor(app, { serverName = url => url } = {}) {
+// The zip's index.html: opening it runs the app, in the client at `root` (where it was downloaded
+// from), through `link`, which carries the app (link.js). A page opened from a disk or another
+// site can't use the client's worker, sign-ins or servers, which belong to the client's origin,
+// so it hands the app to the client.
+export function launcherHtml(app, { link, root }) {
+    const name = escapeHtml(app.name || 'App');
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${name}</title>
+<style>
+  :root { color-scheme: light dark; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { max-width: 36rem; margin: 12vh auto; padding: 0 1.5rem; }
+  .run { display: inline-block; padding: 0.55rem 1.1rem; border-radius: 999px; background: #18181b; color: #fafafa; font-weight: 600; text-decoration: none; }
+  .note { color: GrayText; font-size: 0.875rem; }
+  @media (prefers-color-scheme: dark) { .run { background: #fafafa; color: #18181b; } }
+</style>
+</head>
+<body>
+<h1>${name}</h1>
+<p>${escapeHtml(app.description || 'An app built in MCP Browser Client.')}</p>
+<p><a class="run" id="run" href="${escapeHtml(link)}">Run ${name}</a></p>
+<p class="note">It runs in MCP Browser Client at <a href="${escapeHtml(root)}">${escapeHtml(root)}</a>, in your browser: the client calls the app's servers for it, with your sign-ins, and there's nothing to install. This page runs ${app.version ? `version ${app.version}` : 'the version it was downloaded with'}, which its link carries; app.dml beside it is the app as markup, and screen.html its screen.</p>
+<script>location.replace(document.getElementById('run').href);</script>
+</body>
+</html>
+`;
+}
+
+// The README that travels in an app's zip: what's in it, the flow in words, and how to run it,
+// in the client at `root`.
+export function readmeFor(app, { serverName = url => url, root = APP_URL } = {}) {
     const elements = new Map(elementsOf(app.screen).map(element => [element.id, element]));
     const elementName = id => {
         const label = elements.get(id)?.label;
@@ -314,7 +346,8 @@ An app built in MCP Browser Client${app.version ? `, version ${app.version}` : '
 
 ## What's here
 
-- \`index.html\`: the screen, what people see. ${app.screen?.kind === 'html' ? (app.screen.from ? `A call to \`${app.screen.from.toolName}\` on ${serverName(app.screen.from.serverUrl)} made it.` : 'It was written as HTML.') : 'It was built from components, which app.dml lists.'}
+- \`index.html\`: opens the app, running, in MCP Browser Client (see Run it).
+- \`${SCREEN_FILE}\`: the screen, what people see. ${app.screen?.kind === 'html' ? (app.screen.from ? `A call to \`${app.screen.from.toolName}\` on ${serverName(app.screen.from.serverUrl)} made it.` : 'It was written as HTML.') : 'It was built from components, which app.dml lists.'}
 - \`app.dml\`: the screen's components and the flow, what happens when people use it, as markup.${parts.map(part => `\n- \`${partFile(part.id)}\`: the part \`${part.id}\`, ${made(part)}. On the screen its ids start with \`${part.id}.\`.`).join('')}
 
 ${screens.length ? `## The screens
@@ -342,7 +375,7 @@ ${agent.join(' ')}
 
 ## Run it
 
-Open MCP Browser Client (${APP_URL}), choose Apps, then Import, and pick this zip. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}, which you add under Servers in the Workbench:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}${demoServerAt(url) ? ", a demo server built into MCP Browser Client, which Import adds for you" : ''}`).join('\n')}` : "It doesn't call any servers yet."}
+Open \`index.html\` in a browser: it runs the app in MCP Browser Client at ${root}, which calls its servers for it from your browser, with your sign-ins, and there's nothing to install. It runs ${app.version ? `version ${app.version}` : 'the version it was downloaded with'}, which travels in the page's link, so a change to app.dml doesn't change what it runs. To change the app, or run a changed app.dml, open MCP Browser Client, choose Apps, then Import, and pick this zip. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}, which you add under Servers in the Workbench, or with Add it when the app runs:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}${demoServerAt(url) ? ', a demo server built into MCP Browser Client, which running or importing the app adds for you' : ''}`).join('\n')}` : "It doesn't call any servers yet."}
 `;
 }
 
@@ -883,11 +916,13 @@ export class Apps {
             download(`${base}.dml`, toDml(app, { standalone: true, serverNames }), 'application/xml');
         } else {
             const parts = app.screen?.kind === 'html' ? [] : (app.screen?.components || []).filter(component => component.type === 'part');
+            const root = clientRoot(location.href);
             const files = [
                 { name: 'app.dml', data: toDml(app, { serverNames }) },
-                { name: 'index.html', data: screenHtml(app) },
+                { name: 'index.html', data: launcherHtml(app, { link: await this.linkTo(app), root }) },
+                { name: SCREEN_FILE, data: screenHtml(app) },
                 ...parts.map(part => ({ name: partFile(part.id), data: part.html || '' })),
-                { name: 'README.md', data: readmeFor(app, { serverName: url => this.serverName(url) }) },
+                { name: 'README.md', data: readmeFor(app, { serverName: url => this.serverName(url), root }) },
             ];
             const link = document.createElement('a');
             link.href = URL.createObjectURL(new Blob([zip(files)], { type: 'application/zip' }));

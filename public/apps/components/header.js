@@ -62,7 +62,7 @@ export class AppHeader extends AppElement {
                 <button type="button" id="launchAppBtn" class="btn-sm" title="The app on its own, running in a new tab as people will use it, at an address you can bookmark"><span class="icon icon-external-link" aria-hidden="true"></span>Launch</button>
                 <span class="app-version text-secondary" id="appVersion" aria-live="polite"></span>
                 <div class="split-button">
-                    <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with app.dml (the flow, as markup), index.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
+                    <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with index.html, which runs the app, app.dml (the flow, as markup), screen.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
                     <details class="menu app-menu">
                         <summary class="btn-sm" aria-label="Other ways to download it">▾</summary>
                         <div class="menu-list" role="menu">

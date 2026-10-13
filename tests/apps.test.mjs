@@ -86,7 +86,7 @@ test('the DML reads like the flow it describes', () => {
     const dml = toDml(sampleApp());
     assert.match(dml, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<!--/);
     assert.match(dml, /<app dml="1" id="app-1" name="Ask &amp; answer &lt;test&gt;" version="3">/);
-    assert.match(dml, /<screen src="index\.html" built-from="components">/);
+    assert.match(dml, /<screen src="screen\.html" built-from="components">/);
     assert.match(dml, /<textbox id="details" label="Details" lines="4" value="first&#10;second"\/>/);
     assert.match(dml, /<when element="ask" event="click" x="660" y="96">\n {6}<or element="question" event="enter"\/>\n {6}<call server="http:\/\/127\.0\.0\.1:8081\/" tool="search_notes">/);
     assert.match(dml, /<part id="dash" label="Tickets" src="parts\/dash\.html">\n {6}<ask>a ticket dashboard<\/ask>\n {6}<from server="http:\/\/127\.0\.0\.1:8081\/" tool="chat">/);
@@ -97,7 +97,7 @@ test('the DML reads like the flow it describes', () => {
     assert.match(dml, /<when event="open">/);
 });
 
-test('an HTML screen travels as index.html in a zip, or inside the DML on its own', () => {
+test('an HTML screen travels as screen.html in a zip (index.html in one downloaded before), or inside the DML on its own', () => {
     const html = '<!DOCTYPE html>\n<html><body><input id="q"><button id="go">Go</button><div id="out"></div></body></html>\n';
     const app = {
         id: 'app-2', name: 'From a tool', description: '', version: 0,
@@ -106,10 +106,12 @@ test('an HTML screen travels as index.html in a zip, or inside the DML on its ow
     };
     app.screen.ask = '';
     const inZip = toDml(app);
-    assert.match(inZip, /<screen src="index\.html">\n {4}<from server="http:\/\/127\.0\.0\.1:8081\/" tool="make_screen">/);
+    assert.match(inZip, /<screen src="screen\.html">\n {4}<from server="http:\/\/127\.0\.0\.1:8081\/" tool="make_screen">/);
     assert.doesNotMatch(inZip, /<html>/);
-    assert.deepEqual(withoutRuleIds(fromDml(inZip, { files: { 'index.html': html } }).app), withoutRuleIds(app));
-    assert.throws(() => fromDml(inZip), /The screen is in index\.html, which isn't with this file/);
+    assert.deepEqual(withoutRuleIds(fromDml(inZip, { files: { 'screen.html': html } }).app), withoutRuleIds(app));
+    assert.throws(() => fromDml(inZip), /The screen is in screen\.html, which isn't with this file/);
+    const older = inZip.replace('src="screen.html"', 'src="index.html"');
+    assert.deepEqual(withoutRuleIds(fromDml(older, { files: { 'index.html': html, 'screen.html': 'not this' } }).app), withoutRuleIds(app), 'a zip downloaded before still imports');
 
     const alone = toDml(app, { standalone: true });
     assert.doesNotMatch(alone, /src=/);
@@ -577,7 +579,7 @@ test('each box draws its piece of the answer, and says when it doesn\'t fit', ()
 test('a dashboard comes back the same from its DML, and its boxes ask in the prompt argument', () => {
     const app = dashboard();
     const dml = toDml(app);
-    assert.match(dml, /<screen src="index.html" built-from="components" size="wide">/);
+    assert.match(dml, /<screen src="screen.html" built-from="components" size="wide">/);
     assert.match(dml, /<output id="activity" label="Activity" show="bar" width="two-thirds">Updates per week, the last 6 weeks<\/output>/);
     assert.match(dml, /<output id="plain" label="Plain"\/>/);
     assert.match(dml, /<arg name="message" role="prompt">What's the latest on \{\{project\}\}\?<\/arg>/);
@@ -829,7 +831,7 @@ test('a screen moves with what is on it and is deleted with it; the first one ad
 test("screens travel in the DML as <screen>s inside the app's <screen>, with where buttons go, and broken ones say what's wrong", () => {
     const app = { id: 'app-steps', name: 'Steps', description: '', version: 0, screen: { kind: 'components', components: twoScreens() }, flow: [] };
     const dml = toDml(app);
-    assert.match(dml, /<screen src="index\.html" built-from="components">\n {4}<title id="title">Steps<\/title>\n {4}<screen id="first" label="First">\n {6}<text id="hello">Hello<\/text>\n {6}<button id="next" label="Next" go="second"\/>\n {4}<\/screen>\n {4}<screen id="second" label="Second">/);
+    assert.match(dml, /<screen src="screen\.html" built-from="components">\n {4}<title id="title">Steps<\/title>\n {4}<screen id="first" label="First">\n {6}<text id="hello">Hello<\/text>\n {6}<button id="next" label="Next" go="second"\/>\n {4}<\/screen>\n {4}<screen id="second" label="Second">/);
     assert.match(dml, /<button id="back" label="Back" go="back"\/>\n {6}<button id="again" label="Again" go="start"\/>\n {4}<\/screen>\n {2}<\/screen>/);
     assert.deepEqual(fromDml(dml).app.screen.components, twoScreens());
     const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
@@ -891,7 +893,7 @@ test('the Front desk example: four screens under its title, and three rules on i
     const dml = toDml(app);
     assert.equal(toDml(fromDml(dml).app), dml);
     assert.equal(app.serverNames, undefined);
-    assert.match(readmeFor(app, { serverName: () => 'Front desk (demo)' }), /\n- Front desk \(demo\): https:\/\/frontdesk\.demo\.invalid\/mcp, a demo server built into MCP Browser Client, which Import adds for you\n/);
+    assert.match(readmeFor(app, { serverName: () => 'Front desk (demo)' }), /\n- Front desk \(demo\): https:\/\/frontdesk\.demo\.invalid\/mcp, a demo server built into MCP Browser Client, which running or importing the app adds for you\n/);
 });
 
 test('the storyboard puts Front desk\'s screens in the order people go through them, and each tool beside the screen that starts it', () => {
@@ -942,7 +944,7 @@ test('where each screen\'s card sits travels in the DML, as x and y on its <scre
     const back = fromDml(dml).app.screen.components.filter(component => component.type === 'screen');
     assert.deepEqual(back.map(screen => screen.position), [{ x: 24, y: 76 }, { x: 896, y: 120 }]);
     const single = { ...sampleApp(), screen: { ...sampleApp().screen, position: { x: 60, y: 90 } } };
-    assert.match(toDml(single), /<screen src="index\.html" built-from="components" x="60" y="90">/);
+    assert.match(toDml(single), /<screen src="screen\.html" built-from="components" x="60" y="90">/);
     assert.deepEqual(fromDml(toDml(single, { standalone: true })).app.screen.position, { x: 60, y: 90 });
     assert.throws(() => fromDml(dml.replace('x="896"', 'x="far"')), /x and y are numbers together: where its card sits on the canvas\./);
 });

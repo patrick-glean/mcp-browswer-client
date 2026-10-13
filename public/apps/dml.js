@@ -2,7 +2,7 @@
 // imported again. app.dml holds the screen (its components, or where its HTML is) and the flow:
 //
 //   <app dml="1" id="…" name="Ask the docs" version="3">
-//     <screen src="index.html" built-from="components">
+//     <screen src="screen.html" built-from="components">
 //       <textbox id="question" label="Question"/>
 //       <button id="ask" label="Ask"/>
 //       <output id="answer" label="Answer"/>
@@ -80,8 +80,10 @@ function callNode(name, call, { prompt = null } = {}) {
     return [name, { server: call?.serverUrl || '', tool: call?.toolName || '' }, ...args];
 }
 
-// Where a part's HTML goes in a zip.
+// Where a part's HTML goes in a zip, and the screen's. A zip's index.html runs the app; one
+// downloaded before that was the screen, which its DML names as its src.
 export const partFile = id => `parts/${id}.html`;
+export const SCREEN_FILE = 'screen.html';
 
 const widthOf = component => (WIDTHS[component.width] && component.width !== 'full' ? component.width : undefined);
 
@@ -147,11 +149,11 @@ const HEADER = `<!-- An app built in MCP Browser Client. <screen> is what people
      {{question}} in a call is what the screen's question element holds; {{text}} in a <then> is
      the text the tool returned. Import the .zip, or this file, under Apps to run or change it. -->`;
 
-// The app as DML. In a zip, the screen's HTML is index.html beside it; on its own (`standalone`),
+// The app as DML. In a zip, the screen's HTML is screen.html beside it; on its own (`standalone`),
 // an HTML screen travels inside, in <html>.
 export function toDml(app, { standalone = false, serverNames = {} } = {}) {
     const screen = app.screen || {};
-    const src = standalone ? undefined : 'index.html';
+    const src = standalone ? undefined : SCREEN_FILE;
     const size = screen.size === 'wide' ? 'wide' : undefined;
     const screenNode = screen.kind === 'html'
         ? ['screen', { src, size, ...placeAttributes(screen.position) },
@@ -449,7 +451,7 @@ export function fromDml(source, { files = {} } = {}) {
         if (typeof html !== 'string') {
             fail(screenNode, src
                 ? `The screen is in ${src}, which isn't with this file. Import the .zip it came in.`
-                : '<screen> needs built-from="components", src="index.html" or an <html> inside it.');
+                : `<screen> needs built-from="components", src="${SCREEN_FILE}" or an <html> inside it.`);
         }
         const from = one(screenNode, 'from', { required: false });
         const ask = one(screenNode, 'ask', { required: false });
