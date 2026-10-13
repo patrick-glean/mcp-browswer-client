@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { deflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
-import { chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, readmeFor } from '../public/apps/apps.js';
+import { chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, launcherHtml, modelName, openRules, readmeFor } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -18,6 +18,7 @@ import {
     renderTemplate, routeSummary, rulesFor, templateValue, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
 import { canConnect, connect, disconnect, goPairOf, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
+import { clientRoot, packApp, RUN_HASH, runLink, unpackApp } from '../public/apps/link.js';
 import {
     canMove, componentsHtml, elementsOfComponents, endOfScreen, freeId, goOptions, htmlFromResult, movedComponents, newComponent, partElements, prefixIds,
     scopeCss, screenOfEach, screensOf, withNewScreen, withoutComponent,
@@ -986,4 +987,52 @@ test("the model found is Glean's chat, else another chat tool, and the demo mode
     assert.equal(foundModel({ [demo.url]: demo, [MOCK]: { url: MOCK, tools: [chat] }, [glean]: { url: glean, tools: [chat] } }).serverUrl, glean);
     assert.deepEqual(demoModel(), { serverUrl: demo.url, toolName: 'chat', messageField: 'message', conversationField: 'history' });
     assert.equal(modelName(demoModel(), {}), 'the demo model');
+});
+
+test('a link carries the whole app: the client\'s root, then #run= and the app\'s DML, deflated, in base64url', async () => {
+    const app = sampleApp();
+    const dml = toDml(app, { standalone: true, serverNames: { [MOCK]: 'Mock server' } });
+    const link = await runLink(dml, 'https://example.github.io/client/');
+    assert.match(link, /^https:\/\/example\.github\.io\/client\/#run=[\w-]+$/, 'only what a URL takes as it is');
+    assert.ok(link.length < dml.length, 'deflated, it is shorter than the DML');
+    const back = await unpackApp(link.split(RUN_HASH)[1]);
+    assert.equal(back, dml);
+    const { app: carried, servers } = fromDml(back);
+    assert.deepEqual(withoutRuleIds(carried), withoutRuleIds(app), "the part's HTML travels in it too");
+    assert.deepEqual(servers, [{ url: MOCK, name: 'Mock server' }]);
+    const desk = toDml(frontDeskApp({ name: 'Front desk' }), { standalone: true });
+    assert.ok((await packApp(desk)).length < 2400, 'Front desk fits in a link of a couple of thousand characters');
+    const big = toDml({ ...app, screen: { kind: 'html', html: '<p>☕ café</p>'.repeat(20000), from: null, ask: '' } }, { standalone: true });
+    assert.equal(await unpackApp(await packApp(big)), big, 'longer than a call can take as arguments, one character each');
+    await assert.rejects(unpackApp((await packApp(dml)).slice(0, -20)), /the link was cut short or changed on the way, so the app in it is incomplete/);
+    await assert.rejects(unpackApp('not base64!'), /the link isn't one MCP Browser Client made/);
+});
+
+test("the client's root is where its index.html is, whatever page of it is open", () => {
+    assert.equal(clientRoot('https://patrick-glean.github.io/mcp-browswer-client/'), 'https://patrick-glean.github.io/mcp-browswer-client/');
+    assert.equal(clientRoot('https://patrick-glean.github.io/mcp-browswer-client/index.html?app=abc#run=xyz'), 'https://patrick-glean.github.io/mcp-browswer-client/');
+    assert.equal(clientRoot('http://127.0.0.1:8080/?app=1'), 'http://127.0.0.1:8080/');
+});
+
+test("a download's index.html runs the app in the client it came from, and its README says how", () => {
+    const app = { ...sampleApp(), version: 3 };
+    const html = launcherHtml(app, { link: 'http://127.0.0.1:8080/#run=abc-_123', root: 'http://127.0.0.1:8080/' });
+    assert.match(html, /<title>Ask &amp; answer &lt;test&gt;<\/title>/);
+    assert.match(html, /<p>Line one\nline &quot;two&quot;\twith a tab<\/p>/);
+    assert.match(html, /<a class="run" id="run" href="http:\/\/127\.0\.0\.1:8080\/#run=abc-_123">Run Ask &amp; answer &lt;test&gt;<\/a>/);
+    assert.match(html, /<script>location\.replace\(document\.getElementById\('run'\)\.href\);<\/script>/, 'opening it goes to the link');
+    assert.match(html, /It runs in MCP Browser Client at <a href="http:\/\/127\.0\.0\.1:8080\/">http:\/\/127\.0\.0\.1:8080\/<\/a>, in your browser.* This page runs version 3, which its link carries/);
+    const readme = readmeFor(app, { serverName: () => 'Mock server', root: 'http://127.0.0.1:8080/' });
+    assert.match(readme, /\n- `index\.html`: opens the app, running, in MCP Browser Client \(see Run it\)\.\n- `screen\.html`: the screen, what people see\. It was built from components, which app\.dml lists\.\n- `app\.dml`: /);
+    assert.match(readme, /\n## Run it\n\nOpen `index\.html` in a browser: it runs the app in MCP Browser Client at http:\/\/127\.0\.0\.1:8080\/, which calls its servers for it from your browser, with your sign-ins, and there's nothing to install\. It runs version 3, which travels in the page's link, so a change to app\.dml doesn't change what it runs\./);
+    assert.match(readme, /It calls this server, which you add under Servers in the Workbench, or with Add it when the app runs:\n\n- Mock server: http:\/\/127\.0\.0\.1:8081\/\n$/);
+    assert.match(readmeFor(app), /MCP Browser Client at https:\/\/patrick-glean\.github\.io\/mcp-browswer-client\//, 'the public client when no other is said');
+});
+
+test('what Start calls: the rules that run as the app opens, which opening it asks about', () => {
+    assert.deepEqual(openRules(sampleApp()).map(rule => rule.id), ['rule-b']);
+    assert.deepEqual(openRules(dashboardApp({ shell: { servers: {} }, model: demoModel(), name: 'Pulse' })).map(rule => rule.call.toolName), ['chat'], 'Project pulse fills its boxes as it opens');
+    assert.deepEqual(openRules(chatApp({ shell: { servers: {} }, model: demoModel(), name: 'Chat' })), []);
+    assert.deepEqual(openRules(frontDeskApp({ name: 'Front desk' })), []);
+    assert.deepEqual(openRules(null), []);
 });

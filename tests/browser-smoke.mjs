@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fromDml } from '../public/apps/dml.js';
+import { RUN_HASH, unpackApp } from '../public/apps/link.js';
 import { unzip } from '../public/apps/zip.js';
 import { DEFAULT_CLIENT, MCP_CLIENTS } from '../public/mcp-clients.js';
 
@@ -366,12 +367,12 @@ async function signIn(page, until, ms = 20000) {
 }
 
 // An app's screen runs in a sandboxed frame, which Chrome keeps in a process of its own, so it's a
-// DevTools target of its own. This evaluates in each such frame and returns the first answer that
-// isn't empty (null when there's none). The canvas's stills of the screens the app isn't on
-// (data-still) never answer: only the running app does.
-async function frameRun(expression) {
+// DevTools target of its own. This evaluates in each such frame (with `inPage`, only those of that
+// tab) and returns the first answer that isn't empty (null when there's none). The canvas's stills
+// of the screens the app isn't on (data-still) never answer: only the running app does.
+async function frameRun(expression, { inPage = null } = {}) {
     const frames = (await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json())
-        .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl);
+        .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl && (!inPage || target.parentId === inPage.id));
     expression = `(document.documentElement.hasAttribute('data-still') ? null : (${expression}))`;
     for (const frame of frames) {
         const ws = new WebSocket(frame.webSocketDebuggerUrl);
@@ -402,10 +403,10 @@ async function frameRun(expression) {
     return null;
 }
 
-async function frameWaitFor(expression, ms = 15000) {
+async function frameWaitFor(expression, ms = 15000, { inPage = null } = {}) {
     const end = Date.now() + ms;
     while (Date.now() < end) {
-        const value = await frameRun(expression);
+        const value = await frameRun(expression, { inPage });
         if (value) return value;
         await sleep(150);
     }
@@ -421,6 +422,19 @@ function storedTokens(url) {
             const request = open.result.transaction('tokens').objectStore('tokens').get(${JSON.stringify(url)});
             request.onsuccess = () => resolve(request.result || null);
             request.onerror = () => reject(request.error);
+        };
+    })`;
+}
+
+// How many runs of a tool from a source the worker has recorded.
+function runCount(toolName, source) {
+    return `new Promise((resolve, reject) => {
+        const open = indexedDB.open('mcp_sandbox');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            if (!open.result.objectStoreNames.contains('runs')) return resolve(0);
+            const all = open.result.transaction('runs').objectStore('runs').getAll();
+            all.onsuccess = () => resolve(all.result.filter(run => run.toolName === ${JSON.stringify(toolName)} && run.source === ${JSON.stringify(source)}).length);
         };
     })`;
 }
@@ -955,8 +969,8 @@ async function main() {
             const toolScreen = await frameWaitFor(`(() => { const text = document.getElementById('answer')?.textContent; return text?.startsWith('You said') ? text : null; })()`);
             check('Apps: the flow works the same on a screen a tool made', toolScreen === 'You said a tool made this, and it said Echo: a tool made this', toolScreen);
 
-            // Download is a zip of the flow as DML, the screen as HTML and a README; importing it
-            // brings the app back.
+            // Download is a zip of the flow as DML, the screen as HTML, a page that runs the app and
+            // a README; importing it brings the app back.
             const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-app-'));
             await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
             await page.run(`document.getElementById('downloadAppBtn').click()`);
@@ -969,23 +983,55 @@ async function main() {
             const zippedText = name => (zipped.has(name) ? new TextDecoder().decode(zipped.get(name)) : '');
             let fromZip;
             try {
-                fromZip = fromDml(zippedText('app.dml'), { files: { 'index.html': zippedText('index.html') } }).app;
+                fromZip = fromDml(zippedText('app.dml'), { files: { 'screen.html': zippedText('screen.html') } }).app;
             } catch (error) {
                 fromZip = { error: error.message };
             }
-            check('Apps: Download saves a zip with the flow as DML, the screen as HTML and a README',
-                zipName === 'new-app-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, README.md'
+            check('Apps: Download saves a zip with the flow as DML, the screen as HTML, a page that runs it and a README',
+                zipName === 'new-app-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, screen.html, README.md'
                     && fromZip.version === 1 && fromZip.screen?.kind === 'html' && fromZip.screen.from?.toolName === 'make_screen'
-                    && /<input id="question"/.test(zippedText('index.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
-                    && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`'),
+                    && /<input id="question"/.test(zippedText('screen.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
+                    && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`')
+                    && zippedText('README.md').includes(`Open \`index.html\` in a browser: it runs the app in MCP Browser Client at ${HOST}:${PORTS.app}/,`),
                 `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+
+            // index.html runs it: its link is the client's root, as the address bar had it, with the
+            // app in it, and opening the page from the disk goes there and runs the app.
+            const launcherLink = zippedText('index.html').match(/<a class="run" id="run" href="([^"]+)">Run New app<\/a>/)?.[1] || '';
+            let linked;
+            try {
+                linked = fromDml(await unpackApp(launcherLink.split(RUN_HASH)[1] || '')).app;
+            } catch (error) {
+                linked = { error: error.message };
+            }
+            writeFileSync(join(appDownloads, 'index.html'), zippedText('index.html'));
+            await page.send('Target.createTarget', { url: `file://${join(appDownloads, 'index.html')}` });
+            const fromDisk = await openPage(target => target.url.startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`));
+            const diskShown = await fromDisk.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!preview || preview.hidden || !preview.querySelector('iframe')) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]')?.textContent.trim()].join(' | ');
+            })()`, 15000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('ask')`, 10000, { inPage: fromDisk });
+            await frameRun(`(() => {
+                document.getElementById('question').value = 'from the download';
+                document.getElementById('ask').click();
+                return true;
+            })()`, { inPage: fromDisk });
+            const diskAnswered = await frameWaitFor(`document.getElementById('answer')?.textContent || null`, 10000, { inPage: fromDisk });
+            await closeTab(fromDisk);
+            await page.send('Page.bringToFront');
+            check("Apps: the download's index.html, opened from the disk, runs the app in the client it came from, as it is in the zip",
+                launcherLink.startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`) && linked.screen?.html === fromZip.screen?.html && linked.flow?.[0]?.call?.toolName === 'echo'
+                    && diskShown === 'New app | Open in the builder' && diskAnswered === 'You said from the download, and it said Echo: from the download',
+                `${launcherLink.slice(0, 40)}…; ${linked.error || ''}; ${diskShown}; ${diskAnswered}`);
             const firstVersion = await page.waitFor(`(() => {
                 const version = document.getElementById('appVersion')?.textContent || '';
                 return version.startsWith('Version 1, downloaded') ? version + ' | ' + document.getElementById('downloadAppBtn').textContent.trim() : null;
             })()`, 5000);
             check('Apps: a download is version 1', firstVersion === 'Version 1, downloaded just now | Download v1', firstVersion);
             await page.run(`(() => {
-                document.querySelector('app-header details.menu').open = true;
+                document.querySelector('app-header .app-more-menu').open = true;
                 const remove = document.getElementById('deleteAppBtn');
                 remove.click();
                 remove.click();
@@ -1017,10 +1063,28 @@ async function main() {
             rmSync(appDownloads, { recursive: true, force: true });
         }
         {
+            // An example asks before it adds a copy: Cancel adds nothing, and Add a copy adds it.
+            const appRows = `document.querySelectorAll('#appList [data-show-app]').length`;
+            const rowsBefore = await page.run(appRows);
+            const askedToAdd = async () => {
+                await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
+                return page.waitFor(`(() => {
+                    const dialog = document.querySelector('apps-add-dialog dialog');
+                    return dialog?.open ? [dialog.querySelector('h2').textContent, [...dialog.querySelectorAll('button')].map(button => button.textContent.trim()).join(', '),
+                        'focus on ' + document.activeElement?.textContent.trim()].join(' | ') : null;
+                })()`, 5000);
+            };
+            const offered = await askedToAdd();
+            await page.run(`document.querySelector('apps-add-dialog [data-cancel]').click()`);
+            const cancelled = await page.run(`(document.querySelector('apps-add-dialog dialog').open ? 'still open' : 'closed') + ', ' + ${appRows} + ' apps'`);
+            await askedToAdd();
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
+            check('Apps: an example asks before it adds a copy under Your apps: Cancel adds nothing, and Add a copy adds it',
+                offered === 'Add a copy of Chat? | Cancel, Add a copy | focus on Add a copy' && cancelled === `closed, ${rowsBefore} apps`, `${offered}; ${cancelled}`);
+
             // The Chat example: an app like any other, whose one rule sends the message and the
             // conversation so far to the model. The mock's chat says what it was sent and how many
             // earlier messages came with it, and writes a tool call when asked to call a tool.
-            await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
             const chatShown = await page.waitFor(`(() => {
                 const current = document.querySelector('apps-rail [aria-current="true"] .wb-row-label')?.textContent;
                 return document.getElementById('appName')?.value === 'Chat' && !document.getElementById('appBuilder').hidden ? current : null;
@@ -1130,6 +1194,22 @@ async function main() {
             // each rule's tool, and wires between them, each one part of a rule. These checks build
             // onto a new app with real mouse drags, at a size where all of it shows.
             await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+            // An example you've added before offers your copy instead of another one.
+            await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'New app').click()`);
+            await page.waitFor(`document.getElementById('appName')?.value === 'New app'`, 5000);
+            const appsBefore = await page.run(`document.querySelectorAll('#appList [data-show-app]').length`);
+            await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
+            const offeredCopy = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-add-dialog dialog');
+                return dialog?.open && dialog.querySelector('[data-open-copy]') ? [dialog.querySelector('.apps-dialog-have').textContent, [...dialog.querySelectorAll('button')].map(button => button.textContent.trim()).join(', '),
+                    'focus on ' + document.activeElement?.textContent.trim()].join(' | ') : null;
+            })()`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-open-copy]').click()`);
+            const openedCopy = await page.waitFor(`document.getElementById('appName')?.value === 'Chat' ? 'Chat, ' + document.querySelectorAll('#appList [data-show-app]').length + ' apps' : null`, 5000);
+            check('Apps: an example you have a copy of offers to open it instead of adding another',
+                /^You have a copy already: Chat, added (just now|\d+ s ago|\d+ min ago)\. \| Cancel, Add another copy, Open Chat \| focus on Open Chat$/.test(offeredCopy || '') && openedCopy === `Chat, ${appsBefore} apps`,
+                `${offeredCopy}; ${openedCopy}`);
+
             // Ask a model asks the model found among your servers: here the mock's stand-in, chat.
             await page.run(`document.getElementById('newAppBtn').click()`);
             await page.waitFor(`document.getElementById('appName')?.value === 'New app 2' && !!document.querySelector('app-header [data-app-view-choice="canvas"]')`, 5000);
@@ -1313,9 +1393,9 @@ async function main() {
             const part = fromZip.screen?.components?.find(component => component.type === 'part');
             const counting = fromZip.flow?.find(rule => rule.call?.toolName === 'count');
             check('Apps: the download keeps the part\'s HTML in parts/, what the model was asked, Start, and where each tool sits',
-                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, parts/part.html, README.md'
+                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, screen.html, parts/part.html, README.md'
                     && part?.ask === 'a ticket dashboard' && part.from?.toolName === 'chat' && /id="refresh"/.test(part.html)
-                    && /id="part\.refresh"/.test(zippedText('index.html'))
+                    && /id="part\.refresh"/.test(zippedText('screen.html'))
                     && counting?.when?.map(candidate => candidate.event).join(', ') === 'click, open'
                     && fromZip.flow.length === 3 && fromZip.flow.every(rule => Number.isFinite(rule.position?.x) && Number.isFinite(rule.position?.y))
                     && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
@@ -1363,7 +1443,13 @@ async function main() {
             // their pieces of its answer, in its prompt. Project pulse, under Examples, calls the
             // model, the mock's chat, which answers the boxes with made-up JSON in their shapes.
             const latestPrompt = `${latestRun('chat', 'app')}.then(run => run?.sentArgs?.message || '')`;
+            // It calls the model as it opens, so adding it asks whether to, each time it opens: yes.
             await page.run(`document.querySelector('apps-rail [data-example="dashboard"]').click()`);
+            const runOnOpenOffered = await page.waitFor(`(() => {
+                const check = document.querySelector('apps-add-dialog dialog[open] [data-run-on-open]');
+                return check ? check.closest('label').textContent.trim() + ' | ' + (check.checked ? 'checked' : 'not checked') : null;
+            })()`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
             const pulse = await frameWaitFor(`(() => {
                 const box = id => document.getElementById(id);
                 if (!box('docs')?.querySelector('a.item-title')) return null;
@@ -1372,7 +1458,8 @@ async function main() {
                     [...box('docs').querySelectorAll('a.item-title')].map(link => link.getAttribute('href')).join(' ')].join(' | ');
             })()`);
             check('Apps: a dashboard opens and fills each box from one answer, drawn as the box says: text, a number, a bar chart and lists',
-                pulse === 'On track: | On track | 6 | 3 | https://example.com/docs/design https://example.com/docs/launch https://example.com/docs/weekly', pulse);
+                pulse === 'On track: | On track | 6 | 3 | https://example.com/docs/design https://example.com/docs/launch https://example.com/docs/weekly'
+                    && runOnOpenOffered === 'Run what it calls as it opens (chat on modern server) each time you open it | checked', `${runOnOpenOffered}; ${pulse}`);
             const asked = await page.waitFor(`${latestPrompt}.then(prompt => prompt.includes('"docs" (list)') ? prompt : null)`, 5000);
             check('Apps: the boxes add to the prompt what each needs, from what it says goes in it, as one JSON object',
                 /^What's the latest on MCP Browser Client\? Use what you find in our documents, messages and tickets\.\n\nThis answer fills the boxes on an app's screen\. Answer with one JSON object in a ```json block/.test(asked || '')
@@ -1436,6 +1523,129 @@ async function main() {
             check('Apps: without the boxes\' request, the answer isn\'t JSON, and the boxes say so',
                 notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
 
+            // Opening an app that calls a tool as it opens asks, when nobody has said, whether to run
+            // it each time; nothing runs until then, and the answer is kept. Start's Inspector shows
+            // it and changes it. The link opened above is a tab in front of this one.
+            await page.send('Page.bringToFront');
+            const pulseId = await page.run(`localStorage.getItem('appsShown')`);
+            const choiceOf = `(JSON.parse(localStorage.getItem('appsRunOnOpen') || '{}')[${JSON.stringify(pulseId)}] || 'none')`;
+            const startChoices = `[...document.querySelectorAll('app-inspector [data-run-on-open-choice]')].map(chip => chip.textContent + (chip.getAttribute('aria-pressed') === 'true' ? '*' : '')).join(', ')`;
+            const chooseOnStart = async choice => {
+                await page.run(`document.querySelector('app-canvas [data-start]').click()`);
+                const shown = await page.waitFor(`document.querySelector('app-inspector [data-run-on-open-choice]') ? ${startChoices} : null`, 5000);
+                await page.run(`document.querySelector('app-inspector [data-run-on-open-choice="${choice}"]').click()`);
+                return shown;
+            };
+            const reopen = async () => {
+                await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'Chat').click()`);
+                await page.waitFor(`document.getElementById('appName')?.value === 'Chat'`, 5000);
+                await page.run(`document.querySelector('apps-rail [data-show-app="${pulseId}"]').click()`);
+                await page.waitFor(`document.getElementById('appName')?.value === 'Project pulse'`, 5000);
+            };
+            const canvasTrace = `[...document.querySelectorAll('app-canvas .app-trace-text')].map(line => line.textContent.trim()).join(' | ')`;
+            const pulseRuns = runCount('chat', 'app');
+            const choiceAdded = await page.run(choiceOf);
+            const startShown = await chooseOnStart('');
+            const startAsks = await page.waitFor(`${startChoices}.includes('Ask*') ? ${startChoices} + ' | ' + ${choiceOf} : null`, 5000);
+            const runsBefore = await page.run(pulseRuns);
+            await reopen();
+            const asking = await page.waitFor(`(() => { const ask = document.querySelector('app-open-ask'); return ask && !ask.hidden ? ask.innerText.replace(/\\s+/g, ' ').trim() : null; })()`, 5000);
+            await sleep(1500);
+            const runsWhileAsking = await page.run(pulseRuns);
+            const heldNote = await page.run(canvasTrace);
+            await page.run(`document.querySelector('app-open-ask [data-answer-run-on-open="no"]').click()`);
+            const saidNo = await page.waitFor(`document.querySelector('app-open-ask').hidden ? ${choiceOf} : null`, 5000);
+            await reopen();
+            await sleep(1500);
+            const quietly = await page.run(`(document.querySelector('app-open-ask').hidden ? 'no question' : 'asked') + ' | ' + ${canvasTrace}`);
+            const runsAfterNo = await page.run(pulseRuns);
+            check("Apps: an app that calls a tool as it opens asks whether to run it each time, and runs nothing until you answer; Don't run it is kept, and it opens without calling it",
+                choiceAdded === 'yes' && startShown === "Ask, Run it*, Don't run it" && startAsks === "Ask*, Run it, Don't run it | none"
+                    && asking === "Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app; Start, on the canvas, changes it. Run it each time Don't run it"
+                    && runsWhileAsking === runsBefore && heldNote === "What Start calls (chat on modern server) hasn't run: say above whether to run it when you open this app."
+                    && saidNo === 'no' && quietly === "no question | What Start calls (chat on modern server) didn't run as the app opened, as you chose for this app. Restart runs it."
+                    && runsAfterNo === runsBefore,
+                `${choiceAdded}; ${startShown}; ${startAsks}; ${asking}; ${runsBefore} → ${runsWhileAsking} → ${runsAfterNo} runs; ${heldNote}; ${saidNo}; ${quietly}`);
+            const startSaysNo = await chooseOnStart('');
+            await reopen();
+            await page.waitFor(`!document.querySelector('app-open-ask').hidden`, 5000);
+            await page.run(`document.querySelector('app-open-ask [data-answer-run-on-open="yes"]').click()`);
+            const ranNow = await page.waitFor(`${pulseRuns}.then(count => count > ${runsBefore} ? count - ${runsBefore} + ' run' : null)`, 10000);
+            const ranNote = await page.waitFor(`(() => { const trace = ${canvasTrace}; return trace.includes('chat answered') ? trace.split(' | ').slice(1, 3).join(' | ') : null; })()`, 10000);
+            const saidYes = await page.run(`(document.querySelector('app-open-ask').hidden ? 'no question' : 'asked') + ', ' + ${choiceOf}`);
+            check('Apps: Run it each time runs what Start calls now, and keeps the answer; Start\'s Inspector showed the one before',
+                startSaysNo === "Ask, Run it, Don't run it*" && ranNow === '1 run' && ranNote === 'Ran what Start calls, as it will each time you open Project pulse. | The app opened' && saidYes === 'no question, yes',
+                `${startSaysNo}; ${ranNow}; ${ranNote}; ${saidYes}`);
+
+            // Launch: the app on its own in a new tab, which runs what Start calls as it starts, as
+            // Preview does, though opening it in the builder wouldn't now.
+            await chooseOnStart('no');
+            const runsBeforeLaunch = await page.run(pulseRuns);
+            await page.send('Runtime.evaluate', { expression: `document.getElementById('launchAppBtn').click()`, userGesture: true });
+            const launchedTab = await openPage(target => target.url === `${HOST}:${PORTS.app}/?app=${pulseId}`);
+            const launchedApp = await launchedTab.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const frame = preview?.querySelector('iframe');
+                if (!preview || preview.hidden || !frame || !/answered/.test(preview.querySelector('[data-preview-status]').textContent)) return null;
+                const box = frame.getBoundingClientRect();
+                const whole = Math.abs(box.width - document.documentElement.clientWidth) <= 1 && Math.abs(box.bottom - window.innerHeight) <= 1;
+                const builder = ['.wb-topbar', 'apps-rail', 'app-header', 'wb-dock'].filter(selector => getComputedStyle(document.querySelector(selector)).display !== 'none');
+                return [document.title, whole ? 'the whole window' : 'not the whole window', builder.length ? builder.join(' ') + ' showing' : 'nothing of the builder',
+                    preview.querySelector('[data-launch-actions]').textContent.trim(), preview.querySelector('[data-launch-notes]').hidden ? 'no notes' : 'notes'].join(' | ');
+            })()`, 15000);
+            await launchedTab.run(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+            await sleep(300);
+            const stillLaunched = await launchedTab.run(`document.querySelector('app-preview').hidden ? 'gone' : 'still there'`);
+            const runsLaunched = await page.run(pulseRuns);
+            await closeTab(launchedTab);
+            await page.send('Page.bringToFront');
+            check("Apps: Launch opens the app on its own in a new tab, the whole window with nothing of the builder, running what Start calls as it starts; Escape keeps it",
+                launchedApp === 'Project pulse | the whole window | nothing of the builder | Open in the builder | no notes' && stillLaunched === 'still there' && runsLaunched === runsBeforeLaunch + 1,
+                `${launchedApp}; ${stillLaunched}; ${runsBeforeLaunch} → ${runsLaunched} runs`);
+
+            // A link that runs it carries the app itself: in a browser with nothing of it, the app
+            // runs from the link, offers to add the server it calls, asks before calling what Start
+            // calls, and joins that browser's apps once added.
+            await page.run(`navigator.clipboard.writeText = text => { window.copiedLink = text; return Promise.resolve(); }`);
+            await page.run(`(() => { document.querySelector('app-header .app-more-menu').open = true; document.getElementById('copyAppLinkBtn').click(); })()`);
+            const copiedLink = await page.waitFor(`window.copiedLink || null`, 5000);
+            const copiedSaid = await page.waitFor(`document.getElementById('wbStatus')?.textContent.startsWith('Copied a link') ? document.getElementById('wbStatus').textContent : null`, 5000);
+            const elsewhere = await otherBrowser();
+            const linkedApp = await elsewhere.open(copiedLink || 'about:blank');
+            const linkNotes = `document.querySelector('app-preview [data-launch-notes]')?.innerText.replace(/\\s+/g, ' ').trim()`;
+            const linkFirst = await linkedApp.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!preview || preview.hidden || !preview.querySelector('[data-answer-run-on-open]')) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]').textContent.trim(), ${linkNotes}].join(' | ');
+            })()`, 20000);
+            const linkRuns = runCount('chat', 'app');
+            await sleep(500);
+            const linkRunsFirst = await linkedApp.run(linkRuns);
+            await linkedApp.run(`document.querySelector('app-preview [data-add-server-for-app]').click()`);
+            const serverAdded = await linkedApp.waitFor(`appShell.servers[${JSON.stringify(modernUrl)}]?.status === 'connected' && appShell.servers[${JSON.stringify(modernUrl)}].tools?.length ? appShell.servers[${JSON.stringify(modernUrl)}].alias + ' | ' + ${linkNotes} : null`, 15000);
+            await linkedApp.run(`document.querySelector('app-preview [data-answer-run-on-open="yes"]').click()`);
+            const linkRan = await linkedApp.waitFor(`(() => { const status = document.querySelector('app-preview [data-preview-status]').textContent; return /answered/.test(status) ? status.replace(/\\d+ ms/, 'N ms') : null; })()`, 15000);
+            const linkRunsAfter = await linkedApp.run(linkRuns);
+            await linkedApp.run(`document.querySelector('app-preview [data-keep-app]').click()`);
+            const linkKept = await linkedApp.waitFor(`(() => {
+                const actions = document.querySelector('app-preview [data-launch-actions]').textContent.trim();
+                if (actions !== 'Open in the builder') return null;
+                return new Promise(resolve => {
+                    const open = indexedDB.open('mcp_apps');
+                    open.onsuccess = () => {
+                        const all = open.result.transaction('apps').objectStore('apps').getAll();
+                        all.onsuccess = () => resolve(actions + ' | ' + all.result.map(app => app.id === ${JSON.stringify(pulseId)} ? app.name : 'another').join(', '));
+                    };
+                });
+            })()`, 5000);
+            await elsewhere.close();
+            check('Apps: a link that runs the app carries it: in a browser with nothing of it, it offers to add the server it calls, asks before calling what Start calls, runs, and joins that browser\'s apps once added',
+                (copiedLink || '').startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`) && copiedSaid === 'Copied a link that runs Project pulse as it is now. Whoever opens it runs it in their browser, on their own servers, and can add it to their apps.'
+                    && linkFirst === `Project pulse | Add to Your apps | This app came in a link. It calls your servers, signed in as you, and each call is in History. It calls modern server (${modernUrl}), which isn't one of your servers. Add it Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app, in this browser. Run it each time Don't run it`
+                    && linkRunsFirst === 0 && serverAdded === "modern server | This app came in a link. It calls your servers, signed in as you, and each call is in History. Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app, in this browser. Run it each time Don't run it"
+                    && linkRan === 'chat answered in N ms' && linkRunsAfter === 1 && linkKept === 'Open in the builder | Project pulse',
+                `${(copiedLink || 'nothing copied').slice(0, 40)}…; ${copiedSaid}; ${linkFirst}; ${linkRunsFirst} runs; ${serverAdded}; ${linkRan}; ${linkRunsAfter} runs; ${linkKept}`);
+
             // Front desk, under Examples: a visitor kiosk over four screens, which the canvas lays out
             // as a storyboard, a card for each screen in the order people go through them and an
             // arrow for each way from one to the next. The app runs on the card of the screen it's
@@ -1443,6 +1653,8 @@ async function main() {
             // above is a tab in front of this one, where the canvas couldn't draw its wires.
             await page.send('Page.bringToFront');
             await page.run(`document.querySelector('apps-rail [data-example="frontdesk"]').click()`);
+            await page.waitFor(`!!document.querySelector('apps-add-dialog dialog[open] [data-add-copy]')`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
             const cardsAt = `Object.fromEntries([...document.querySelectorAll('app-canvas [data-card]')].map(card => [card.dataset.card, { x: parseFloat(card.style.getPropertyValue('--x')), y: parseFloat(card.style.getPropertyValue('--y')) }]))`;
             const player = `document.querySelector('app-canvas [data-player]')`;
             const deskCanvas = `(() => {
@@ -1692,6 +1904,32 @@ async function main() {
                     && can.includes(modernUrl) && !can.includes(`${HOST}:${PORTS.legacy}/`) && cannot.some(text => text.endsWith(': it has no find_visit'))
                     && moved === modernUrl && mockRun === modernUrl,
                 `${deskRun}; ${offered}; ${moved}; ${mockRun}`);
+
+            // Each of Your apps has a ⋯ menu, always there on the app shown: its Delete takes an app
+            // that isn't shown, on a second click, and what this browser kept for it, and the
+            // shown one stays.
+            const rowOf = name => `[...document.querySelectorAll('#appList .apps-row')].find(row => row.querySelector('.wb-row-label').textContent === ${JSON.stringify(name)})`;
+            const goneId = await page.run(`${rowOf('New app')}.querySelector('[data-show-app]').dataset.showApp`);
+            const rowsBeforeDelete = await page.run(`document.querySelectorAll('#appList .apps-row').length`);
+            await page.run(`(() => {
+                const views = JSON.parse(localStorage.getItem('appsCanvasViews') || '{}');
+                localStorage.setItem('appsCanvasViews', JSON.stringify({ ...views, [${JSON.stringify(goneId)}]: { zoom: 0.5, left: 0, top: 0 } }));
+                document.querySelector('app-canvas').apps.setRunOnOpen('no', ${JSON.stringify(goneId)});
+            })()`);
+            const shownMenu = await page.run(`getComputedStyle(document.querySelector('#appList .apps-row:has([aria-current="true"]) .apps-row-menu')).opacity`);
+            await page.run(`(() => {
+                const row = ${rowOf('New app')};
+                row.querySelector('details').open = true;
+                row.querySelector('[data-delete-app]').click();
+            })()`);
+            const confirmingRow = await page.run(`${rowOf('New app')}.querySelector('[data-delete-app]').textContent + ', menu ' + (${rowOf('New app')}.querySelector('details').open ? 'open' : 'closed')`);
+            await page.run(`${rowOf('New app')}.querySelector('[data-delete-app]').click()`);
+            const afterRowDelete = await page.waitFor(`!${rowOf('New app')} ? [document.getElementById('appName').value + ' shown', document.querySelectorAll('#appList .apps-row').length + ' apps',
+                JSON.parse(localStorage.getItem('appsCanvasViews') || '{}')[${JSON.stringify(goneId)}] ? 'its view kept' : 'its view forgotten',
+                JSON.parse(localStorage.getItem('appsRunOnOpen') || '{}')[${JSON.stringify(goneId)}] ? 'its answer kept' : 'its answer forgotten'].join(', ') : null`, 5000);
+            check("Apps: each of Your apps has a ⋯ menu, always there on the one shown, whose Delete takes another app on a second click, with what was kept for it",
+                shownMenu === '1' && confirmingRow === 'Click again to confirm, menu open' && afterRowDelete === `Front desk shown, ${rowsBeforeDelete - 1} apps, its view forgotten, its answer forgotten`,
+                `${shownMenu}; ${confirmingRow}; ${afterRowDelete}`);
             await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);
