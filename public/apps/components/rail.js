@@ -2,7 +2,7 @@
 // apps you've built, and New app and Import. With no app shown, AppsStart offers the examples on
 // the page itself.
 
-import { escapeHtml } from '../../workbench/util.js';
+import { confirmThen, escapeHtml } from '../../workbench/util.js';
 import { EXAMPLES } from '../apps.js';
 import { AppElement } from './base.js';
 import { ModelPicker } from './model-picker.js';
@@ -19,8 +19,12 @@ export class AppsRail extends AppElement {
         this.addEventListener('click', event => {
             const button = event.target.closest('button');
             if (!button) return;
+            // Delete asks for a second click, so its menu stays open for it.
+            if (button.dataset.deleteApp) return confirmThen(button, () => this.apps.remove(button.dataset.deleteApp));
+            button.closest('details.menu')?.removeAttribute('open');
             if (button.dataset.showApp) this.apps.show(button.dataset.showApp);
             if (button.dataset.example) this.apps.offerExample(button.dataset.example);
+            if (button.dataset.duplicateApp) this.apps.duplicate(button.dataset.duplicateApp);
             if (button.id === 'newAppBtn') this.apps.create();
             if (button.id === 'importAppBtn') this.$('#importAppInput').click();
         }, { signal });
@@ -52,7 +56,7 @@ export class AppsRail extends AppElement {
             <section class="wb-section" aria-labelledby="appsYours">
                 <header class="wb-section-head"><h2 id="appsYours">Your apps</h2></header>
                 <ul class="wb-list" id="appList">${this.apps.list.length
-                    ? this.apps.list.map(app => row(`data-show-app="${escapeHtml(app.id)}" ${shown === app.id ? 'aria-current="true"' : ''}`, app.name || 'Untitled app', app.version ? `v${app.version}` : '', app.description || app.name)).join('')
+                    ? this.apps.list.map(app => this.appRow(app, shown === app.id)).join('')
                     : '<li class="wb-list-note">None yet. An app is a screen and a flow: when something happens on the screen, call a tool, and show what it returns.</li>'}
                 </ul>
                 <div class="apps-rail-actions">
@@ -61,6 +65,27 @@ export class AppsRail extends AppElement {
                     <input type="file" id="importAppInput" accept=".zip,.dml,.xml,application/zip,application/xml,text/xml" hidden>
                 </div>
             </section>`;
+    }
+
+    // One of your apps, with its own menu: Duplicate and Delete. The shown app's ⋯ is always
+    // there; the others' show when pointed at or focused.
+    appRow(app, current) {
+        const name = app.name || 'Untitled app';
+        const id = escapeHtml(app.id);
+        return `
+            <li class="apps-row">
+                <button type="button" class="wb-row" data-show-app="${id}" ${current ? 'aria-current="true"' : ''} title="${escapeHtml(app.description || name)}">
+                    <span class="wb-row-label">${escapeHtml(name)}</span>
+                    ${app.version ? `<span class="wb-meta">v${app.version}</span>` : ''}
+                </button>
+                <details class="menu item-menu apps-row-menu">
+                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="${escapeHtml(`More for ${name}`)}" title="Duplicate or delete it"><span class="wb-more" aria-hidden="true">⋯</span></summary>
+                    <div class="menu-list" role="menu">
+                        <button type="button" class="menu-item" role="menuitem" data-duplicate-app="${id}">Duplicate</button>
+                        <button type="button" class="menu-item" role="menuitem" data-delete-app="${id}">Delete</button>
+                    </div>
+                </details>
+            </li>`;
     }
 }
 

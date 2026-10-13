@@ -1,6 +1,6 @@
 // The top of the app builder: the app's name and description, Canvas or Outline, Preview, which
-// version it's at, and Download (a zip of the flow's DML, the screen's HTML and a README), with
-// the DML alone, Duplicate and Delete in its menu.
+// version it's at, Download (a zip of the flow's DML, the screen's HTML and a README, or the DML
+// alone), and ⋯ with Duplicate and Delete.
 
 import { confirmThen, escapeHtml, timeAgo } from '../../workbench/util.js';
 import { PREVIEW, VIEWS } from '../apps.js';
@@ -60,14 +60,19 @@ export class AppHeader extends AppElement {
                 <div class="split-button">
                     <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with app.dml (the flow, as markup), index.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
                     <details class="menu app-menu">
-                        <summary class="btn-sm" aria-label="More for this app">▾</summary>
+                        <summary class="btn-sm" aria-label="Other ways to download it">▾</summary>
                         <div class="menu-list" role="menu">
                             <button type="button" class="menu-item" role="menuitem" id="downloadDmlBtn" title="One file with the screen and the flow">Download app.dml only</button>
-                            <button type="button" class="menu-item" role="menuitem" id="duplicateAppBtn">Duplicate</button>
-                            <button type="button" class="menu-item" role="menuitem" id="deleteAppBtn">Delete this app</button>
                         </div>
                     </details>
                 </div>
+                <details class="menu app-menu app-more-menu">
+                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="More for this app" title="Duplicate or delete this app"><span class="wb-more" aria-hidden="true">⋯</span></summary>
+                    <div class="menu-list" role="menu">
+                        <button type="button" class="menu-item" role="menuitem" id="duplicateAppBtn">Duplicate</button>
+                        <button type="button" class="menu-item" role="menuitem" id="deleteAppBtn">Delete this app</button>
+                    </div>
+                </details>
             </div>
             <p class="app-intro text-secondary" data-outline-only>An app is a <strong>screen</strong> and a <strong>flow</strong>. Build the screen from components, or from HTML a model or a tool makes. The flow is rules: <em>when</em> something happens on the screen, <em>call</em> a tool, <em>then</em> put what it returns back on the screen. On the canvas, each rule is a tool with wires to the screen.</p>`;
         this.$('#appName').value = app.name || '';

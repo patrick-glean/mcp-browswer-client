@@ -27,6 +27,47 @@ apps-rail {
     padding: 8px 6px 4px;
 }
 
+/* One of your apps: its row, and its ⋯ menu, which the shown app always has. */
+.apps-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border-radius: var(--radius-200);
+}
+
+.apps-row:hover {
+    background: var(--theme-hover);
+}
+
+.apps-row:has(> [aria-current='true']) {
+    background: var(--theme-selected);
+}
+
+.apps-row > .wb-row,
+.apps-row > .wb-row:hover:not(:disabled),
+.apps-row > .wb-row[aria-current='true'] {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+}
+
+.apps-row-menu {
+    flex: none;
+    margin-right: 3px;
+    opacity: 0;
+}
+
+.apps-row:hover .apps-row-menu,
+.apps-row:focus-within .apps-row-menu,
+.apps-row:has(> [aria-current='true']) .apps-row-menu,
+.apps-row-menu[open] {
+    opacity: 1;
+}
+
+.apps-row-menu .menu-list {
+    min-width: 160px;
+}
+
 @media (max-width: 860px) {
     apps-rail {
         max-height: 40vh;

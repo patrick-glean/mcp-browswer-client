@@ -122,6 +122,9 @@ export class AppCanvas extends AppElement {
             if (held) this.trace.add({ time: Date.now(), kind: 'note', text: held });
         }, signal);
         this.apps.on('view', () => this.render({ start: false }), signal);
+        this.apps.on('list', ({ removed }) => {
+            if (removed) this.forgetView(removed);
+        }, signal);
         this.apps.on('app', ({ part, by }) => {
             if (part === 'screen') {
                 this.syncCards();
@@ -785,6 +788,13 @@ export class AppCanvas extends AppElement {
         };
         const kept = Object.entries(views).slice(-50);
         localStorage.setItem(VIEWS_KEY, JSON.stringify(Object.fromEntries(kept)));
+    }
+
+    forgetView(id) {
+        const views = readViews();
+        if (!(id in views)) return;
+        delete views[id];
+        localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
     }
 
     // Brings a card into view when it's out of it, as the app moves there or it's picked.

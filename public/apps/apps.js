@@ -4,7 +4,7 @@
 // Workbench's do.
 //
 // Events, with what their detail holds:
-//   list       apps were added, renamed or deleted
+//   list       apps were added, renamed or deleted               { removed }
 //   shown      the page shows another app, or none (id null)    { id }
 //   model      the model the builder asks changed
 //   app        the shown app changed
@@ -707,29 +707,39 @@ export class Apps {
         return listed(serversOf(app).map(url => (demoServerAt(url) && !this.shell.servers[url] ? `${demoServerAt(url).name}, built in` : this.serverName(url, app))));
     }
 
-    async duplicate() {
-        if (!this.app) return null;
-        await this.flush();
+    // A copy of one of your apps (the shown one, unless you say which), which opens as the
+    // original does.
+    async duplicate(id = this.shownId) {
+        const source = this.list.find(app => app.id === id);
+        if (!source) return null;
+        if (id === this.shownId) await this.flush();
         const now = Date.now();
-        const copy = { ...structuredClone(this.app), id: crypto.randomUUID(), name: `${this.app.name} (copy)`, version: 0, createdAt: now, updatedAt: now, downloadedAt: null };
+        const copy = { ...structuredClone(source), id: crypto.randomUUID(), name: `${source.name} (copy)`, version: 0, createdAt: now, updatedAt: now, downloadedAt: null };
+        if (this.runOnOpen(id)) this.setRunOnOpen(this.runOnOpen(id), copy.id);
         await store.saveApp(copy);
         this.list.push(copy);
         this.emit('list');
         this.show(copy.id);
-        this.status(`Made a copy of ${this.app.name}.`);
+        this.status(`Made a copy of ${source.name}.`);
         return copy;
     }
 
-    async remove() {
-        if (!this.app) return;
-        const { id, name } = this.app;
-        clearTimeout(this.saveTimer);
-        this.app = null;
+    // Deletes one of your apps (the shown one, unless you say which), and what this browser kept
+    // for it. Deleting the shown one shows the next, or the examples when it was the last.
+    async remove(id = this.shownId) {
+        const app = this.list.find(candidate => candidate.id === id);
+        if (!app) return;
+        const shown = id === this.shownId;
+        if (shown) {
+            clearTimeout(this.saveTimer);
+            this.app = null;
+        }
         await store.deleteApp(id);
-        this.list = this.list.filter(app => app.id !== id);
-        this.emit('list');
-        this.show(this.list[0]?.id ?? null);
-        this.status(`Deleted ${name}.`);
+        this.list = this.list.filter(candidate => candidate.id !== id);
+        this.setRunOnOpen(null, id);
+        this.emit('list', { removed: id });
+        if (shown) this.show(this.list[0]?.id ?? null);
+        this.status(`Deleted ${app.name}.`);
     }
 
     // --- Download and import ---
