@@ -314,6 +314,21 @@
         // window would restart it and drop every open tab's connections.
         const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
 
+        // ?app=<id> runs one of your apps on its own, and #run=… one a link carries (apps/link.js):
+        // the window is the app's screen, as in Preview, with nothing of the Workbench or the
+        // builder. The page still starts the worker and the Workbench's state, which the app uses.
+        const LAUNCH = (() => {
+            if (LOGS_ONLY) return null;
+            const run = location.hash.startsWith('#run=') ? location.hash.slice('#run='.length) : '';
+            const id = new URLSearchParams(location.search).get('app') || '';
+            return run || id ? { run: run || null, id: run ? null : id } : null;
+        })();
+        if (LAUNCH) document.body.classList.add('launched');
+        // A link to another app, pasted into this tab, only changes what follows #.
+        window.addEventListener('hashchange', () => {
+            if (location.hash.startsWith('#run=')) location.reload();
+        });
+
         // Which MCP client library the service worker runs, one of the Runtime menu's. ?client= or
         // the menu picks it. The page remembers it and tells the worker when the page starts and
         // when the choice changes; the worker remembers it across restarts. Only a choice is ever
@@ -1737,7 +1752,7 @@
                 .then(({ installWorkbench }) => installWorkbench(appShell))
                 .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }))
                 .then(() => import('./apps/index.js'))
-                .then(({ installApps }) => installApps(appShell, { showMode }))
+                .then(({ installApps }) => installApps(appShell, { showMode, launch: LAUNCH }))
                 .catch(error => appShell.log({ level: 'error', message: `Couldn't load the app builder: ${error.message}` }));
         }
 
@@ -1768,14 +1783,15 @@
         const hasPlaceholder = text => typeof text === 'string' && /\{\{\s*[A-Za-z_][\w.-]*\s*\}\}/.test(text);
         const isWholePlaceholder = text => typeof text === 'string' && /^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text.trim());
 
-        // The Workbench or the Apps page; the dock stays under both.
-        function showMode(mode) {
+        // The Workbench or the Apps page; the dock stays under both. Without `keep`, the next
+        // visit doesn't open on it, as a launched app's page doesn't.
+        function showMode(mode, { keep = true } = {}) {
             const apps = mode === 'apps';
             document.body.dataset.mode = apps ? 'apps' : 'workbench';
             document.getElementById('workbench').hidden = apps;
             document.getElementById('appsPage').hidden = !apps;
             document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === document.body.dataset.mode)));
-            localStorage.setItem('mode', document.body.dataset.mode);
+            if (keep) localStorage.setItem('mode', document.body.dataset.mode);
             appShell.emit('mode', { mode: document.body.dataset.mode });
         }
         document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => showMode(button.dataset.mode)));
@@ -1900,7 +1916,7 @@
             navigator.serviceWorker.ready.then(() => setTimeout(() => appShell.addServer(linkedServer), 0));
         }
 
-        if (!LOGS_ONLY && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(appShell.servers).length === 0) {
+        if (!LOGS_ONLY && !LAUNCH && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(appShell.servers).length === 0) {
             openGuide();
         }
 
@@ -1941,8 +1957,9 @@
             }
         });
 
-        // Back where you were: the Workbench, or the Apps page.
-        if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
+        // Back where you were: the Workbench, or the Apps page. A launched app is on the Apps page.
+        if (LAUNCH) showMode('apps', { keep: false });
+        else if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
     </script>
 
     <!-- Styles moved to styles.css -->

@@ -1,6 +1,6 @@
 // Starts the Apps page: loads the apps you've built, defines the builder's components (which draw
 // themselves where index.html places them) and shows the builder, or with no app to show, the
-// examples to start from.
+// examples to start from; or, launched, one app on its own.
 
 import { app } from '../workbench/app.js';
 import { Apps } from './apps.js';
@@ -31,7 +31,8 @@ const COMPONENTS = {
     'app-preview': AppPreview,
 };
 
-export async function installApps(shell, { showMode } = {}) {
+// With `launch` ({ id } or { run }), the page runs that one app on its own (Apps.launch).
+export async function installApps(shell, { showMode, launch = null } = {}) {
     const apps = new Apps(shell, app.workbench, { showMode });
     app.apps = apps;
     // First, so the builder and the view are on the page before their components draw the app.
@@ -47,6 +48,6 @@ export async function installApps(shell, { showMode } = {}) {
     for (const [name, component] of Object.entries(COMPONENTS)) {
         if (!customElements.get(name)) customElements.define(name, component);
     }
-    await apps.load();
+    await apps.load({ launch });
     return apps;
 }

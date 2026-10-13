@@ -1,7 +1,7 @@
 // The apps you build, and the state the Apps page's components share: which app is shown, edits to
 // it (saved as you go), the model the builder asks, the examples to start from, downloads and
-// imports. Components reach each other only through here, AppShell and the Workbench state, as the
-// Workbench's do.
+// imports, and an app the page runs on its own (launched). Components reach each other only
+// through here, AppShell and the Workbench state, as the Workbench's do.
 //
 // Events, with what their detail holds:
 //   list       apps were added, renamed or deleted               { removed }
@@ -27,6 +27,7 @@ import { BOX_KINDS, isBox, isConversation, promptFieldOf } from './boxes.js';
 import { fromDml, partFile, serversOf, toDml } from './dml.js';
 import { answerOf, callArguments, describeRule, listed, newRule, normalizeRule, renameInFlow, toolResult, trigger, triggersOf } from './flow.js';
 import { disconnect, wiresOf } from './graph.js';
+import { clientRoot, runLink, unpackApp } from './link.js';
 import { componentsHtml, elementsOf, htmlFromResult, movedComponents, newComponent, sanitizePart, screenHtml, withNewScreen, withoutComponent } from './screen.js';
 import { withCallsTo } from './servers.js';
 import * as store from './store.js';
@@ -37,6 +38,8 @@ const VIEW_KEY = 'appsView';
 const MODEL_KEY = 'appsModel';
 // Whether each app runs what Start calls when it opens: { [app id]: 'yes' | 'no' }.
 const RUN_ON_OPEN_KEY = 'appsRunOnOpen';
+// index.html's: whether the page opens on the Workbench or Apps.
+const MODE_KEY = 'mode';
 export const VIEWS = { canvas: 'Canvas', outline: 'Outline' };
 // The app as it is when it's launched: the window is its screen, and nothing of the builder shows.
 // A view like the two above, so their components stop while it runs, but never the one kept.
@@ -56,6 +59,9 @@ function readChoices() {
         return {};
     }
 }
+
+// The worker is up to take calls, as it isn't yet on a first visit; or a few seconds have gone by.
+const workerReady = () => Promise.race([navigator.serviceWorker?.ready ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
 const APP_URL = 'https://patrick-glean.github.io/mcp-browswer-client/';
 
 export const slug = name => String(name || 'app').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60) || 'app';
@@ -360,6 +366,8 @@ export class Apps {
         this.answers = new Map();
         // The shown app opened without running what Start calls (startsOnOpen), and it hasn't run since.
         this.startHeld = false;
+        // The page runs one app on its own (launch): { fromLink, problem }, or null for the builder.
+        this.launched = null;
     }
 
     on(type, listener, signal) {
@@ -374,13 +382,116 @@ export class Apps {
         this.workbench.status(text, options);
     }
 
-    async load() {
+    // With `launch` ({ id } or { run }, from index.html's address), the page runs that one app
+    // on its own (launch); otherwise it shows the app shown last.
+    async load({ launch = null } = {}) {
         this.list = (await store.listApps()).map(normalizeApp).sort((a, b) => a.createdAt - b.createdAt);
-        const shown = localStorage.getItem(SHOWN_KEY);
-        this.show(this.list.some(app => app.id === shown) ? shown : this.list[0]?.id ?? null);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') this.flush();
         });
+        if (launch) return this.launch(launch);
+        const shown = localStorage.getItem(SHOWN_KEY);
+        this.show(this.list.some(app => app.id === shown) ? shown : this.list[0]?.id ?? null);
+    }
+
+    // --- Launched: one app on its own, as people use it ---
+
+    // Runs one app with nothing of the builder, the window its screen as in Preview: one of yours
+    // (`id`, index.html?app=<id>, which Launch opens), or one a link carries (`run`, the #run=
+    // of a link from Copy a link or a download's index.html). A link's app isn't added to Your
+    // apps until you say so, and it waits to run what Start calls as an app opening does; yours
+    // runs it at once, as Preview does. `launched` says which, or why there's nothing to run.
+    async launch({ id = null, run = null }) {
+        let app = null;
+        let problem = '';
+        if (run) {
+            try {
+                const { app: carried, servers } = fromDml(await unpackApp(run));
+                const now = Date.now();
+                app = {
+                    ...normalizeApp(carried),
+                    id: carried.id || crypto.randomUUID(),
+                    createdAt: now,
+                    updatedAt: now,
+                    downloadedAt: now,
+                    serverNames: Object.fromEntries(servers.filter(server => server.name).map(server => [server.url, server.name])),
+                };
+            } catch (error) {
+                problem = `The app in this link can't run: ${error.message}.`;
+            }
+        } else {
+            app = this.list.find(candidate => candidate.id === id) || null;
+            if (!app) problem = "This browser has no app with this link's id: it may have been deleted, or made in another browser. An app's own link, which runs it anywhere, is Copy a link that runs it, in its ⋯ menu in the builder.";
+        }
+        this.launched = { fromLink: !!run, problem };
+        this.view = PREVIEW;
+        this.app = app;
+        this.shownId = app?.id ?? null;
+        this.elementsCache = null;
+        this.selection = null;
+        this.answers.clear();
+        this.startHeld = !!app && !!run && !this.startsOnOpen();
+        if (app) {
+            document.title = app.name || 'App';
+            // The demo servers it calls are built in, so they're added for it, once the worker can connect them.
+            await workerReady();
+            for (const url of serversOf(app)) {
+                const demo = demoServerAt(url);
+                if (demo) this.addDemoServer(demo.id);
+            }
+        }
+        this.emit('shown', { id: this.shownId });
+    }
+
+    isYours(app = this.app) {
+        return !!app && this.list.some(candidate => candidate.id === app.id);
+    }
+
+    // The app a link carried, added to Your apps, as Import adds one.
+    async keepLaunched() {
+        const app = this.app;
+        if (!this.launched?.fromLink || !app || this.isYours(app)) return;
+        await store.saveApp(app);
+        this.list = [...this.list, app];
+        this.emit('list');
+        this.status(`Added ${app.name} to Your apps. Open it in the builder to change it.`);
+    }
+
+    // The builder, in this tab, showing the launched app if it's one of yours.
+    openInBuilder() {
+        if (this.isYours()) localStorage.setItem(SHOWN_KEY, this.app.id);
+        localStorage.setItem(MODE_KEY, 'apps');
+        location.assign(clientRoot(location.href));
+    }
+
+    // Where one of your apps runs on its own: index.html?app=<id>, in this browser.
+    launchUrl(id = this.shownId) {
+        return `${clientRoot(location.href)}?app=${encodeURIComponent(id)}`;
+    }
+
+    // Launch: one of your apps on its own, in a tab of its own, as it is now.
+    launchInTab(id = this.shownId) {
+        if (!this.list.some(app => app.id === id)) return;
+        if (id === this.shownId) this.flush();
+        window.open(this.launchUrl(id), '_blank', 'noopener');
+    }
+
+    // A link that runs the app as it is now, wherever the client is served from here: the app
+    // travels in the link, so whoever opens it runs it in their browser, on their own servers.
+    linkTo(app = this.app) {
+        return runLink(toDml(app, { standalone: true, serverNames: this.serverNamesOf(app) }), clientRoot(location.href));
+    }
+
+    async copyLink() {
+        const app = this.app;
+        if (!app) return;
+        await this.flush();
+        try {
+            await navigator.clipboard.writeText(await this.linkTo(app));
+            this.status(`Copied a link that runs ${app.name} as it is now. Whoever opens it runs it in their browser, on their own servers, and can add it to their apps.`);
+        } catch (error) {
+            this.status(`Couldn't copy the link: ${error.message}`, { error: true });
+        }
     }
 
     // Shows an app, or with null none: the page then offers the examples. A preview is of the app it
@@ -462,8 +573,9 @@ export class Apps {
         if (this.app) this.showView(PREVIEW);
     }
 
+    // A launched app has no builder to go back to.
     exitPreview() {
-        if (this.view === PREVIEW) this.showView(this.editView);
+        if (this.view === PREVIEW && !this.launched) this.showView(this.editView);
     }
 
     // What's selected on the canvas: { kind: 'element', id }, { kind: 'rule', id },
@@ -494,7 +606,8 @@ export class Apps {
     flush() {
         clearTimeout(this.saveTimer);
         this.saveTimer = null;
-        if (!this.app) return Promise.resolve();
+        // An app a link carried is yours only once it's added (keepLaunched).
+        if (!this.app || !this.list.includes(this.app)) return Promise.resolve();
         return store.saveApp(structuredClone(this.app)).catch(error => this.status(`Couldn't save ${this.app?.name}: ${error.message}`, { error: true }));
     }
 
@@ -749,6 +862,11 @@ export class Apps {
         return server ? serverLabel(server, url) : app?.serverNames?.[url] || demoServerAt(url)?.name || url;
     }
 
+    // The names of the servers an app calls, which its DML keeps for whoever adds them next.
+    serverNamesOf(app = this.app) {
+        return Object.fromEntries(serversOf(app).map(url => [url, this.serverName(url, app)]).filter(([url, name]) => name !== url));
+    }
+
     // Each download is a version: the first is 1, and one after any change is the next number.
     async download({ standalone = false } = {}) {
         const app = this.app;
@@ -759,7 +877,7 @@ export class Apps {
             this.emit('app', { part: 'version' });
         }
         await this.flush();
-        const serverNames = Object.fromEntries(serversOf(app).map(url => [url, this.serverName(url)]).filter(([url, name]) => name !== url));
+        const serverNames = this.serverNamesOf(app);
         const base = `${slug(app.name)}-v${app.version}`;
         if (standalone) {
             download(`${base}.dml`, toDml(app, { standalone: true, serverNames }), 'application/xml');

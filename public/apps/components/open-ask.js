@@ -7,13 +7,13 @@ import { openRules, PREVIEW } from '../apps.js';
 import { AppElement } from './base.js';
 
 // The question, for the builder's bar and a launched app's (preview.js).
-export function openAskHtml(apps) {
+export function openAskHtml(apps, { kept = 'The answer is kept for this app; Start, on the canvas, changes it.' } = {}) {
     const app = apps.app;
     return `
-        <p class="app-open-ask-text"><strong>${escapeHtml(app.name || 'This app')} calls ${escapeHtml(apps.openCallsText())} as it opens.</strong> Run that each time you open it? <span class="text-secondary">The answer is kept for this app; Start, on the canvas, changes it.</span></p>
+        <p class="app-open-ask-text"><strong>${escapeHtml(app.name || 'This app')} calls ${escapeHtml(apps.openCallsText())} as it opens.</strong> Run that each time you open it? <span class="text-secondary">${escapeHtml(kept)}</span></p>
         <div class="app-open-ask-actions">
             <button type="button" class="btn-sm btn-primary" data-answer-run-on-open="yes" title="Runs it now, and each time this app opens">Run it each time</button>
-            <button type="button" class="btn-sm" data-answer-run-on-open="no" title="Opening the app runs nothing until you choose Restart">Don't run it</button>
+            <button type="button" class="btn-sm btn-outline" data-answer-run-on-open="no" title="Opening the app runs nothing until you choose Restart">Don't run it</button>
         </div>`;
 }
 

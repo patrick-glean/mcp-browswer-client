@@ -1,6 +1,7 @@
-// The top of the app builder: the app's name and description, Canvas or Outline, Preview, which
-// version it's at, Download (a zip of the flow's DML, the screen's HTML and a README, or the DML
-// alone), and ⋯ with Duplicate and Delete.
+// The top of the app builder: the app's name and description, Canvas or Outline, Preview, Launch
+// (the app on its own in a new tab), which version it's at, Download (a zip of the flow's DML, the
+// screen's HTML and a README, or the DML alone), and ⋯ with a link that runs it, Duplicate and
+// Delete.
 
 import { confirmThen, escapeHtml, timeAgo } from '../../workbench/util.js';
 import { PREVIEW, VIEWS } from '../apps.js';
@@ -33,9 +34,11 @@ export class AppHeader extends AppElement {
             if (button.id === 'deleteAppBtn') return confirmThen(button, () => this.apps.remove());
             if (button.dataset.appViewChoice) return this.apps.showView(button.dataset.appViewChoice);
             if (button.id === 'previewAppBtn') return this.apps.preview();
+            if (button.id === 'launchAppBtn') return this.apps.launchInTab();
             button.closest('details.menu')?.removeAttribute('open');
             if (button.id === 'downloadAppBtn') this.apps.download();
             if (button.id === 'downloadDmlBtn') this.apps.download({ standalone: true });
+            if (button.id === 'copyAppLinkBtn') this.apps.copyLink();
             if (button.id === 'duplicateAppBtn') this.apps.duplicate();
         }, { signal });
     }
@@ -56,6 +59,7 @@ export class AppHeader extends AppElement {
                     ${Object.entries(VIEWS).map(([view, label]) => `<button type="button" class="wb-chip" data-app-view-choice="${view}" aria-pressed="${this.apps.view === view}" title="${view === 'canvas' ? 'The screen running, wired to its tools' : 'The screen and the flow as cards, with the app beside them'}">${label}</button>`).join('')}
                 </div>
                 <button type="button" id="previewAppBtn" class="btn-sm" title="The app as it is when it's launched: it fills the window and starts from the beginning. Escape ends it."><span class="icon icon-eye" aria-hidden="true"></span>Preview</button>
+                <button type="button" id="launchAppBtn" class="btn-sm" title="The app on its own, running in a new tab as people will use it, at an address you can bookmark"><span class="icon icon-external-link" aria-hidden="true"></span>Launch</button>
                 <span class="app-version text-secondary" id="appVersion" aria-live="polite"></span>
                 <div class="split-button">
                     <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with app.dml (the flow, as markup), index.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
@@ -67,8 +71,9 @@ export class AppHeader extends AppElement {
                     </details>
                 </div>
                 <details class="menu app-menu app-more-menu">
-                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="More for this app" title="Duplicate or delete this app"><span class="wb-more" aria-hidden="true">⋯</span></summary>
+                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="More for this app" title="A link that runs it, Duplicate and Delete"><span class="wb-more" aria-hidden="true">⋯</span></summary>
                     <div class="menu-list" role="menu">
+                        <button type="button" class="menu-item" role="menuitem" id="copyAppLinkBtn" title="The app as it is now, in a link: whoever opens it runs it, in their browser and on their own servers">Copy a link that runs it</button>
                         <button type="button" class="menu-item" role="menuitem" id="duplicateAppBtn">Duplicate</button>
                         <button type="button" class="menu-item" role="menuitem" id="deleteAppBtn">Delete this app</button>
                     </div>

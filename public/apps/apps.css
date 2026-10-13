@@ -281,6 +281,50 @@ app-preview[hidden] {
     padding: 20px;
 }
 
+/* A launched app's notes: what it needs first, and where it came from. */
+.app-launch-notes {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+    font-size: 0.8125rem;
+}
+
+.app-launch-notes[hidden] {
+    display: none;
+}
+
+.app-launch-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    margin: 0;
+}
+
+/* ---------- An app launched on its own (index.html?app= or #run=): the app, and nothing else ---------- */
+
+body.launched .wb-topbar,
+body.launched #workbench,
+body.launched wb-dock,
+body.launched .guide-drawer,
+body.launched #appsPage > apps-rail,
+body.launched #appsPage > apps-splitter,
+body.launched #appBuilder > :not(app-preview) {
+    display: none;
+}
+
+body.launched .wb-app {
+    grid-template-rows: minmax(0, 1fr);
+}
+
+body.launched .wb-apps {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 /* The app gets the device's whole width, and the border sits outside it. */
 .app-preview-stage:is([data-device='phone'], [data-device='tablet']) .app-preview-frame {
     box-sizing: content-box;

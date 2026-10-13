@@ -24,6 +24,7 @@ export class AppsRail extends AppElement {
             button.closest('details.menu')?.removeAttribute('open');
             if (button.dataset.showApp) this.apps.show(button.dataset.showApp);
             if (button.dataset.example) this.apps.offerExample(button.dataset.example);
+            if (button.dataset.launchApp) this.apps.launchInTab(button.dataset.launchApp);
             if (button.dataset.duplicateApp) this.apps.duplicate(button.dataset.duplicateApp);
             if (button.id === 'newAppBtn') this.apps.create();
             if (button.id === 'importAppBtn') this.$('#importAppInput').click();
@@ -67,8 +68,8 @@ export class AppsRail extends AppElement {
             </section>`;
     }
 
-    // One of your apps, with its own menu: Duplicate and Delete. The shown app's ⋯ is always
-    // there; the others' show when pointed at or focused.
+    // One of your apps, with its own menu: Launch, Duplicate and Delete. The shown app's ⋯ is
+    // always there; the others' show when pointed at or focused.
     appRow(app, current) {
         const name = app.name || 'Untitled app';
         const id = escapeHtml(app.id);
@@ -79,8 +80,9 @@ export class AppsRail extends AppElement {
                     ${app.version ? `<span class="wb-meta">v${app.version}</span>` : ''}
                 </button>
                 <details class="menu item-menu apps-row-menu">
-                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="${escapeHtml(`More for ${name}`)}" title="Duplicate or delete it"><span class="wb-more" aria-hidden="true">⋯</span></summary>
+                    <summary class="btn-icon btn-sm btn-tertiary" aria-label="${escapeHtml(`More for ${name}`)}" title="Launch, duplicate or delete it"><span class="wb-more" aria-hidden="true">⋯</span></summary>
                     <div class="menu-list" role="menu">
+                        <button type="button" class="menu-item" role="menuitem" data-launch-app="${id}" title="The app on its own, in a new tab, at an address you can bookmark">Launch in a new tab</button>
                         <button type="button" class="menu-item" role="menuitem" data-duplicate-app="${id}">Duplicate</button>
                         <button type="button" class="menu-item" role="menuitem" data-delete-app="${id}">Delete</button>
                     </div>
@@ -90,10 +92,13 @@ export class AppsRail extends AppElement {
 }
 
 // What the Apps page shows when there's no app to show: the examples, and a blank app, to start
-// from, and the model the examples call.
+// from, and the model the examples call; or, launched, why the app can't run.
 export class AppsStart extends AppElement {
     setup(signal) {
         this.signal = signal;
+        this.apps.on('shown', () => {
+            if (this.apps.launched) this.render();
+        }, signal);
         this.apps.on('model', () => this.picker?.render(), signal);
         this.shell.on('tools', () => this.picker?.refresh(), signal);
         this.shell.on('servers', () => this.picker?.refresh(), signal);
@@ -104,6 +109,17 @@ export class AppsStart extends AppElement {
     }
 
     render() {
+        const problem = this.apps.launched?.problem;
+        if (problem) {
+            this.picker = null;
+            this.innerHTML = `
+                <header class="wb-apps-head">
+                    <h2>This app can't run</h2>
+                    <p class="text-secondary">${escapeHtml(problem)}</p>
+                </header>
+                <p><a href="./">Open MCP Browser Client</a></p>`;
+            return;
+        }
         this.innerHTML = `
             <header class="wb-apps-head">
                 <h2>Start an app</h2>
