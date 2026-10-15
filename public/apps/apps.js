@@ -445,7 +445,7 @@ Serve this folder and open its address. In the folder, run one of
 
 and open the address it prints. Any static host serves it as it is, too: GitHub Pages, Netlify, an S3 bucket. The app runs in your browser, which calls its servers for it, with your sign-ins.
 
-Opened as a file, from a double-click, it won't run: browsers start its service worker, which makes the app's calls and keeps sign-ins and runs, only at a web address. The page says so then, with a link that runs ${app.version ? `version ${app.version}` : 'this version'} in MCP Browser Client at ${root}, where it was downloaded from.
+Opened as a file, from a double-click, it won't run: browsers start its service worker, which makes the app's calls and keeps sign-ins and runs, only at a web address. The page says so then, with a link that runs ${app.version ? `version ${app.version}` : 'this version'} in MCP Browser Client at ${root}. For a page that runs it from a double-click, Share in the builder has embed.html.
 
 It runs \`app.dml\` as it is in the folder, so a change to it shows on the next reload. \`?builder\` after the folder's address opens the builder, to change the app there and download it again; or import this zip in MCP Browser Client (Apps, then Import).
 

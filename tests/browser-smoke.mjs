@@ -1001,7 +1001,7 @@ async function main() {
                     && /<input id="question"/.test(zippedText('screen.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
                     && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`')
                     && zippedText('README.md').includes('## Run it\n\nServe this folder and open its address.')
-                    && zippedText('README.md').includes(`a link that runs version 1 in MCP Browser Client at ${HOST}:${PORTS.app}/, where it was downloaded from.`),
+                    && zippedText('README.md').includes(`a link that runs version 1 in MCP Browser Client at ${HOST}:${PORTS.app}/. For a page that runs it from a double-click, Share in the builder has embed.html.`),
                 `${zipName}: ${zippedNames.length} files, ${zippedNames.slice(0, 3).join(', ')}…${leftOut.length ? `; without ${leftOut.join(', ')}` : ''}; ${named ? named[2] : 'no <meta> naming the app'}${fromZip.error ? `; ${fromZip.error}` : ''}`);
 
             // Served, the folder runs its app.dml. At its own address the client has none of this
