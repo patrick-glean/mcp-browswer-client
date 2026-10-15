@@ -35,7 +35,7 @@ const HOST = 'http://127.0.0.1';
 const PORTS = {
     app: 18080, modern: 18081, sse: 18082, legacy: 18083, legacySse: 18084, dual: 18085, reference: 18086,
     strictLegacy: 18087, token: 18088, strictModern: 18089, oauth: 18090, oauthWrongIss: 18091,
-    oauthNoExpiry: 18092,
+    oauthNoExpiry: 18092, template: 18093,
     // Chosen per run (see freePort), so a Chrome from an earlier run that's still exiting
     // can't answer for this one.
     devtools: null,
@@ -475,6 +475,7 @@ async function main() {
     mock('oauth', PORTS.oauth, '--mode', 'modern', '--oauth', '--hide-www-authenticate', '--token-ttl', '62');
     mock('oauth+wrong iss', PORTS.oauthWrongIss, '--mode', 'modern', '--oauth', '--oauth-wrong-iss');
     mock('oauth+no expires_in', PORTS.oauthNoExpiry, '--mode', 'modern', '--oauth', '--token-ttl', '2', '--omit-expires-in');
+    mock('server template', PORTS.template, '--mode', 'modern', '--replies', 'public/server-template/example.json');
     if (WITH_REFERENCE) {
         start('reference', referencePython, ['tests/reference_server.py', '--port', String(PORTS.reference)]);
     }
@@ -658,7 +659,7 @@ async function main() {
             const schemas = [...document.querySelectorAll('#requestPane .tool-schema summary')].map(s => s.textContent).join(', ');
             const hidden = document.getElementById('hiddenTools');
             document.getElementById('serverInfoBtn').click();
-            const connection = document.getElementById('serverConnection')?.innerText.replace(/\\s+/g, ' ') || '';
+            const connection = ['serverAbout', 'serverConnection'].map(id => document.getElementById(id)?.innerText || '').join(' ').replace(/\\s+/g, ' ');
             document.querySelector('wb-sheet [data-close-sheet]').click();
             return {
                 echo, count: countBadges, schemas, hints, writes, connection,
@@ -675,7 +676,8 @@ async function main() {
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
         check('inspector: Info shows what the server said about itself',
-            /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities prompts resources tools/.test(inspector.connection), inspector.connection);
+            /Name Mock MCP Server Version 2\.0\.0/.test(inspector.connection) && /Capabilities prompts resources tools/.test(inspector.connection)
+                && /Status Connected Protocol 2026-07-28 \(modern\)/.test(inspector.connection), inspector.connection);
         // The mock has too few tools to be grouped, so the grouping is checked on GitHub's names.
         const groups = await page.run(`import('./workbench/components/tools.js').then(({ groupTools }) => {
             const names = ['get_me', 'list_issues', 'get_issue', 'create_issue', 'add_issue_comment', 'list_pull_requests', 'get_pull_request',
@@ -766,6 +768,180 @@ async function main() {
         const toolsBack = await page.run(`['requestPane', 'responsePane'].every(id => !document.getElementById(id).hidden)
             && ['resourcePane', 'promptPane', 'contentsPane'].every(id => document.getElementById(id).hidden)`);
         check('resources and prompts: back on Tools, the tool panes return', toolsBack);
+
+        // The server template's replies, served by the mock: each field shows where
+        // public/server-template/README.md says it does.
+        const templateUrl = `${HOST}:${PORTS.template}/`;
+        const helpdesk = await addAndConnect(page, templateUrl, '');
+        const helpdeskTools = await toolNames(page, templateUrl);
+        const helpdeskLabel = await page.run(`${serverRow(templateUrl)}.querySelector('.wb-row-label').textContent`);
+        check('server template: connects, and without a name of the person\'s the rail shows its serverInfo.title',
+            helpdesk?.status === 'connected' && helpdesk.name === 'example-helpdesk' && helpdeskTools.length === 6 && helpdeskLabel === 'Example Helpdesk',
+            `${helpdeskLabel} (${helpdesk?.name}): ${helpdeskTools.join(', ')}`);
+        const shownHelpdesk = await page.run(`(() => {
+            ${serverRow(templateUrl)}.click();
+            const detail = document.querySelector('wb-server-bar [data-detail]').textContent;
+            document.getElementById('serverInfoBtn').click();
+            const info = document.getElementById('serverAbout').innerText.replace(/\\s+/g, ' ').trim();
+            const website = document.querySelector('#serverAbout a')?.href || '';
+            const instructions = document.querySelector('wb-sheet .instructions p')?.textContent || '';
+            const icons = [...document.querySelectorAll('#serverAbout .wb-icon')].map(icon => icon.querySelector('img') ? 'drawn' : 'skipped').join(' ');
+            const headerIcon = document.querySelector('wb-sheet [data-icon]');
+            const iconInHeader = !headerIcon.hidden && headerIcon.src.startsWith('data:image/svg+xml');
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            const hints = [...document.querySelectorAll('#toolList .wb-tool')]
+                .map(row => row.dataset.tool + ' ' + [...row.querySelectorAll('.hint')].map(hint => hint.textContent).join(' ')).join('; ');
+            const pane = document.getElementById('requestPane');
+            const heading = () => [pane.querySelector('.wb-request-title').textContent, ...[...pane.querySelectorAll('.badge')].map(b => b.textContent)].join(', ');
+            ${toolRow('search_tickets')}.click();
+            const search = heading();
+            const query = document.querySelector('#requestForm [name="query"]').value;
+            const folded = document.querySelector('#requestForm .wb-optional summary')?.textContent || '';
+            ${toolRow('delete_ticket')}.click();
+            return { detail, info, website, instructions, icons, iconInHeader, hints, search, query, folded, remove: heading() };
+        })()`);
+        check('server template: the server bar and Info show everything it says about itself',
+            shownHelpdesk.detail.endsWith('example-helpdesk 1.4.0')
+                && shownHelpdesk.info.startsWith('Title Example Helpdesk Name example-helpdesk Version 1.4.0 Description Search, read and update')
+                && /Capabilities prompts resources tools$/.test(shownHelpdesk.info)
+                && shownHelpdesk.website === 'https://helpdesk.example.com/docs/mcp' && shownHelpdesk.instructions.includes('\n- To find a ticket, use search_tickets'),
+            `${shownHelpdesk.detail} | ${shownHelpdesk.info.slice(0, 300)}`);
+        check('server template: Info draws its data: icons, one in its header, and says why it skips an icon on another origin',
+            shownHelpdesk.icons === 'drawn drawn skipped' && shownHelpdesk.iconInHeader && /Not shown: it's not on the server's origin, http:\/\/127\.0\.0\.1:18093/.test(shownHelpdesk.info),
+            `${shownHelpdesk.icons}; header icon: ${shownHelpdesk.iconInHeader}`);
+        check('server template: each tool\'s annotations mark its row',
+            shownHelpdesk.hints === 'search_tickets ro; get_ticket ro; update_ticket writes; delete_ticket del; ticket_volume_chart ro; fetch_help_article ro web', shownHelpdesk.hints);
+        check('server template: a tool shows its title and badges, and Pre-fill fills its required field from its examples',
+            shownHelpdesk.search === 'Search tickets, read-only, idempotent, structured output' && shownHelpdesk.remove === 'Delete a ticket, destructive, idempotent'
+                && shownHelpdesk.query === 'printer offline' && shownHelpdesk.folded.startsWith('6 optional fields'),
+            `${shownHelpdesk.search}; ${shownHelpdesk.remove}; query: ${shownHelpdesk.query}; ${shownHelpdesk.folded}`);
+        const found = await callTool(page, templateUrl, 'search_tickets', {});
+        check('server template: a result shows its JSON, its links and its structured content, which matches the output schema',
+            /^OK/.test(found || '') && /"id": "T-1042"/.test(found || '') && /link T-1042: Printer on floor 3 shows offline open, high priority/.test(found || '') && /Structured content/.test(found || ''),
+            found?.slice(0, 200));
+        await callTool(page, templateUrl, 'ticket_volume_chart', {});
+        const chart = await page.waitFor(`(() => {
+            const image = document.querySelector('#responsePane img.wb-content-image');
+            return image?.complete && image.naturalWidth ? image.naturalWidth + 'x' + image.naturalHeight + ' ' + document.querySelector('#responsePane .wb-content-text')?.textContent : null;
+        })()`, 5000);
+        check('server template: an image result shows as an image', /^160x80 Last 30 days: 214 new tickets/.test(chart || ''), chart);
+        await page.waitFor(`!document.querySelector('wb-tools [data-view="resources"]').disabled && !document.querySelector('wb-tools [data-view="prompts"]').disabled`, 5000);
+        await showView('resources');
+        const helpdeskResources = await page.waitFor(`(() => {
+            const labels = [...document.querySelectorAll('#toolList .wb-pick .wb-row-label')].map(label => label.textContent);
+            return labels.length === 4 ? labels.join(', ') : null;
+        })()`, 5000);
+        const schemaRead = await readItem('resource', 'helpdesk://schemas/ticket');
+        const indented = await page.run(`document.querySelector('#contentsPane .wb-content-json')?.textContent.startsWith('{\\n  "$schema"')`);
+        check('server template: resources are listed by title, and JSON reads are indented',
+            helpdeskResources === 'Getting started, Ticket schema, Ticket volume, last 30 days, Ticket by ID' && /application\/schema\+json/.test(schemaRead || '') && indented,
+            `${helpdeskResources}; ${schemaRead?.slice(0, 100)}`);
+        await showView('prompts');
+        const ticketSummary = await getPrompt('summarize_ticket');
+        const promptId = await page.run(`document.querySelector('#promptForm [name="id"]').value`);
+        check('server template: a prompt\'s argument is filled from its description, and its messages come back',
+            promptId === 'T-1042' && /A summary of T-1042 for the support team/.test(ticketSummary || '') && /helpdesk:\/\/tickets\/T-1042/.test(ticketSummary || ''),
+            `id: ${promptId}; ${ticketSummary?.slice(0, 160)}`);
+        await page.run(`${serverRow(modernUrl)}.click()`);
+        await showView('tools');
+
+        // What this client tells servers about itself: its name and version, plus only the fields
+        // of Settings' description a server's Info ticks. The trace has what each request carried.
+        const lastSent = (url, method) => `(() => {
+            const sent = ${entries}.filter(e => e.source === ${JSON.stringify(CLIENT.logSource)} && e.level === 'debug' && e.server === ${JSON.stringify(url)} && e.message.startsWith('→ ${method}'));
+            const params = sent.at(-1)?.detail?.body?.params;
+            const info = params?._meta?.['io.modelcontextprotocol/clientInfo'] ?? params?.clientInfo;
+            return info ? JSON.stringify(info) : null;
+        })()`;
+        // Connects again and waits for the request that introduces the client to differ from `before`.
+        const reconnectAndRead = async (url, method, before) => {
+            await page.run(`appShell.connectMcpServer(${JSON.stringify(url)})`);
+            await page.waitFor(`${lastSent(url, method)} !== ${JSON.stringify(before)} && appShell.servers[${JSON.stringify(url)}].status === 'connected'`, 10000);
+            return page.run(lastSent(url, method));
+        };
+        const ofInfo = text => (text ? JSON.parse(text) : {});
+        const bareInfo = ofInfo(await reconnectAndRead(modernUrl, 'server/discover', 'none yet'));
+        check('client description: a server gets only the client\'s name and version until its Info ticks more',
+            JSON.stringify(Object.keys(bareInfo).sort()) === '["name","version"]' && bareInfo.name === 'mcp-browser-client', JSON.stringify(bareInfo));
+        const settings = await page.run(`(() => {
+            document.getElementById('settingsBtn').click();
+            const title = document.querySelector('wb-sheet [data-description-field="title"]');
+            const shown = title.value;
+            title.value = 'Smoke Test Client';
+            title.dispatchEvent(new Event('input', { bubbles: true }));
+            return shown;
+        })()`);
+        await page.waitFor(`appShell.clientDescription.title === 'Smoke Test Client'`, 5000);
+        const bareSent = await page.run(lastSent(modernUrl, 'server/discover'));
+        await page.run(`(() => {
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            ${serverRow(modernUrl)}.click();
+            document.getElementById('serverInfoBtn').click();
+            const boxes = ['title', 'description'].map(field => document.querySelector('#clientInfoSection [data-client-field="' + field + '"]'));
+            boxes.forEach(box => { box.checked = true; });
+            boxes[1].dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await page.waitFor(`${lastSent(modernUrl, 'server/discover')} !== ${JSON.stringify(bareSent)} && appShell.servers[${JSON.stringify(modernUrl)}].status === 'connected'`, 10000);
+        const richInfo = ofInfo(await page.run(lastSent(modernUrl, 'server/discover')));
+        const toldInInfo = await page.waitFor(`document.querySelector('#clientInfoSection pre')?.textContent.includes('Smoke Test Client') || null`, 5000);
+        check('client description: Settings has the client\'s description, and a server whose Info ticks fields connects again with them',
+            settings === 'MCP Browser Client' && richInfo.title === 'Smoke Test Client' && /^A browser-based MCP client/.test(richInfo.description || '')
+                && !('websiteUrl' in richInfo) && !('icons' in richInfo) && !!toldInInfo,
+            `${settings} → ${JSON.stringify(richInfo).slice(0, 160)}`);
+        await page.run(`(() => {
+            document.getElementById('settingsBtn').click();
+            const title = document.querySelector('wb-sheet [data-description-field="title"]');
+            title.value = 'Smoke Test Client, renamed';
+            title.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await page.waitFor(`${lastSent(modernUrl, 'server/discover')}?.includes('Smoke Test Client, renamed') && appShell.servers[${JSON.stringify(modernUrl)}].status === 'connected'`, 10000);
+        const renamed = ofInfo(await page.run(lastSent(modernUrl, 'server/discover')));
+        check('client description: changing a field a server gets connects it again with the new value', renamed.title === 'Smoke Test Client, renamed', renamed.title);
+        const legacyUrl = `${HOST}:${PORTS.legacy}/`;
+        const legacyBefore = await page.run(lastSent(legacyUrl, 'initialize'));
+        await page.run(`(() => {
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            ${serverRow(legacyUrl)}.click();
+            document.getElementById('serverInfoBtn').click();
+            const box = document.querySelector('#clientInfoSection [data-client-field="websiteUrl"]');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+        })()`);
+        await page.waitFor(`${lastSent(legacyUrl, 'initialize')} !== ${JSON.stringify(legacyBefore)} && appShell.servers[${JSON.stringify(legacyUrl)}].status === 'connected'`, 10000);
+        const legacyInfo = ofInfo(await page.run(lastSent(legacyUrl, 'initialize')));
+        const dualInfo = ofInfo(await reconnectAndRead(`${HOST}:${PORTS.dual}/`, 'server/discover', 'none yet'));
+        check('client description: the 2025 handshake carries the ticked fields too, and other servers stay bare',
+            legacyInfo.websiteUrl === 'https://patrick-glean.github.io/mcp-browswer-client/' && !('title' in legacyInfo)
+                && JSON.stringify(Object.keys(dualInfo).sort()) === '["name","version"]',
+            `legacy ${JSON.stringify(legacyInfo)}; dual ${JSON.stringify(dualInfo)}`);
+        await page.run(`${serverRow(modernUrl)}.click()`);
+
+        // The server guide on the site: the Guide links to it, and it renders README.md, the
+        // same Markdown GitHub shows, with contents and a viewer for the files it links to.
+        const guideSections = readFileSync(join(ROOT, 'public/server-template/README.md'), 'utf8').split('\n').filter(line => line.startsWith('## ')).length;
+        await page.send('Runtime.evaluate', { expression: `window.open(document.getElementById('serverGuideLink').href)`, userGesture: true });
+        const serverGuide = await openPage(t => t.url.endsWith('/server-template/'));
+        const rendered = await serverGuide.waitFor(`document.getElementById('guide')?.dataset.rendered === 'true' && {
+            title: document.title,
+            sections: document.querySelectorAll('#guide h2').length,
+            tables: document.querySelectorAll('#guide table').length,
+            contents: document.querySelectorAll('#contents a').length,
+        }`, 10000);
+        await serverGuide.run(`document.querySelector('[data-show-file="example.json"]').click()`);
+        const viewed = await serverGuide.waitFor(`(() => {
+            const text = document.querySelector('#viewer:not([hidden]) pre code')?.textContent || '';
+            try { return JSON.parse(text)['server/discover'] ? text.length : null; } catch { return null; }
+        })()`, 5000);
+        check('server guide: the Guide links to its page, which renders README.md with contents and shows example.json',
+            rendered?.title === 'Describing your MCP server · MCP Browser Client' && rendered.sections === guideSections && rendered.tables >= 6
+                && rendered.contents >= guideSections && !!viewed,
+            `${JSON.stringify(rendered)}; example.json ${viewed} chars`);
+        serverGuide.close();
+        // Closing the guide's tab doesn't hand the foreground back, and the checks after this
+        // need the app's tab visible.
+        await page.send('Page.bringToFront');
+        await page.waitFor(`document.visibilityState === 'visible'`, 5000);
 
         // Splitters, at a width where request and response sit side by side.
         await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });

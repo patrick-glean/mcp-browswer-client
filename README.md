@@ -11,7 +11,7 @@ Everything runs in a web page and a service worker that every open tab shares. T
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
 - **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and apps live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
 
-It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions.
+It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions. It works best with servers that describe themselves well, since what a server says about itself is what people and models see. If you're building one, see [Describing your server](#describing-your-server).
 
 ## Try it
 
@@ -286,10 +286,11 @@ Everything stays in this browser, in IndexedDB (`mcp_sandbox`, its name from whe
 
 The Workbench doubles as an inspector, in the spirit of the MCP Inspector but without installing anything:
 
-- **Connection**: the server bar shows the status, the protocol and era, and the server's name and version. Info opens a side sheet with the capabilities it declared, how you're authenticated, the server's instructions and its address.
+- **Connection**: the server bar shows the status, the protocol and era, and the server's own name and version. Info opens a side sheet with everything the server said about itself: its title, name, version, description, website, icons, capabilities and instructions, and all of it as JSON. Then the connection, how you're authenticated and the server's address. A server is listed under the name you give it in Info, else the title it gives itself, else its name.
 - **Tools**: the count, a filter on name, title and description (`/` jumps to it), and filters for what the annotations say: Read-only, Writes (anything that doesn't say it only reads) and Reaches out (open world). Each row marks the tool `ro`, `writes`, `del` or `?` (no read-only hint, so assume it may write), plus `web` and `app` (MCP Apps UI). Servers with many tools are grouped by what their tools work on (`issue`, `pull request`, `search`). Annotations are hints from the server, not guarantees.
 - **Tool details**: the request pane shows the tool's title and badges and the argument form; Schema has the input schema, output schema and raw definition.
 - **Hidden tools**: tools the client won't call, listed after the others with the reason.
+- **What this client tells the server**: every server gets only the client's name and version. Settings, the gear in the top bar, holds a richer description: a title, description, website and icon. Tick the fields a server should also get under "What this client tells it" in its Info, and it connects again with them. Info then shows what the client told it.
 - **Download the server report**, in the server bar's ⋯ menu or under Info, saves the server's details and full tool list as JSON.
 
 ### Resources and prompts
@@ -301,6 +302,21 @@ When a server declares resources or prompts, the client lists them as soon as it
 - **Errors**: a resource the server doesn't have, or a prompt missing an argument, shows the server's error. If a list can't be fetched, its tab says why, and the tools keep working.
 
 Each tab keeps what its last read or get returned, with a JSON tab for the raw result. Reads and gets aren't tool calls, so they don't go into the run history.
+
+## Describing your server
+
+This client is only as good as what servers say about themselves. MCP has a field for most of it, and the client shows each one somewhere:
+
+- **People see** the server's name, title, version, website and instructions in the server bar and Info; each tool's title, description and annotations in the tool list and the request pane; and the form each input schema makes, with each property's description.
+- **Pre-fill** makes its test data from input schemas: their defaults, examples, enums, formats and ranges.
+- **Results show by content type**: JSON text indented, images and audio drawn, links with their titles, structured content beside them.
+- **The Chat app's model** is told every server's instructions and every tool's definition, and chooses tools from their names and descriptions alone.
+
+A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do: its name and version, plus whichever fields of its description in Settings the person chose for that server. See [what the client tells your server](public/server-template/README.md#what-the-client-tells-your-server).
+
+[`public/server-template/`](public/server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](public/server-template/example.json), the replies of a well-described server to copy. The site has the same guide as a page, [Describing your server](https://patrick-glean.github.io/mcp-browswer-client/server-template/), rendered from that README so the two never differ; the in-app Guide links to it. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies public/server-template/example.json`, and add `http://127.0.0.1:8081`.
+
+[`examples/`](public/server-template/README.md#the-same-server-on-the-official-sdks) has that server written on the official Go, TypeScript, Python, Rust, Java and C# SDKs, with what each SDK needs to describe a server well. `npm run test:examples` runs each one whose toolchain is installed and checks that it describes itself as `example.json` does.
 
 ## MCP Support
 
@@ -403,11 +419,12 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`), then the list of the client's files that an app's download ships (`npm run build:files`, `public/client-files.json`), which `npm run test:unit` checks is up to date
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
-- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, and the app builder's DML, zips, links and flow
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, that the server template is valid MCP and follows its guide, and the app builder's DML, zips, links and flow
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
 - `npm run bench`: Load-test tool calls on every library against the mock server and an in-memory one, plus a cold start and calls through the whole app (`-- --quick` for a fast pass)
+- `npm run test:examples`: Run each SDK example in `public/server-template/examples/` whose toolchain is installed (Go, Node, the venv's Python, Cargo, Maven, .NET) and check it against `example.json` (name some to run only those: `-- go python`)
 
 ### Changing a library
 
@@ -501,6 +518,12 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   ├── diff.js        # The line diff behind Changes
 │   │   └── util.js        # Small shared helpers (escaping, badges, time)
 │   ├── bench/             # The tool-call benchmark, with its own service worker and an in-memory server
+│   ├── server-template/   # For people building servers: where the client shows each field a server sends
+│   │   ├── README.md      # The guide: each descriptive field, where the client shows it and what to put in it
+│   │   ├── example.json   # A well-described server's replies, by method (test_mcp_server.py --replies serves them)
+│   │   ├── index.html     # The guide as a page of the site, rendered from README.md (guide.js, guide.css)
+│   │   ├── markdown.js    # The Markdown renderer behind it
+│   │   └── examples/      # The same server on the official Go, TypeScript, Python, Rust, Java and C# SDKs
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── client-files.json  # The client's own files, which an app's download ships (npm run build:files)
 │   ├── serve.json         # Keeps npx serve from rewriting the folder's addresses (clean URLs off)
@@ -515,6 +538,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   ├── demo-servers.test.mjs # The demo servers built in: both protocol eras, their tools, the demo model
 │   ├── workbench.test.mjs # What opening a run from history fills in: as written, or as an app sent it
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
+│   ├── examples.mjs       # Runs each SDK example and checks it against example.json
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
 ├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS
 ├── DEVELOPMENT.md         # The library interface, the worker's messages, apps and the agent loop, logging
@@ -570,6 +594,7 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 | `--allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"` | Uses a CORS policy written before 2026-07-28. With `--mode legacy` the client still connects; with `--mode modern` it explains which headers to allow |
 | `--allow-origin https://example.github.io` | Accepts requests from another page origin (repeatable) |
 | `--keep-alive` | Speaks HTTP/1.1 and keeps connections open between requests, as most servers do, instead of a connection per request (the benchmark uses it) |
+| `--replies public/server-template/example.json` | Answers with the replies in a file, keyed by method, instead of its own tools, resources and prompts: the [server template](public/server-template/README.md)'s, or your own server's, to see how the client shows them |
 | `--verbose` | Prints every request's headers and body |
 
 `--port` and `--host` change where it listens. Every request is printed with its result, such as `POST tools/call (modern) -> 200`.
@@ -622,13 +647,14 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
-npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, the app builder's DML, zips, links, flow, screens, examples and agent loop, and the demo servers built in
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, the server template, the app builder's DML, zips, links, flow, screens, examples and agent loop, and the demo servers built in
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
+npm run test:examples                # the server template on each official SDK, against example.json
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the apps' calls and their models' tool calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Apps page with no app (the examples, and the model found among your servers, chosen and back); the Chat example (the message in the conversation as it's sent, the field cleared, the answer after, the conversation sent as a list with the instructions and the tools, a tool call in the answer run as a reply with its result in the conversation, the limit of three in 10 seconds, and the tools without tokens), and that the Chat app's old settings and conversations are gone; Preview (the whole window, the app started again with nothing of the builder running, the bar saying what it did, a phone's width, and Escape on the app's screen and off it); building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); the canvas (wiring by dragging between ports, a drop that can't connect, Run with both tools answering, a transform picked from the last answer, Start calling a tool when the app opens, a dashboard part the stand-in model writes, wired to a tool, and the zip with the part and where each tool sits); dashboards (the Project pulse starter filled from one answer, the request its boxes add to the prompt, a box changed to a line chart, an HTML box sized in the request, a link opening in a new tab, and an answer that isn't JSON); screens (Front desk's tabs on the canvas, wires ending at another screen's tab, a button dragged to a tab and its menu, a screen added from the Library and deleted with what's on it, the Outline, and in Preview a check-in, Done starting over, a visit not found, Call the front desk, Try again going back and Not me); the demo servers built in (one connecting in the worker on each library, and Front desk running on its own, then moved to the mock server, which has the same tools, while servers without them say what's missing); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18093 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; the server template's replies, shown where its guide says; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info with everything a server says about itself and its icons, the report download); what each server is told about the client (its name and version, and only the fields of Settings its Info ticks); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the apps' calls and their models' tool calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Apps page with no app (the examples, and the model found among your servers, chosen and back); the Chat example (the message in the conversation as it's sent, the field cleared, the answer after, the conversation sent as a list with the instructions and the tools, a tool call in the answer run as a reply with its result in the conversation, the limit of three in 10 seconds, and the tools without tokens), and that the Chat app's old settings and conversations are gone; Preview (the whole window, the app started again with nothing of the builder running, the bar saying what it did, a phone's width, and Escape on the app's screen and off it); building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); the canvas (wiring by dragging between ports, a drop that can't connect, Run with both tools answering, a transform picked from the last answer, Start calling a tool when the app opens, a dashboard part the stand-in model writes, wired to a tool, and the zip with the part and where each tool sits); dashboards (the Project pulse starter filled from one answer, the request its boxes add to the prompt, a box changed to a line chart, an HTML box sized in the request, a link opening in a new tab, and an answer that isn't JSON); screens (Front desk's tabs on the canvas, wires ending at another screen's tab, a button dragged to a tab and its menu, a screen added from the Library and deleted with what's on it, the Outline, and in Preview a check-in, Done starting over, a visit not found, Call the front desk, Try again going back and Not me); the demo servers built in (one connecting in the worker on each library, and Front desk running on its own, then moved to the mock server, which has the same tools, while servers without them say what's missing); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide and the server guide it links to; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 

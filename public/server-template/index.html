@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Describing your MCP server · MCP Browser Client</title>
+    <meta name="description" content="Each descriptive field an MCP server sends, where MCP Browser Client shows it and what to put in it, with a well-described server's replies and the same server on the official SDKs.">
+    <script>
+        (function () {
+            var stored = localStorage.getItem('theme');
+            var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.classList.toggle('dark-theme', dark);
+        })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <link rel="preload" href="../fonts/Inter/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="../tokens.css">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="guide.css">
+</head>
+<body class="guide-page">
+    <header class="guide-topbar">
+        <a class="app-title" href="../" title="Open MCP Browser Client">
+            <span class="app-mark"><span class="icon icon-zap" aria-hidden="true"></span></span>
+            <h1>MCP Browser Client</h1>
+        </a>
+        <span class="guide-crumb" aria-hidden="true">›</span>
+        <span class="guide-crumb-page">Describing your server</span>
+        <span class="guide-spacer"></span>
+        <button type="button" class="btn-sm" data-show-file="example.json" title="A well-described server's replies, by method">example.json</button>
+        <a class="btn-sm btn-tertiary guide-link-button" href="https://github.com/patrick-glean/mcp-browswer-client/tree/main/public/server-template" target="_blank" rel="noopener noreferrer">On GitHub<span class="icon icon-external-link" aria-hidden="true"></span></a>
+        <a class="btn-sm btn-primary guide-link-button" href="../">Open the client</a>
+        <button type="button" id="themeToggle" class="btn-icon btn-sm btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
+            <span class="icon icon-theme" aria-hidden="true"></span>
+        </button>
+    </header>
+    <div class="guide-layout">
+        <nav id="contents" class="guide-contents" aria-label="On this page"></nav>
+        <main id="guide" class="guide-content" aria-live="polite">
+            <p class="text-secondary">Loading the guide…</p>
+        </main>
+    </div>
+    <aside id="viewer" class="guide-viewer" role="dialog" aria-labelledby="viewerPath" hidden>
+        <header class="guide-viewer-head">
+            <h2 id="viewerPath" class="mono" data-path></h2>
+            <span class="guide-spacer"></span>
+            <button type="button" class="btn-sm" data-copy-file><span class="icon icon-copy" aria-hidden="true"></span><span class="btn-label">Copy</span></button>
+            <a class="btn-sm btn-tertiary guide-link-button" data-raw download>Download</a>
+            <a class="btn-sm btn-tertiary guide-link-button" data-github target="_blank" rel="noopener noreferrer">GitHub<span class="icon icon-external-link" aria-hidden="true"></span></a>
+            <button type="button" class="btn-icon btn-sm btn-tertiary" data-close-viewer aria-label="Close"><span class="icon icon-x" aria-hidden="true"></span></button>
+        </header>
+        <pre class="guide-viewer-body"><code></code></pre>
+    </aside>
+    <script type="module" src="guide.js"></script>
+</body>
+</html>

@@ -1481,6 +1481,72 @@ wb-sheet {
     margin-bottom: 0;
 }
 
+.wb-server-icon {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+
+.wb-preline {
+    white-space: pre-line;
+}
+
+.wb-icons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wb-icon {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+.wb-icon img,
+.wb-icon-none {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-200);
+    object-fit: contain;
+}
+
+.wb-icon-none {
+    background: repeating-linear-gradient(45deg, transparent 0 6px, var(--theme-background-light) 6px 12px);
+}
+
+.wb-icon figcaption {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.wb-client-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wb-check {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.wb-check:has(input:disabled) {
+    cursor: default;
+}
+
+.wb-check span {
+    overflow-wrap: anywhere;
+}
+
 .wb-sheet-actions {
     align-items: center;
 }

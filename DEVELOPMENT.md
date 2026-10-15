@@ -39,7 +39,7 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 
 | Export | Returns |
 | --- | --- |
-| `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions}` |
+| `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions, clientInfo}` |
 | `list_tools(url, options)` | `{tools, rejected, ttlMs, cacheScope, fromCache}` |
 | `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
 | `list_resources(url, options)` | `{resources}`, every page |
@@ -56,7 +56,7 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 | `get_uptime()`, `increment_uptime()`, `get_metadata()` | the Runtime menu's health check |
 | `reset()` (optional) | nothing; drops every connection when the worker unloads the library |
 
-`options` is `{"bearerToken"?: string, "refresh"?: boolean}`. Every call connects on its own if needed, so it keeps working after the browser restarts the worker. Only the tool list is cached (for its `ttlMs`); resources, templates and prompts are fetched fresh each time, and `resources/read` and `prompts/get` send `Mcp-Name` (the URI or the prompt's name) on modern servers, as `tools/call` does. That's the whole interface: anything an app needs beyond MCP and sign-in, such as what a model is told about your tools, belongs to the page or the worker.
+`options` is `{"bearerToken"?: string, "refresh"?: boolean, "clientInfo"?: {title?, description?, websiteUrl?, icons?}}`. `clientInfo` adds those fields to how the library introduces the client, whose `name` (`mcp-browser-client`) and `version` are the library's own: in `_meta` on every 2026-07-28 request, and in the 2025 `initialize`. It's part of the connection, so a call with a different `clientInfo` connects again (the log says "Reconnecting: what this client tells the server about itself changed"), and `connect` returns the `clientInfo` it sent. Every call connects on its own if needed, so it keeps working after the browser restarts the worker. Only the tool list is cached (for its `ttlMs`); resources, templates and prompts are fetched fresh each time, and `resources/read` and `prompts/get` send `Mcp-Name` (the URI or the prompt's name) on modern servers, as `tools/call` does. That's the whole interface: anything an app needs beyond MCP and sign-in, such as what a model is told about your tools, belongs to the page or the worker.
 
 The auth exports do the network steps and checks but store nothing; the worker keeps their records in IndexedDB (`authStore.js`):
 
@@ -80,6 +80,7 @@ Both pass the same smoke test and send the same requests in the same order, with
 - **Legacy servers get one more request** from the SDK, a `GET` for a server-sent stream after the handshake (the mock answers 405).
 - **Sign-in differs a little.** The SDK adds `scope` to the client registration and `prompt=consent` when it asks for a refresh token.
 - **Some wording is the SDK's**: hidden-tool reasons and the wrong-issuer error.
+- **The Rust library sorts JSON keys.** Its `serde_json` has no `preserve_order`, so every object it passes on has its keys in alphabetical order: a tool's fields show that way (required ones still first), as do structured content and the raw JSON. The SDK keeps the order the server sent.
 - **The SDK checks 2026-07-28 results more strictly.** It rejects list results (tools, resources, templates, prompts) and `resources/read` results that lack `ttlMs` and `cacheScope`, which that version requires; the Rust library accepts them. So a modern server that leaves them out lists its resources on Rust/WASM but not on the SDK, which says `Invalid result for resources/list`.
 - **One fragile spot**: the SDK only says why it hid a tool through `console.warn`, so `sdk-client/mcp.js` overrides its internal `_excludeInvalidXMcpHeaderTools` to catch the reason. Check it when upgrading the SDK.
 
@@ -102,6 +103,8 @@ Both pass the same smoke test and send the same requests in the same order, with
 | `{type: 'set_client', client}` (a name from `mcp-clients.js`) | `client_set {client, loaded}` to the sender; `client_loaded {client, size, buildInfo}` to every page once it loads |
 | `{type: 'check_client'}` | the JSON-RPC notification `client_status {status: {healthy, uptime}, metadata}` to every page |
 | `{type: 'reload_client'}`, `{type: 'unload_client'}` | `client_loaded` after a reload; `client_status {healthy: false}` if it fails |
+
+Messages about a server (`connect-mcp`, the lists, `read_resource`, `get_prompt`, `call_tool`) also carry `clientInfo?`: the fields of the client's description (Settings) ticked in the server's Info. The page sends it with each message for its server, as it does the static token, and the worker passes it to the library (`clientInfoFor` in `sw.js`). The page keeps the description in `localStorage` `clientDescription`, and each server's ticked fields and the values they give (`clientInfoFields`, `clientInfo`) in its record in `servers`; `AppShell.refreshClientInfo` brings them up to date and connects the server again when they change.
 
 `status` is `{signedIn, issuer?, scope?, expiresAt?, refreshable?, clientId?}`: pages learn whether they're signed in, never the tokens. MCP calls get their credentials in the worker: a static `bearerToken`, which the page sends with each message for its server (the worker keeps no server list), wins, otherwise the stored access token, refreshed first when it expires within a minute. When a server turns down an OAuth token with `auth_required`, the worker refreshes it once and retries (`withAuth` in `sw.js`). Refreshes for one server run one at a time, because refresh tokens may rotate.
 
@@ -278,15 +281,18 @@ Write messages as sentences someone can act on, and put structured data in `deta
 npm run build                       # both libraries, then the client's file list (build:files)
 npm run test:browser -- --reference # the real UI in headless Chrome, on the default TypeScript SDK library
 npm run test:browser:wasm -- --reference # the same on the Rust/WASM library
-npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema and real servers' descriptions, RFC 6570 URIs, and the app builder's DML, zips and flow
+npm run test:unit                   # Pre-fill's test data, checked with Ajv against a dozen kinds of schema and real servers' descriptions, RFC 6570 URIs, the server template, and the app builder's DML, zips and flow
 npm run test:rust                   # the Rust library's protocol logic
 npm run bench -- --quick            # tool-call throughput of every library, in a few minutes
+npm run test:examples               # the server template on each official SDK whose toolchain is installed
 ```
 
 Pre-fill's test data comes from `public/workbench/prefill.js`, a pure function of the tool's schema and the environment's variables. Keep it deterministic (no randomness, so runs of the same values compare) and valid: a new keyword it handles gets a schema in `tests/prefill.test.mjs`, where every generated value is validated against its schema.
 
 - `testData(schema, { variables, every })` fills the required fields, which is what the request pane does when a tool opens (and the resource and prompt panes when one is picked); `every` fills the optional ones too. `fieldTestData(schema, path, { variables })` fills one field, by the path the form names it with (`limit`, `filter.owner`), the way `every` would. That's Fill beside a field's name: `addFillButtons` and `fillField` in `public/workbench/util.js`, which find fields by the `data-field` that AppShell's `renderInputField` puts on each card.
 - Values from descriptions are where Pre-fill most often goes wrong, since servers describe their tools for models: examples of what a person might ask, mappings ("this week" -> pw) and fields not to fill. A description's value has to follow a cue (examples, or a list of the values a field takes), be quoted with quotes that pair up or be one bare token that ends its phrase, and fit the field. A phrase only goes into a field that takes free text. When a server's description fills something that makes no sense, add it to the "prose in a description" test, shortened, before changing the rules.
+
+`public/server-template/README.md` tells people building servers where this client shows each field a server sends, and `example.json` beside it is a well-described server's replies. When the Workbench starts showing a field (a server's icons, say), stops, or shows one differently, update the guide's tables. `tests/server-template.test.mjs` checks the example with the SDK's own protocol schemas and against the guide's checklist, and the smoke test serves it (`test_mcp_server.py --replies`) and checks where the client shows its fields. `examples/` has the same server on each official SDK; `tests/examples.mjs` (`npm run test:examples`) runs each one and compares what it says about itself with `example.json`, field by field, as this client shows them. A difference an SDK can't avoid goes in the example's `known` list in `tests/examples.mjs`, with the reason, and in the guide's notes for that SDK. The site renders the guide from its README at load (`index.html`, `markdown.js`), and `tests/server-guide.test.mjs` checks that its links lead to real headings and files and that its tables have every cell.
 
 After a rebuild, reload the page. Each load checks the worker's scripts, and the build files change with every build, so a new worker installs. The log shows "Installing the service worker with the MCP client library builds …" and then "Loaded the TypeScript SDK client (…)" with the new build time.
 

@@ -67,3 +67,9 @@ mcp_server.log
 
 # Source maps from npm run build
 public/*.map
+
+# The server examples' builds and dependencies
+public/server-template/examples/rust/target/
+public/server-template/examples/java/target/
+public/server-template/examples/csharp/bin/
+public/server-template/examples/csharp/obj/

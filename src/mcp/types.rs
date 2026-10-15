@@ -14,6 +14,26 @@ pub const LEGACY_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"]
 pub const CLIENT_NAME: &str = "mcp-browser-client";
 pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// What this client tells a server about itself: its name and version, plus whichever of the
+/// optional fields (`title`, `description`, `websiteUrl`, `icons`) the service worker passed for
+/// that server.
+pub fn client_info(extra: Option<&Value>) -> Value {
+    let mut info = serde_json::Map::new();
+    info.insert("name".into(), json!(CLIENT_NAME));
+    info.insert("version".into(), json!(CLIENT_VERSION));
+    if let Some(extra) = extra {
+        for key in ["title", "description", "websiteUrl"] {
+            if let Some(text) = extra.get(key).and_then(Value::as_str).filter(|text| !text.is_empty()) {
+                info.insert(key.into(), json!(text));
+            }
+        }
+        if let Some(icons) = extra.get("icons").filter(|icons| icons.as_array().is_some_and(|list| !list.is_empty())) {
+            info.insert("icons".into(), icons.clone());
+        }
+    }
+    Value::Object(info)
+}
+
 pub const HEADER_MISMATCH: i64 = -32020;
 pub const MISSING_REQUIRED_CLIENT_CAPABILITY: i64 = -32021;
 pub const UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
@@ -82,6 +102,29 @@ mod tests {
         assert_eq!(error.message, "Unsupported protocol version");
         assert_eq!(error.data, Some(json!({ "supported": ["2026-07-28"] })));
         assert!(rpc_error(&json!({ "jsonrpc": "2.0", "id": 1, "result": {} })).is_none());
+    }
+
+    #[test]
+    fn introduces_the_client_with_only_the_fields_it_was_given() {
+        assert_eq!(client_info(None), json!({ "name": CLIENT_NAME, "version": CLIENT_VERSION }));
+        let extra = json!({
+            "title": "MCP Browser Client",
+            "description": "",
+            "websiteUrl": "https://example.com/",
+            "icons": [{ "src": "https://example.com/icon.svg" }],
+            "name": "someone-else",
+        });
+        assert_eq!(
+            client_info(Some(&extra)),
+            json!({
+                "name": CLIENT_NAME,
+                "version": CLIENT_VERSION,
+                "title": "MCP Browser Client",
+                "websiteUrl": "https://example.com/",
+                "icons": [{ "src": "https://example.com/icon.svg" }],
+            })
+        );
+        assert_eq!(client_info(Some(&json!({ "icons": [] }))), client_info(None));
     }
 
     #[test]

@@ -1,0 +1,373 @@
+/* The server guide's page: the app's top bar and tokens, a contents column, the guide's text,
+   and a side viewer for the files it links to. */
+
+.guide-page {
+    min-height: 100vh;
+}
+
+:where(.guide-link-button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--theme-background-mid);
+    border-radius: var(--radius-full);
+    background: var(--theme-background-mid);
+    color: var(--theme-text-primary);
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.guide-link-button:hover {
+    background: var(--theme-feedback-hover);
+}
+
+.guide-link-button:focus-visible {
+    outline: 2px solid var(--theme-link);
+    outline-offset: 2px;
+}
+
+.guide-spacer {
+    flex: 1;
+}
+
+/* ---------- Top bar ---------- */
+
+.guide-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 52px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+}
+
+.guide-topbar .app-title {
+    gap: 10px;
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.guide-topbar .app-title h1 {
+    font-size: 0.9375rem;
+}
+
+.guide-topbar .app-mark {
+    width: 26px;
+    height: 26px;
+}
+
+.guide-topbar .app-mark .icon {
+    width: 14px;
+    height: 14px;
+}
+
+.guide-crumb {
+    color: var(--theme-text-secondary);
+}
+
+.guide-crumb-page {
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---------- Layout ---------- */
+
+.guide-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 48px;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 32px 24px 96px;
+}
+
+.guide-contents {
+    position: sticky;
+    top: 84px;
+    align-self: start;
+    max-height: calc(100vh - 116px);
+    overflow: auto;
+    font-size: 0.8125rem;
+}
+
+.guide-contents-title {
+    margin-bottom: 8px;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.guide-contents ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.guide-contents a {
+    display: block;
+    padding: 4px 10px;
+    border-left: 2px solid var(--theme-border-light);
+    color: var(--theme-text-secondary);
+    text-decoration: none;
+}
+
+.guide-contents .level-3 a {
+    padding-left: 22px;
+    font-size: 0.75rem;
+}
+
+.guide-contents a:hover {
+    color: var(--theme-text-primary);
+}
+
+.guide-contents a[aria-current] {
+    border-left-color: var(--theme-primary-highlight);
+    color: var(--theme-text-primary);
+    font-weight: 500;
+}
+
+/* The guide's tables need the width, so the contents move above the text before they'd squeeze it. */
+@media (max-width: 1100px) {
+    .guide-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 24px;
+    }
+
+    .guide-contents {
+        position: static;
+        max-height: none;
+    }
+
+    .guide-crumb,
+    .guide-crumb-page {
+        display: none;
+    }
+}
+
+/* ---------- The guide's text ---------- */
+
+.guide-content {
+    max-width: 900px;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+}
+
+.guide-content h1 {
+    margin-bottom: 16px;
+    font-size: 2rem;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.guide-content h2 {
+    margin: 48px 0 12px;
+    padding-top: 8px;
+    font-size: 1.375rem;
+    line-height: 1.3;
+}
+
+.guide-content h3 {
+    margin: 32px 0 8px;
+    font-size: 1.0625rem;
+}
+
+.guide-content h2,
+.guide-content h3 {
+    scroll-margin-top: 72px;
+}
+
+.guide-content p,
+.guide-content ul,
+.guide-content ol,
+.guide-content .md-table,
+.guide-content .md-code,
+.guide-content blockquote {
+    margin: 0 0 14px;
+}
+
+.guide-content ul,
+.guide-content ol {
+    padding-left: 22px;
+}
+
+.guide-content li + li {
+    margin-top: 6px;
+}
+
+.guide-content .md-task {
+    margin-left: -22px;
+    list-style: none;
+}
+
+.guide-content .md-task input {
+    margin-right: 6px;
+    vertical-align: -2px;
+}
+
+.guide-content a {
+    color: var(--theme-link);
+    text-underline-offset: 2px;
+}
+
+.guide-content a:hover {
+    color: var(--theme-link-hover);
+}
+
+.guide-content a[data-file]::after {
+    content: '';
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    margin-left: 3px;
+    background-color: currentColor;
+    -webkit-mask: url('../icons/external-link.svg') center / contain no-repeat;
+    mask: url('../icons/external-link.svg') center / contain no-repeat;
+    vertical-align: -1px;
+    opacity: 0.6;
+}
+
+.guide-content code {
+    padding: 1px 5px;
+    border-radius: var(--radius-100, 4px);
+    background: var(--theme-background-light);
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+}
+
+.guide-content blockquote {
+    padding: 4px 16px;
+    border-left: 3px solid var(--theme-border-dark);
+    color: var(--theme-text-secondary);
+}
+
+/* Code blocks, with a Copy button in their corner. */
+.guide-content .md-code {
+    position: relative;
+    padding: 14px 16px;
+    overflow: auto;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.guide-content .md-code code {
+    padding: 0;
+    background: none;
+    font-size: inherit;
+    overflow-wrap: normal;
+}
+
+.guide-code-copy {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    opacity: 0;
+}
+
+.md-code:hover .guide-code-copy,
+.guide-code-copy:focus-visible {
+    opacity: 1;
+}
+
+/* Tables scroll sideways on narrow screens rather than squeezing their words. */
+.guide-content .md-table {
+    overflow-x: auto;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+}
+
+.guide-content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.guide-content th,
+.guide-content td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--theme-border-light);
+    text-align: left;
+    vertical-align: top;
+}
+
+.guide-content th {
+    background: var(--theme-background-light);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.guide-content tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.guide-content td:first-child {
+    min-width: 140px;
+}
+
+/* Code in a table breaks inside a word only when the word can't fit at all, and a field's or
+   file's name never does. */
+.guide-content td code {
+    overflow-wrap: break-word;
+}
+
+.guide-content td:first-child code,
+.guide-content td a code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+}
+
+/* ---------- The file viewer ---------- */
+
+.guide-viewer {
+    position: fixed;
+    top: 52px;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    width: min(760px, 100vw);
+    border-left: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-modal);
+}
+
+.guide-viewer-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.guide-viewer-head h2 {
+    overflow: hidden;
+    font-size: 0.875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.guide-viewer-body {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    background: var(--theme-background-light);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    tab-size: 4;
+}

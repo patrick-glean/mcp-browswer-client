@@ -74,10 +74,19 @@ const REFRESH_MARGIN_MS = 60_000;
 // A static token, which the page sends with each message for the server it's for.
 const staticToken = (message = {}) => message.bearerToken;
 
+// What this client tells the server about itself beyond its name and version: the fields chosen
+// in the server's Info, which the page sends with each message for that server, as it does the
+// static token.
+function clientInfoFor(message = {}) {
+    const info = message.clientInfo;
+    return info && typeof info === 'object' && Object.keys(info).length ? info : undefined;
+}
+
 // Options for the MCP client. A static token wins; otherwise the server's OAuth token.
-async function mcpOptions(url, message = {}, extra = {}) {
-    const bearerToken = staticToken(message) || await oauthAccessToken(url);
-    return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...extra });
+async function mcpOptions(url, message = {}, extra = {}, token = undefined) {
+    const bearerToken = token ?? (staticToken(message) || await oauthAccessToken(url));
+    const clientInfo = clientInfoFor(message);
+    return JSON.stringify({ ...(bearerToken ? { bearerToken } : {}), ...(clientInfo ? { clientInfo } : {}), ...extra });
 }
 
 // Runs an MCP call with the server's credentials. When the server turns down an OAuth token,
@@ -92,7 +101,7 @@ async function withAuth(url, message, extra, call) {
         logger.info('The server turned down the access token; refreshing it and trying again', { server: url });
         const accessToken = await oauthAccessToken(url, { force: true });
         if (!accessToken || accessToken === held.accessToken) throw error;
-        return call(JSON.stringify({ bearerToken: accessToken, ...extra }));
+        return call(await mcpOptions(url, message, extra, accessToken));
     }
 }
 

@@ -1,0 +1,576 @@
+{
+  "$comment": "The replies of a well-described MCP server, Example Helpdesk, by method (MCP 2026-07-28). README.md, next to this file, says where MCP Browser Client shows each field. python3 test_mcp_server.py --replies public/server-template/example.json serves them.",
+  "server/discover": {
+    "resultType": "complete",
+    "supportedVersions": ["2026-07-28"],
+    "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
+    "instructions": "Example Helpdesk holds the Example company's support tickets. Ticket IDs look like T-1042, and dates are in UTC.\n\n- To find a ticket, use search_tickets, then get_ticket with its ID. Don't guess IDs.\n- update_ticket changes only the fields you send. Before changing the status or assignee of a ticket the person didn't mention, ask them.\n- delete_ticket can't be undone. Only use it when the person asks to delete a specific ticket; otherwise set its status to closed.\n- For questions about workload or trends, use ticket_volume_chart.\n- helpdesk://guides/getting-started explains what each status and priority means.",
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "example-helpdesk",
+        "title": "Example Helpdesk",
+        "version": "1.4.0",
+        "description": "Search, read and update the support tickets in Example Helpdesk, and chart how many come in.",
+        "websiteUrl": "https://helpdesk.example.com/docs/mcp",
+        "icons": [
+          {
+            "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMWQ0ZWQ4IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI0Ii8+PHBhdGggZD0iTTQuOSA0LjlsNC4zIDQuM00xNC44IDE0LjhsNC4zIDQuM00xNC44IDkuMmw0LjMtNC4zTTQuOSAxOS4xbDQuMy00LjMiLz48L3N2Zz4=",
+            "mimeType": "image/svg+xml",
+            "sizes": ["any"],
+            "theme": "light"
+          },
+          {
+            "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTNjNWZkIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI0Ii8+PHBhdGggZD0iTTQuOSA0LjlsNC4zIDQuM00xNC44IDE0LjhsNC4zIDQuM00xNC44IDkuMmw0LjMtNC4zTTQuOSAxOS4xbDQuMy00LjMiLz48L3N2Zz4=",
+            "mimeType": "image/svg+xml",
+            "sizes": ["any"],
+            "theme": "dark"
+          },
+          {"src": "https://helpdesk.example.com/icons/helpdesk-48.png", "mimeType": "image/png", "sizes": ["48x48"]}
+        ]
+      }
+    },
+    "ttlMs": 3600000,
+    "cacheScope": "public"
+  },
+  "tools/list": {
+    "resultType": "complete",
+    "tools": [
+      {
+        "name": "search_tickets",
+        "title": "Search tickets",
+        "description": "Finds tickets by words in their subject and messages, most recently updated first. Use it to find a ticket before reading or changing it. Returns each ticket's ID, subject, status, priority and when it last changed, with a link to read the whole ticket. Narrow a long list with status, priority, assignee or updated_after.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Words to look for in the subject and messages.",
+              "examples": ["printer offline"]
+            },
+            "status": {
+              "type": "string",
+              "enum": ["open", "pending", "solved", "closed"],
+              "description": "Only tickets with this status."
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["low", "normal", "high", "urgent"],
+              "description": "Only tickets with this priority."
+            },
+            "assignee": {
+              "type": "string",
+              "format": "email",
+              "description": "Only tickets assigned to this person, by email address.",
+              "examples": ["grace@example.com"]
+            },
+            "updated_after": {
+              "type": "string",
+              "format": "date",
+              "description": "Only tickets updated on or after this day (UTC), as YYYY-MM-DD.",
+              "examples": ["2026-10-01"]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10,
+              "description": "How many tickets to return at most."
+            },
+            "cursor": {"type": "string", "description": "nextCursor from an earlier response, for the next page."}
+          },
+          "required": ["query"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "tickets": {
+              "type": "array",
+              "description": "The tickets found, most recently updated first.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string"},
+                  "subject": {"type": "string"},
+                  "status": {"type": "string", "enum": ["open", "pending", "solved", "closed"]},
+                  "priority": {"type": "string", "enum": ["low", "normal", "high", "urgent"]},
+                  "updatedAt": {"type": "string", "format": "date-time"}
+                },
+                "required": ["id", "subject", "status", "priority", "updatedAt"]
+              }
+            },
+            "total": {"type": "integer", "description": "How many tickets match, on every page."},
+            "nextCursor": {
+              "type": "string",
+              "description": "Send as cursor for the next page. Absent on the last page."
+            }
+          },
+          "required": ["tickets", "total"]
+        },
+        "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+      },
+      {
+        "name": "get_ticket",
+        "title": "Get a ticket",
+        "description": "Gets one ticket in full: subject, status, priority, requester, assignee, tags, dates and its address in the web app. Use it when you know the ticket's ID, from search_tickets or from the person; it doesn't search.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^T-[0-9]+$",
+              "description": "The ticket's ID: T- and a number.",
+              "examples": ["T-1042"]
+            }
+          },
+          "required": ["id"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {"type": "string", "description": "The ticket's ID."},
+            "subject": {"type": "string", "description": "One line on what's wrong."},
+            "status": {"type": "string", "enum": ["open", "pending", "solved", "closed"]},
+            "priority": {"type": "string", "enum": ["low", "normal", "high", "urgent"]},
+            "requester": {
+              "type": "object",
+              "properties": {"name": {"type": "string"}, "email": {"type": "string", "format": "email"}},
+              "required": ["name", "email"]
+            },
+            "assignee": {
+              "type": "string",
+              "format": "email",
+              "description": "Who's working on it. Absent while it's unassigned."
+            },
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "createdAt": {"type": "string", "format": "date-time"},
+            "updatedAt": {"type": "string", "format": "date-time"},
+            "url": {"type": "string", "format": "uri", "description": "The ticket in the helpdesk's web app."}
+          },
+          "required": ["id", "subject", "status", "priority", "requester", "tags", "createdAt", "updatedAt", "url"]
+        },
+        "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+      },
+      {
+        "name": "update_ticket",
+        "title": "Update a ticket",
+        "description": "Changes a ticket's status, priority, assignee or tags. Fields you leave out stay as they are, and sending the same values again changes nothing. Send at least one field besides id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^T-[0-9]+$",
+              "description": "The ticket's ID: T- and a number.",
+              "examples": ["T-1042"]
+            },
+            "status": {
+              "type": "string",
+              "enum": ["open", "pending", "solved", "closed"],
+              "description": "The new status."
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["low", "normal", "high", "urgent"],
+              "description": "The new priority."
+            },
+            "assignee": {
+              "type": "string",
+              "format": "email",
+              "description": "Who to assign it to, by email address.",
+              "examples": ["grace@example.com"]
+            },
+            "tags": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+              "uniqueItems": true,
+              "description": "The ticket's tags, replacing the ones it has: lowercase words and dashes.",
+              "examples": [["hardware", "printing"]]
+            }
+          },
+          "required": ["id"],
+          "additionalProperties": false
+        },
+        "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+      },
+      {
+        "name": "delete_ticket",
+        "title": "Delete a ticket",
+        "description": "Deletes a ticket and its messages for good. Only use it when the person asks to delete that ticket; to stop work on one, set its status to closed with update_ticket instead.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^T-[0-9]+$",
+              "description": "The ticket's ID: T- and a number.",
+              "examples": ["T-1042"]
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Why it's being deleted, kept in the audit log.",
+              "examples": ["Duplicate of T-1038"]
+            }
+          },
+          "required": ["id"],
+          "additionalProperties": false
+        },
+        "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false}
+      },
+      {
+        "name": "ticket_volume_chart",
+        "title": "Chart ticket volume",
+        "description": "Charts how many tickets came in over the last days, one bar per status or priority, as a PNG image with a one-line summary. Use it for questions about workload and trends.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 7,
+              "maximum": 90,
+              "default": 30,
+              "description": "How many days to chart, ending today."
+            },
+            "group_by": {
+              "type": "string",
+              "enum": ["status", "priority"],
+              "default": "status",
+              "description": "What each bar counts."
+            }
+          },
+          "additionalProperties": false
+        },
+        "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+      },
+      {
+        "name": "fetch_help_article",
+        "title": "Fetch a help center article",
+        "description": "Fetches an article from the public help center at help.example.com, as Markdown. Use it to quote or summarize published help for a requester. It only fetches help.example.com addresses.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://help\\.example\\.com/",
+              "description": "The article's address on help.example.com.",
+              "examples": ["https://help.example.com/articles/printer-offline"]
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": false
+        },
+        "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true}
+      }
+    ],
+    "ttlMs": 600000,
+    "cacheScope": "public"
+  },
+  "tools/call": {
+    "search_tickets": {
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"tickets\": [{\"id\": \"T-1042\", \"subject\": \"Printer on floor 3 shows offline\", \"status\": \"open\", \"priority\": \"high\", \"updatedAt\": \"2026-10-14T16:02:00Z\"}, {\"id\": \"T-1038\", \"subject\": \"Printer driver won't install on macOS 16\", \"status\": \"pending\", \"priority\": \"normal\", \"updatedAt\": \"2026-10-13T11:40:00Z\"}, {\"id\": \"T-1017\", \"subject\": \"Badge printer jams on the first card\", \"status\": \"solved\", \"priority\": \"low\", \"updatedAt\": \"2026-10-09T08:05:00Z\"}], \"total\": 3}"
+        },
+        {
+          "type": "resource_link",
+          "uri": "helpdesk://tickets/T-1042",
+          "name": "T-1042",
+          "title": "T-1042: Printer on floor 3 shows offline",
+          "description": "open, high priority, updated 2026-10-14",
+          "mimeType": "application/json"
+        },
+        {
+          "type": "resource_link",
+          "uri": "helpdesk://tickets/T-1038",
+          "name": "T-1038",
+          "title": "T-1038: Printer driver won't install on macOS 16",
+          "description": "pending, normal priority, updated 2026-10-13",
+          "mimeType": "application/json"
+        },
+        {
+          "type": "resource_link",
+          "uri": "helpdesk://tickets/T-1017",
+          "name": "T-1017",
+          "title": "T-1017: Badge printer jams on the first card",
+          "description": "solved, low priority, updated 2026-10-09",
+          "mimeType": "application/json"
+        }
+      ],
+      "structuredContent": {
+        "tickets": [
+          {
+            "id": "T-1042",
+            "subject": "Printer on floor 3 shows offline",
+            "status": "open",
+            "priority": "high",
+            "updatedAt": "2026-10-14T16:02:00Z"
+          },
+          {
+            "id": "T-1038",
+            "subject": "Printer driver won't install on macOS 16",
+            "status": "pending",
+            "priority": "normal",
+            "updatedAt": "2026-10-13T11:40:00Z"
+          },
+          {
+            "id": "T-1017",
+            "subject": "Badge printer jams on the first card",
+            "status": "solved",
+            "priority": "low",
+            "updatedAt": "2026-10-09T08:05:00Z"
+          }
+        ],
+        "total": 3
+      }
+    },
+    "get_ticket": {
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"id\": \"T-1042\", \"subject\": \"Printer on floor 3 shows offline\", \"status\": \"open\", \"priority\": \"high\", \"requester\": {\"name\": \"Ada Lovelace\", \"email\": \"ada@example.com\"}, \"assignee\": \"grace@example.com\", \"tags\": [\"hardware\", \"printing\"], \"createdAt\": \"2026-10-12T09:14:00Z\", \"updatedAt\": \"2026-10-14T16:02:00Z\", \"url\": \"https://helpdesk.example.com/tickets/T-1042\"}"
+        },
+        {
+          "type": "resource_link",
+          "uri": "https://helpdesk.example.com/tickets/T-1042",
+          "name": "T-1042",
+          "title": "Open T-1042 in Example Helpdesk",
+          "mimeType": "text/html"
+        }
+      ],
+      "structuredContent": {
+        "id": "T-1042",
+        "subject": "Printer on floor 3 shows offline",
+        "status": "open",
+        "priority": "high",
+        "requester": {"name": "Ada Lovelace", "email": "ada@example.com"},
+        "assignee": "grace@example.com",
+        "tags": ["hardware", "printing"],
+        "createdAt": "2026-10-12T09:14:00Z",
+        "updatedAt": "2026-10-14T16:02:00Z",
+        "url": "https://helpdesk.example.com/tickets/T-1042"
+      }
+    },
+    "update_ticket": {
+      "resultType": "complete",
+      "content": [
+        {"type": "text", "text": "Updated T-1042: its status is now solved."},
+        {
+          "type": "resource_link",
+          "uri": "helpdesk://tickets/T-1042",
+          "name": "T-1042",
+          "title": "T-1042: Printer on floor 3 shows offline",
+          "description": "solved, high priority, updated 2026-10-15",
+          "mimeType": "application/json"
+        }
+      ]
+    },
+    "delete_ticket": {
+      "resultType": "complete",
+      "content": [{"type": "text", "text": "Deleted T-1042 and its 4 messages."}]
+    },
+    "ticket_volume_chart": {
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "image",
+          "data": "iVBORw0KGgoAAAANSUhEUgAAAKAAAABQCAMAAACpg44GAAAAElBMVEX///8lY+vZdwYWo0prcoCco69dcYm0AAAABnRSTlMA//////96eeD+AAAAWUlEQVR42u3OyQkAIRAAsPHY/lv25cfHgOCCYFJBIgA4riUEBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFHwuWhKCgoKDgVBOCgkuwJwQFBfeC36UC4H8DEoQebf3n2AwAAAAASUVORK5CYII=",
+          "mimeType": "image/png",
+          "annotations": {"audience": ["user"]}
+        },
+        {"type": "text", "text": "Last 30 days: 214 new tickets. 37 are open, 21 pending, 142 solved and 14 closed."}
+      ]
+    },
+    "fetch_help_article": {
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "# When a printer shows offline\n\n1. Check that the printer is on and its screen shows no error.\n2. Print a configuration page from the printer's menu, and check that its IP address starts with 10.3.\n3. On your computer, remove the printer and add it again from Settings, then Printers.\n\nStill offline? Open a ticket and include the configuration page.\n"
+        },
+        {
+          "type": "resource_link",
+          "uri": "https://help.example.com/articles/printer-offline",
+          "name": "printer-offline",
+          "title": "When a printer shows offline, in the help center",
+          "mimeType": "text/html"
+        }
+      ]
+    }
+  },
+  "resources/list": {
+    "resultType": "complete",
+    "resources": [
+      {
+        "uri": "helpdesk://guides/getting-started",
+        "name": "getting-started",
+        "title": "Getting started",
+        "description": "What each ticket status and priority means. Read it before changing tickets.",
+        "mimeType": "text/markdown",
+        "size": 522,
+        "annotations": {"audience": ["user", "assistant"], "priority": 0.9, "lastModified": "2026-09-30T12:00:00Z"}
+      },
+      {
+        "uri": "helpdesk://schemas/ticket",
+        "name": "ticket-schema",
+        "title": "Ticket schema",
+        "description": "The JSON Schema every ticket follows, with what each field means.",
+        "mimeType": "application/schema+json",
+        "size": 1437,
+        "annotations": {"audience": ["assistant"], "priority": 0.5, "lastModified": "2026-08-14T08:00:00Z"}
+      },
+      {
+        "uri": "helpdesk://reports/volume.png",
+        "name": "volume-chart",
+        "title": "Ticket volume, last 30 days",
+        "description": "New tickets over the last 30 days, one bar per status. Updated every hour.",
+        "mimeType": "image/png",
+        "size": 194,
+        "annotations": {"audience": ["user"], "priority": 0.3, "lastModified": "2026-10-15T09:00:00Z"}
+      }
+    ],
+    "ttlMs": 600000,
+    "cacheScope": "public"
+  },
+  "resources/templates/list": {
+    "resultType": "complete",
+    "resourceTemplates": [
+      {
+        "uriTemplate": "helpdesk://tickets/{id}",
+        "name": "ticket",
+        "title": "Ticket by ID",
+        "description": "One ticket as JSON, as get_ticket returns it. id is the ticket's ID, such as T-1042.",
+        "mimeType": "application/json"
+      }
+    ],
+    "ttlMs": 600000,
+    "cacheScope": "public"
+  },
+  "resources/read": {
+    "helpdesk://guides/getting-started": {
+      "resultType": "complete",
+      "contents": [
+        {
+          "uri": "helpdesk://guides/getting-started",
+          "mimeType": "text/markdown",
+          "text": "# Getting started with Example Helpdesk\n\nEvery ticket has an ID like T-1042, a subject, a status and a priority.\n\n## Statuses\n\n- **open**: someone needs to act on it.\n- **pending**: waiting for the requester to answer.\n- **solved**: fixed. It closes by itself after 7 days.\n- **closed**: done for good. A closed ticket can't be reopened; open a new one instead.\n\n## Priorities\n\nlow, normal, high and urgent. An urgent ticket pages whoever is on call, so only raise a ticket to urgent when the requester can't work at all.\n"
+        }
+      ],
+      "ttlMs": 3600000,
+      "cacheScope": "public"
+    },
+    "helpdesk://schemas/ticket": {
+      "resultType": "complete",
+      "contents": [
+        {
+          "uri": "helpdesk://schemas/ticket",
+          "mimeType": "application/schema+json",
+          "text": "{\"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"title\": \"Ticket\", \"description\": \"A support request in Example Helpdesk.\", \"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^T-[0-9]+$\", \"description\": \"T- and a number, such as T-1042. Never reused.\"}, \"subject\": {\"type\": \"string\", \"description\": \"One line on what's wrong, in the requester's words.\"}, \"status\": {\"enum\": [\"open\", \"pending\", \"solved\", \"closed\"], \"description\": \"open: someone needs to act. pending: waiting for the requester. solved: fixed, and closes after 7 days. closed: done for good.\"}, \"priority\": {\"enum\": [\"low\", \"normal\", \"high\", \"urgent\"], \"description\": \"urgent pages whoever is on call.\"}, \"requester\": {\"type\": \"object\", \"description\": \"Who asked for help.\", \"properties\": {\"name\": {\"type\": \"string\"}, \"email\": {\"type\": \"string\", \"format\": \"email\"}}, \"required\": [\"name\", \"email\"]}, \"assignee\": {\"type\": \"string\", \"format\": \"email\", \"description\": \"Who's working on it. Absent while it's unassigned.\"}, \"tags\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Lowercase words and dashes.\"}, \"createdAt\": {\"type\": \"string\", \"format\": \"date-time\"}, \"updatedAt\": {\"type\": \"string\", \"format\": \"date-time\"}, \"url\": {\"type\": \"string\", \"format\": \"uri\", \"description\": \"The ticket in the helpdesk's web app.\"}}, \"required\": [\"id\", \"subject\", \"status\", \"priority\", \"requester\", \"tags\", \"createdAt\", \"updatedAt\", \"url\"]}"
+        }
+      ],
+      "ttlMs": 86400000,
+      "cacheScope": "public"
+    },
+    "helpdesk://reports/volume.png": {
+      "resultType": "complete",
+      "contents": [
+        {
+          "uri": "helpdesk://reports/volume.png",
+          "mimeType": "image/png",
+          "blob": "iVBORw0KGgoAAAANSUhEUgAAAKAAAABQCAMAAACpg44GAAAAElBMVEX///8lY+vZdwYWo0prcoCco69dcYm0AAAABnRSTlMA//////96eeD+AAAAWUlEQVR42u3OyQkAIRAAsPHY/lv25cfHgOCCYFJBIgA4riUEBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFHwuWhKCgoKDgVBOCgkuwJwQFBfeC36UC4H8DEoQebf3n2AwAAAAASUVORK5CYII="
+        }
+      ],
+      "ttlMs": 3600000,
+      "cacheScope": "private"
+    },
+    "helpdesk://tickets/T-1042": {
+      "resultType": "complete",
+      "contents": [
+        {
+          "uri": "helpdesk://tickets/T-1042",
+          "mimeType": "application/json",
+          "text": "{\"id\": \"T-1042\", \"subject\": \"Printer on floor 3 shows offline\", \"status\": \"open\", \"priority\": \"high\", \"requester\": {\"name\": \"Ada Lovelace\", \"email\": \"ada@example.com\"}, \"assignee\": \"grace@example.com\", \"tags\": [\"hardware\", \"printing\"], \"createdAt\": \"2026-10-12T09:14:00Z\", \"updatedAt\": \"2026-10-14T16:02:00Z\", \"url\": \"https://helpdesk.example.com/tickets/T-1042\"}"
+        }
+      ],
+      "ttlMs": 0,
+      "cacheScope": "private"
+    }
+  },
+  "prompts/list": {
+    "resultType": "complete",
+    "prompts": [
+      {
+        "name": "summarize_ticket",
+        "title": "Summarize a ticket",
+        "description": "Drafts a short summary of a ticket: what's wrong, what's been tried and what's next. For handing a ticket over, or for updating the requester.",
+        "arguments": [
+          {"name": "id", "description": "The ticket to summarize, such as T-1042.", "required": true},
+          {
+            "name": "audience",
+            "description": "Who reads the summary: either \"agent\" or \"requester\". Defaults to \"agent\".",
+            "required": false
+          }
+        ]
+      },
+      {
+        "name": "triage_open_tickets",
+        "title": "Triage the open tickets",
+        "description": "Asks for the open tickets in order of urgency, with who should take each one."
+      }
+    ],
+    "ttlMs": 600000,
+    "cacheScope": "public"
+  },
+  "prompts/get": {
+    "summarize_ticket": {
+      "resultType": "complete",
+      "description": "A summary of T-1042 for the support team",
+      "messages": [
+        {
+          "role": "user",
+          "content": {
+            "type": "text",
+            "text": "Summarize this ticket for the support team in three short paragraphs: the problem, what has been tried, and the next step. Keep the requester's own words where you can."
+          }
+        },
+        {
+          "role": "user",
+          "content": {
+            "type": "resource",
+            "resource": {
+              "uri": "helpdesk://tickets/T-1042",
+              "mimeType": "application/json",
+              "text": "{\"id\": \"T-1042\", \"subject\": \"Printer on floor 3 shows offline\", \"status\": \"open\", \"priority\": \"high\", \"requester\": {\"name\": \"Ada Lovelace\", \"email\": \"ada@example.com\"}, \"assignee\": \"grace@example.com\", \"tags\": [\"hardware\", \"printing\"], \"createdAt\": \"2026-10-12T09:14:00Z\", \"updatedAt\": \"2026-10-14T16:02:00Z\", \"url\": \"https://helpdesk.example.com/tickets/T-1042\"}"
+            }
+          }
+        }
+      ]
+    },
+    "triage_open_tickets": {
+      "resultType": "complete",
+      "description": "Triage of the open tickets",
+      "messages": [
+        {
+          "role": "user",
+          "content": {
+            "type": "text",
+            "text": "List the open tickets from most to least urgent. For each, say in one line why it's urgent and who should take it, from the people already working on similar tickets."
+          }
+        },
+        {
+          "role": "assistant",
+          "content": {
+            "type": "text",
+            "text": "I'll search the open tickets first, then read the urgent and high-priority ones in full before ordering them."
+          }
+        }
+      ]
+    }
+  }
+}

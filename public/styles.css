@@ -142,6 +142,7 @@ hr.divider {
 .icon-monitor { --icon: url('icons/monitor.svg'); }
 .icon-tool { --icon: url('icons/tool.svg'); }
 .icon-search { --icon: url('icons/search.svg'); }
+.icon-settings { --icon: url('icons/settings.svg'); }
 .icon-theme { --icon: url('icons/moon.svg'); }
 .dark-theme .icon-theme { --icon: url('icons/sun.svg'); }
 

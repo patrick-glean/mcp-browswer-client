@@ -17,7 +17,21 @@ import { McpError } from './errors.js';
 import * as log from './log.js';
 import { NETWORK_FAILURE, describeReply, endpointFetch, shorten } from './trace.js';
 
-const CLIENT_INFO = { name: 'mcp-browser-client', version: __CLIENT_VERSION__ };
+const CLIENT_NAME = 'mcp-browser-client';
+
+// What this client tells a server about itself: its name and version, plus whichever of the
+// optional fields the worker passed for that server.
+export function clientInfo(extra) {
+    const text = key => (typeof extra?.[key] === 'string' && extra[key] ? { [key]: extra[key] } : {});
+    return {
+        name: CLIENT_NAME,
+        ...text('title'),
+        version: __CLIENT_VERSION__,
+        ...text('description'),
+        ...text('websiteUrl'),
+        ...(Array.isArray(extra?.icons) && extra.icons.length ? { icons: extra.icons } : {}),
+    };
+}
 
 const CONNECT_TIMEOUT_MS = 20_000;
 const LIST_TIMEOUT_MS = 30_000;
@@ -86,8 +100,8 @@ class Wire {
 const EXCLUSION = /^\[mcp-sdk\] excluding tool '([^]*)' from tools\/list: invalid x-mcp-header declaration — ([^]*)$/;
 
 class BrowserClient extends Client {
-    constructor(server) {
-        super(CLIENT_INFO, {
+    constructor(server, info) {
+        super(info, {
             versionNegotiation: { mode: 'auto', probe: { timeoutMs: CONNECT_TIMEOUT_MS } },
             // input_required results go to the page, which says the client can't answer them yet.
             inputRequired: { autoFulfill: false },
@@ -120,8 +134,9 @@ class BrowserClient extends Client {
 }
 
 class Connection {
-    constructor(url, wire, credentials, { client, transport }) {
-        Object.assign(this, { url, wire, credentials, client, transport });
+    constructor(url, wire, credentials, { client, transport, clientInfo }) {
+        Object.assign(this, { url, wire, credentials, client, transport, clientInfo });
+        this.clientInfoKey = JSON.stringify(clientInfo);
         this.busy = 0;
         this.retired = false;
     }
@@ -148,6 +163,7 @@ class Connection {
             serverInfo: this.client.getServerVersion() ?? this.client.getDiscoverResult()?._meta?.['io.modelcontextprotocol/serverInfo'] ?? null,
             capabilities: this.client.getServerCapabilities() ?? {},
             instructions: this.client.getInstructions() ?? null,
+            clientInfo: this.clientInfo,
         };
     }
 }
@@ -155,13 +171,13 @@ class Connection {
 const connections = new Map();
 const establishing = new Map();
 
-async function attach(url, wire, credentials, prior) {
+async function attach(url, wire, credentials, info, prior) {
     const transport = new StreamableHTTPClientTransport(new URL(url), {
         fetch: endpointFetch(wire),
         // Read before every request, so a refreshed or newly set token is used at once.
         authProvider: { token: async () => credentials.token || undefined },
     });
-    const client = new BrowserClient(url);
+    const client = new BrowserClient(url, info);
     client.onerror = error => log.debug(url, `The SDK reported: ${error?.message || error}`);
     try {
         await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS, ...(prior ? { prior } : {}) });
@@ -169,16 +185,16 @@ async function attach(url, wire, credentials, prior) {
         await client.close().catch(() => {});
         throw error;
     }
-    return new Connection(url, wire, credentials, { client, transport });
+    return new Connection(url, wire, credentials, { client, transport, clientInfo: info });
 }
 
-// Connects in whichever era the server speaks.
-async function establish(url, token) {
+// Connects in whichever era the server speaks, introducing the client with `info`.
+async function establish(url, token, info) {
     const wire = new Wire(url);
     const credentials = { token };
     let connection;
     try {
-        connection = await attach(url, wire, credentials);
+        connection = await attach(url, wire, credentials, info);
     } catch (error) {
         if (!wire.blockedProbe) throw explain(error, url, wire);
         const probeFailure = unreachable(url, wire.blockedProbe);
@@ -187,7 +203,7 @@ async function establish(url, token) {
         // worker it reports the blocked probe as a failed connection.
         log.debug(url, 'The SDK gave up after the blocked server/discover (it only falls back to initialize in pages, not workers); connecting again with prior: legacy');
         try {
-            connection = await attach(url, wire, credentials, { kind: 'legacy' });
+            connection = await attach(url, wire, credentials, info, { kind: 'legacy' });
         } catch (handshakeError) {
             throw afterBlockedProbe(url, probeFailure, explain(handshakeError, url, wire));
         }
@@ -200,12 +216,19 @@ async function establish(url, token) {
 }
 
 // The connection for `url`, made if there isn't one. After the browser restarts the service
-// worker there are none, so the first request reconnects on its own.
-async function connectionFor(url, token) {
+// worker there are none, so the first request reconnects on its own. What the client tells the
+// server about itself is part of the connection, so a change to it connects again.
+async function connectionFor(url, opts) {
+    const info = clientInfo(opts.clientInfo);
     let connection = connections.get(url);
+    if (connection && connection.clientInfoKey !== JSON.stringify(info)) {
+        log.info(url, 'Reconnecting: what this client tells the server about itself changed');
+        forget(url);
+        connection = null;
+    }
     if (!connection) {
         if (!establishing.has(url)) {
-            const made = establish(url, token)
+            const made = establish(url, opts.bearerToken, info)
                 .then(connection => {
                     connections.set(url, connection);
                     return connection;
@@ -215,7 +238,7 @@ async function connectionFor(url, token) {
         }
         connection = await establishing.get(url);
     }
-    connection.credentials.token = token;
+    connection.credentials.token = opts.bearerToken;
     return connection;
 }
 
@@ -223,7 +246,7 @@ async function connectionFor(url, token) {
 // server that stopped accepting the negotiated version gets one reconnect and retry.
 async function withConnection(url, opts, timeoutMs, operation) {
     for (let attempt = 0; ; attempt++) {
-        const connection = await connectionFor(url, opts.bearerToken);
+        const connection = await connectionFor(url, opts);
         connection.busy++;
         try {
             return await operation(connection);
@@ -244,9 +267,9 @@ function needsReconnect(connection, failure) {
     return failure.code === UNSUPPORTED_PROTOCOL_VERSION;
 }
 
-// Returns {url, era, protocolVersion, serverInfo, capabilities, instructions}.
+// Returns {url, era, protocolVersion, serverInfo, capabilities, instructions, clientInfo}.
 export async function connect(url, opts) {
-    const connection = await establish(url, opts.bearerToken);
+    const connection = await establish(url, opts.bearerToken, clientInfo(opts.clientInfo));
     const previous = connections.get(url);
     connections.set(url, connection);
     if (previous && previous !== connection) previous.retire();

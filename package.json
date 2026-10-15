@@ -18,7 +18,8 @@
     "test:browser": "node tests/browser-smoke.mjs",
     "test:browser:wasm": "node tests/browser-smoke.mjs --client=wasm",
     "test:public": "node tests/browser-smoke.mjs --public",
-    "bench": "node tests/bench.mjs"
+    "bench": "node tests/bench.mjs",
+    "test:examples": "node tests/examples.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

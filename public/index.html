@@ -80,6 +80,9 @@ python3 -m http.server 8000</code></pre>
             <button type="button" id="guideBtn" class="btn-tertiary btn-sm" title="How to try it" aria-controls="guide">
                 <span class="icon icon-help" aria-hidden="true"></span>Guide
             </button>
+            <button type="button" id="settingsBtn" class="btn-icon btn-sm btn-tertiary" title="Settings: how this client describes itself to servers" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
+                <span class="icon icon-settings" aria-hidden="true"></span>
+            </button>
             <button type="button" id="themeToggle" class="btn-icon btn-sm btn-tertiary" title="Toggle dark mode" aria-label="Toggle dark mode">
                 <span class="icon icon-theme" aria-hidden="true"></span>
             </button>
@@ -327,6 +330,11 @@ python3 -m http.server 8000</code></pre>
         <section class="guide-section">
             <h3>6. Read the log</h3>
             <p>The dock at the bottom lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Trace has every HTTP request and response, and Runs every call. Copy or Download the log to share a problem.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>Building a server?</h3>
+            <p>This client shows what a server says about itself: titles, descriptions, annotations, schemas, icons. <a href="server-template/" target="_blank" rel="noopener" id="serverGuideLink">Describing your server</a> lists each of those fields, where the client shows it and what to put in it, with a well-described server's replies to copy and the same server on the official SDKs.</p>
         </section>
 
         <section class="guide-section">
@@ -648,6 +656,35 @@ python3 -m http.server 8000</code></pre>
             label._flashTimer = setTimeout(() => { label.textContent = label.dataset.label; }, 1500);
         }
 
+        // How this client describes itself to servers, past the name and version the MCP client
+        // library sends every server. Settings edits it; each server gets only the fields ticked
+        // in its Info.
+        const CLIENT_DESCRIPTION_KEY = 'clientDescription';
+        const CLIENT_DESCRIPTION_DEFAULTS = {
+            title: 'MCP Browser Client',
+            description: 'A browser-based MCP client for testing servers and client libraries: a Workbench to call their tools by hand, and an agent loop over them.',
+            websiteUrl: 'https://patrick-glean.github.io/mcp-browswer-client/',
+            iconUrl: 'https://patrick-glean.github.io/mcp-browswer-client/favicon.svg',
+        };
+        // The fields a server can be sent, in the order Info lists them.
+        const CLIENT_INFO_FIELDS = ['title', 'description', 'websiteUrl', 'icons'];
+
+        function loadClientDescription() {
+            try {
+                return { ...CLIENT_DESCRIPTION_DEFAULTS, ...JSON.parse(localStorage.getItem(CLIENT_DESCRIPTION_KEY) || '{}') };
+            } catch {
+                return { ...CLIENT_DESCRIPTION_DEFAULTS };
+            }
+        }
+
+        // An icon for an address, with the type its data: URI or file extension gives.
+        function iconFor(src) {
+            const extension = /\.(\w+)(?:[?#]|$)/.exec(src)?.[1]?.toLowerCase();
+            const mimeType = /^data:([^;,]+)/i.exec(src)?.[1]
+                || { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[extension];
+            return { src, ...(mimeType ? { mimeType } : {}), ...(mimeType === 'image/svg+xml' ? { sizes: ['any'] } : {}) };
+        }
+
         // The app's controller: the service worker and its MCP client library, the server list,
         // sign-in and tool calls. It draws nothing itself; the Workbench's components
         // (public/workbench/) listen for these events and call its methods:
@@ -660,6 +697,7 @@ python3 -m http.server 8000</code></pre>
         //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
         //   recorded the worker saved a run in history           (the run's summary)
         //   mode     the page switched to the Workbench or Apps  { mode }
+        //   client-description  Settings changed how this client describes itself
         class AppShell {
             constructor() {
                 this.events = new EventTarget();
@@ -677,6 +715,7 @@ python3 -m http.server 8000</code></pre>
                 this.selectedServerUrl = null;
                 this.isInitialized = false;
                 this.servers = this.loadServers();
+                this.clientDescription = loadClientDescription();
                 this.pendingConnects = new Map();
                 // Tool calls waiting for the worker's answer, by run id: { resolve, timer, show }.
                 this.pendingRuns = new Map();
@@ -1284,17 +1323,20 @@ python3 -m http.server 8000</code></pre>
                 }
             }
 
+            // What every message about a server carries for the worker to pass to the library: a
+            // static token, and the fields this client tells the server about itself.
+            connectionOptions(url) {
+                const server = this.servers[url];
+                return { bearerToken: server?.bearerToken || undefined, clientInfo: server?.clientInfo || undefined };
+            }
+
             connectMcpServer(url = this.selectedServerUrl) {
                 const server = this.servers[url];
                 if (!server) {
                     this.log({ level: 'error', message: 'Select a server to connect to first' });
                     return;
                 }
-                const sent = this.postToWorker({
-                    type: 'connect-mcp',
-                    url,
-                    bearerToken: server.bearerToken || undefined
-                });
+                const sent = this.postToWorker({ type: 'connect-mcp', url, ...this.connectionOptions(url) });
                 this.updateServer(url, sent
                     ? { status: 'connecting', lastError: null }
                     : { status: 'failed', lastError: "The service worker isn't running yet. Try again in a moment." });
@@ -1319,10 +1361,10 @@ python3 -m http.server 8000</code></pre>
             // Lists the tools, and the resources and prompts when the server says it has them.
             requestTools(url, { refresh = false } = {}) {
                 const server = this.servers[url];
-                const bearerToken = server?.bearerToken || undefined;
-                this.postToWorker({ type: 'list_tools', url, refresh, bearerToken });
-                if (server?.capabilities?.resources) this.postToWorker({ type: 'list_resources', url, bearerToken });
-                if (server?.capabilities?.prompts) this.postToWorker({ type: 'list_prompts', url, bearerToken });
+                const options = this.connectionOptions(url);
+                this.postToWorker({ type: 'list_tools', url, refresh, ...options });
+                if (server?.capabilities?.resources) this.postToWorker({ type: 'list_resources', url, ...options });
+                if (server?.capabilities?.prompts) this.postToWorker({ type: 'list_prompts', url, ...options });
             }
 
             // Reads a resource, or gets a prompt filled in with its arguments. Resolves with the
@@ -1338,7 +1380,7 @@ python3 -m http.server 8000</code></pre>
 
             requestFromWorker(message) {
                 const requestId = crypto.randomUUID();
-                const sent = this.postToWorker({ ...message, requestId, bearerToken: this.servers[message.url]?.bearerToken || undefined });
+                const sent = this.postToWorker({ ...message, requestId, ...this.connectionOptions(message.url) });
                 if (!sent) return Promise.resolve({ error: { kind: 'not_sent', message: "The service worker isn't running yet. Try again in a moment." } });
                 return new Promise(resolve => {
                     // Requests time out after 120 s in the client; past that, the worker is gone.
@@ -1362,9 +1404,63 @@ python3 -m http.server 8000</code></pre>
                     protocolVersion: info.protocolVersion,
                     serverInfo: info.serverInfo || null,
                     capabilities: info.capabilities,
-                    instructions: info.instructions || null
+                    instructions: info.instructions || null,
+                    // What the library told the server about this client when it connected.
+                    clientInfoSent: info.clientInfo || null
                 });
                 this.requestTools(url);
+            }
+
+            // --- What this client tells servers about itself ---
+
+            // Changes how this client describes itself (Settings). Servers sent a changed field
+            // connect again, so they get the new value at once.
+            setClientDescription(changes) {
+                Object.assign(this.clientDescription, changes);
+                localStorage.setItem(CLIENT_DESCRIPTION_KEY, JSON.stringify(this.clientDescription));
+                this.emit('client-description', {});
+                for (const url of Object.keys(this.servers)) this.refreshClientInfo(url);
+            }
+
+            resetClientDescription() {
+                localStorage.removeItem(CLIENT_DESCRIPTION_KEY);
+                this.clientDescription = loadClientDescription();
+                this.emit('client-description', {});
+                for (const url of Object.keys(this.servers)) this.refreshClientInfo(url);
+            }
+
+            // The fields of the client's description that `fields` names and that aren't empty,
+            // as the library adds them to the client's name and version.
+            clientInfoExtras(fields = []) {
+                const { title, description, websiteUrl, iconUrl } = this.clientDescription;
+                const values = { title, description, websiteUrl, icons: iconUrl?.trim() ? [iconFor(iconUrl.trim())] : null };
+                return Object.fromEntries(CLIENT_INFO_FIELDS
+                    .filter(field => fields.includes(field) && (Array.isArray(values[field]) || values[field]?.trim()))
+                    .map(field => [field, Array.isArray(values[field]) ? values[field] : values[field].trim()]));
+            }
+
+            // Chooses which of the client's fields a server gets besides its name and version.
+            setClientInfoFields(url, fields) {
+                if (!this.servers[url]) return;
+                this.servers[url].clientInfoFields = CLIENT_INFO_FIELDS.filter(field => fields.includes(field));
+                this.refreshClientInfo(url);
+                this.emit('servers', { url });
+            }
+
+            // Brings a server's clientInfo up to date with its fields and the description. A
+            // connected server connects again, since the client introduces itself when it
+            // connects; several changes in a row make one reconnect.
+            refreshClientInfo(url) {
+                const server = this.servers[url];
+                const extras = this.clientInfoExtras(server.clientInfoFields || []);
+                const clientInfo = Object.keys(extras).length ? extras : undefined;
+                if (JSON.stringify(clientInfo) === JSON.stringify(server.clientInfo)) return;
+                this.updateServer(url, { clientInfo });
+                this.reconnectTimers ??= {};
+                clearTimeout(this.reconnectTimers[url]);
+                this.reconnectTimers[url] = setTimeout(() => {
+                    if (this.servers[url]?.status === 'connected') this.connectMcpServer(url);
+                }, 400);
             }
 
             handleServerError(url, action, error) {
@@ -1564,6 +1660,8 @@ python3 -m http.server 8000</code></pre>
             }
 
             updateBuildInfo(buildInfo) {
+                // "v0.1.0 built …": the version the library tells servers, which Settings shows.
+                this.clientVersion = /^v(\S+)/.exec(buildInfo || '')?.[1] || this.clientVersion;
                 const compiledInfo = document.getElementById('client-build');
                 if (compiledInfo) {
                     compiledInfo.textContent = buildInfo;
@@ -1664,7 +1762,7 @@ python3 -m http.server 8000</code></pre>
                     call: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
                     run: { id: runId, args, requestId, collectionRunId, environmentName: prepared.environmentName },
                     source,
-                    bearerToken: this.servers[url]?.bearerToken || undefined
+                    ...this.connectionOptions(url)
                 });
                 if (!sent) return notSent("The service worker isn't running yet. Try again in a moment.");
                 if (show) {
