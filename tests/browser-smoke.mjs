@@ -1048,7 +1048,8 @@ async function main() {
             const asFile = await openPage(target => target.url.startsWith('file://'));
             const fileNotice = await asFile.waitFor(`(() => {
                 const notice = document.getElementById('fromFile');
-                if (!notice || notice.hidden) return null;
+                // The notice shows as it's parsed, before the rest of the page is.
+                if (document.readyState === 'loading' || !notice || notice.hidden) return null;
                 const link = notice.querySelector('[data-from-file-link]');
                 return [notice.querySelector('[data-from-file-title]').textContent, getComputedStyle(document.querySelector('.wb-app')).display, link.textContent.trim(), link.getAttribute('href') === ${JSON.stringify(named?.[1] || '')} ? 'the link in the page' : link.getAttribute('href')].join(' | ');
             })()`, 10000);
@@ -2052,6 +2053,7 @@ async function main() {
                 const preview = document.querySelector('app-preview');
                 if (!document.body.classList.contains('embedded') || !preview?.querySelector('iframe') || !Object.keys(appShell.servers).length) return null;
                 const own = preview.querySelector('[data-launch-actions] a');
+                if (!own) return null;
                 return [document.title, own.textContent.trim(), own.getAttribute('href').replace(/#run=[\\w-]+/, '#run=…'), own.target, Object.keys(appShell.servers).join(' ')].join(' | ');
             })()`, 20000);
             await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('visitor')`, 10000, { inPage: embedded });
