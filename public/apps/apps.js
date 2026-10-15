@@ -51,6 +51,10 @@ export const normalizeApp = app => ({ ...app, flow: (app.flow || []).map(normali
 // The rules that run as the app opens: what Start calls.
 export const openRules = app => (app?.flow || []).filter(rule => triggersOf(rule).some(candidate => candidate.event === 'open'));
 
+// What Start calls holds nothing of anyone's: each of its rules calls a demo server, and none lets
+// its model call your servers' tools, which would send its tool calls to them.
+export const startCallsOnlyDemos = app => openRules(app).every(rule => !!demoServerAt(rule.call?.serverUrl) && !rule.tools);
+
 function readChoices() {
     try {
         const choices = JSON.parse(localStorage.getItem(RUN_ON_OPEN_KEY) || '{}');
@@ -504,8 +508,9 @@ export class Apps {
     // link from Copy a link or an embed), or the one beside a downloaded folder's index.html
     // (`file`). `embed` (?embed) is an iframe's, in another page. A link's or a folder's app isn't
     // added to Your apps until you say so; a link's waits to run what Start calls as an app
-    // opening does, while yours and a folder's (which is there to run it) run it at once, as
-    // Preview does. `launched` says which, or why there's nothing to run.
+    // opening does, unless that only calls demo servers, while yours and a folder's (which is
+    // there to run it) run it at once, as Preview does. `launched` says which, or why there's
+    // nothing to run.
     async launch({ id = null, run = null, file = null, embed = false }) {
         let app = null;
         let problem = '';
@@ -535,7 +540,7 @@ export class Apps {
         this.elementsCache = null;
         this.selection = null;
         this.answers.clear();
-        this.startHeld = !!app && !!run && !this.startsOnOpen();
+        this.startHeld = !!app && !!run && !this.startsOnOpen() && !startCallsOnlyDemos(app);
         if (app) {
             document.title = app.name || 'App';
             // The demo servers it calls are built in, so they're added for it, once the worker can connect them.

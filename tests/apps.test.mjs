@@ -10,7 +10,9 @@ import { test } from 'node:test';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
-import { appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, openRules, readmeFor } from '../public/apps/apps.js';
+import {
+    appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, openRules, readmeFor, startCallsOnlyDemos,
+} from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -1100,4 +1102,15 @@ test('what Start calls: the rules that run as the app opens, which opening it as
     assert.deepEqual(openRules(chatApp({ shell: { servers: {} }, model: demoModel(), name: 'Chat' })), []);
     assert.deepEqual(openRules(frontDeskApp({ name: 'Front desk' })), []);
     assert.deepEqual(openRules(null), []);
+});
+
+test("what Start calls holds nothing of anyone's when each of its rules calls a demo server and lets no model use your servers' tools", () => {
+    const pulse = dashboardApp({ shell: { servers: {} }, model: demoModel(), name: 'Pulse' });
+    assert.equal(startCallsOnlyDemos(pulse), true, 'Project pulse on the stand-in model');
+    const withTools = { ...pulse, flow: pulse.flow.map(rule => ({ ...rule, tools: true })) };
+    assert.equal(startCallsOnlyDemos(withTools), false, "its model's tool calls would go to your servers");
+    const onMock = { ...pulse, flow: pulse.flow.map(rule => ({ ...rule, call: { ...rule.call, serverUrl: MOCK } })) };
+    assert.equal(startCallsOnlyDemos(onMock), false, 'a server of yours');
+    assert.equal(startCallsOnlyDemos(sampleApp()), false);
+    assert.equal(startCallsOnlyDemos(frontDeskApp({ name: 'Front desk' })), true, 'Start calls nothing');
 });
