@@ -9,7 +9,7 @@ Everything runs in a web page and a service worker that every open tab shares. T
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
 - **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and conversations live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
 
-It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions.
+It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions. It works best with servers that describe themselves well, since what a server says about itself is what people and models see: building one? See [Describing your server](#describing-your-server).
 
 ## Try it
 
@@ -131,6 +131,19 @@ When a server declares resources or prompts, the client lists them as soon as it
 
 Each tab keeps what its last read or get returned, with a JSON tab for the raw result. Reads and gets aren't tool calls, so they don't go into the run history.
 
+## Describing your server
+
+This client is only as good as what servers say about themselves. MCP has a field for most of it, and the client shows each one somewhere:
+
+- **People see** the server's name, title, version, website and instructions in the server bar and Info; each tool's title, description and annotations in the tool list and the request pane; and the form each input schema makes, with each property's description.
+- **Pre-fill** makes its test data from input schemas: their defaults, examples, enums, formats and ranges.
+- **Results show by content type**: JSON text indented, images and audio drawn, links to follow, structured content beside them.
+- **The Chat app's model** is told every server's instructions and every tool's definition, and chooses tools from their names and descriptions alone.
+
+A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client it is and what it can do.
+
+[`server-template/`](server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](server-template/example.json), the replies of a well-described server to copy. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies server-template/example.json`, and add `http://127.0.0.1:8081`.
+
 ## MCP Support
 
 Both libraries work out which protocol era a server speaks the same way:
@@ -229,7 +242,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
-- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time) and the URIs resource templates make
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, and that the server template is valid MCP and follows its guide
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
@@ -304,6 +317,9 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
 │   ├── fonts/             # Inter and DM Sans (OFL)
 │   └── icons/             # Feather icons, rendered as CSS masks (MIT)
+├── server-template/       # For people building servers: where the client shows each field a server sends
+│   ├── README.md          #   The guide: each descriptive field, where it shows and what to put in it
+│   └── example.json       #   A well-described server's replies, by method (test_mcp_server.py --replies serves them)
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
@@ -355,6 +371,7 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 | `--allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"` | Uses a CORS policy written before 2026-07-28. With `--mode legacy` the client still connects; with `--mode modern` it explains which headers to allow |
 | `--allow-origin https://example.github.io` | Accepts requests from another page origin (repeatable) |
 | `--keep-alive` | Speaks HTTP/1.1 and keeps connections open between requests, as most servers do, instead of a connection per request (the benchmark uses it) |
+| `--replies server-template/example.json` | Answers with the replies in a file, keyed by method, instead of its own tools, resources and prompts: the [server template](server-template/README.md)'s, or your own server's, to see how the client shows them |
 | `--verbose` | Prints every request's headers and body |
 
 `--port` and `--host` change where it listens. Every request is printed with its result, such as `POST tools/call (modern) -> 200`.
@@ -407,13 +424,13 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
-npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, and resource template URIs
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, and the server template
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 ```
 
-The browser test starts its own servers on ports 18080-18092 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18093 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; the server template's replies, shown where its guide says; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 
