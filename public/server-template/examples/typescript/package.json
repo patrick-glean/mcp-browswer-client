@@ -1,0 +1,19 @@
+{
+  "name": "example-helpdesk",
+  "version": "1.4.0",
+  "description": "Example Helpdesk, a well-described MCP server, on the official TypeScript SDK",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings server.ts",
+    "check": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.3.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
