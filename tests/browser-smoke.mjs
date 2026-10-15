@@ -1270,6 +1270,86 @@ async function main() {
             check('Apps: two parts of the screen don\'t wire to each other, and the canvas says why',
                 refused === "Two parts of the screen don't connect to each other: connect them through a tool.", refused);
 
+            // Screens and tools look different: a screen's bar is blue with a monitor, a tool's head
+            // violet with a tool icon. Pins that start or fill a tool are rings, and those things
+            // come out of and land on are solid; a tool shows them under In and Out, and says where
+            // each of its outputs goes. A key says so.
+            const looks = await page.run(`(() => {
+                // A color mixed in CSS comes back as color(srgb r g b), each from 0 to 1.
+                const hue = element => {
+                    const color = getComputedStyle(element).backgroundColor;
+                    const [r, g, b] = color.match(/[\\d.]+/g).map(Number).map(value => (color.startsWith('color(') ? value * 255 : value));
+                    return b > r && b > g ? (r > g ? 'violet' : 'blue') : 'neither';
+                };
+                const node = document.querySelector('app-canvas [data-node="${countRule}"]');
+                const bar = document.querySelector('app-canvas [data-card-bar]');
+                const blank = getComputedStyle(node).backgroundColor;
+                const pin = port => (getComputedStyle(document.querySelector('app-canvas [data-port^="' + port + '"]')).backgroundColor === blank ? 'ring' : 'solid');
+                return [
+                    'screen ' + hue(bar) + (bar.querySelector('.icon-monitor') ? ' with a monitor' : ''),
+                    'tool ' + hue(node.querySelector('.app-node-head')) + (node.querySelector('.app-node-head .icon-tool') ? ' with a tool' : ''),
+                    [...node.querySelectorAll('.app-node-caption span')].map(caption => caption.textContent).join(' and '),
+                    ['run:', 'arg:', 'sent:', 'ok:', 'err:', 'el:run', 'el:input', 'el:output2'].map(port => port.replace(':', '') + ' ' + pin(port)).join(', '),
+                    [...node.querySelectorAll('[data-out]')].map(row => row.dataset.out + ' ' + row.querySelector('.app-node-where').textContent).join(', '),
+                    document.querySelector('app-canvas .app-canvas-key').innerText.replace(/\\s+/g, ' ').trim(),
+                ].join(' | ');
+            })()`);
+            check('Apps: a screen is blue and a tool violet; pins into a tool are rings and those out of it solid, under In and Out, each output says where it goes, and a key says so',
+                looks === 'screen blue with a monitor | tool violet with a tool | In and Out | run ring, arg ring, sent solid, ok solid, err solid, elrun ring, elinput ring, eloutput2 solid | sent —, ok → output2, error — | Screen Tool In: starts a tool, fills a field Out: what comes out of a tool Point at a pin to see its wires.',
+                looks);
+
+            // Pointing at a pin lights up its wires and the pins at their other ends, and the rest dim.
+            const answerPin = JSON.parse(await page.run(`(() => {
+                const pin = document.querySelector('app-canvas [data-port="ok:${countRule}"]');
+                pin.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = pin.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+            })()`));
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: answerPin.x, y: answerPin.y });
+            const lit = await page.waitFor(`(() => {
+                const canvas = document.querySelector('app-canvas');
+                if (!canvas.classList.contains('app-pointing')) return null;
+                return [...canvas.querySelectorAll('.app-hot')].map(element => element.dataset.port || (element.dataset.pill ? 'pill ' + element.dataset.pill : 'wire ' + element.dataset.wire)).sort().join(', ');
+            })()`, 3000);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+            const unlit = await page.waitFor(`!document.querySelector('app-canvas').classList.contains('app-pointing') && !document.querySelector('app-canvas .app-hot') ? 'nothing lit' : null`, 3000);
+            check('Apps: pointing at a pin lights its wire, its transform and the pin at the other end, and the other wires dim until it leaves',
+                lit === `el:output2, ok:${countRule}, pill r:${countRule}:0, wire r:${countRule}:0` && unlit === 'nothing lit', `${lit}; ${unlit}`);
+
+            // The Inspector: what's picked heads it, in its color, and stays as the rest scrolls; the
+            // rest is in sections that open and close, say what's in them while closed and stay as
+            // they're left. A wire opens only its part, and picking it doesn't scroll the page.
+            const folds = `[...document.querySelectorAll('app-inspector [data-fold]')].filter(fold => !fold.hidden).map(fold => fold.dataset.fold.split('.')[1] + (fold.open ? '+' : '-')).join(' ')`;
+            const pageScroll = `(() => { let total = 0; for (let box = document.querySelector('app-inspector').parentElement; box; box = box.parentElement) total += box.scrollTop; return total; })()`;
+            await page.run(`document.querySelector('app-canvas [data-node="${countRule}"] [data-node-status]').click()`);
+            const toolPicked = await page.waitFor(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return head?.dataset.tone === 'tool' && getComputedStyle(head).position === 'sticky'
+                    ? ['.app-inspector-kind', '.app-inspector-title', '.app-inspector-sub'].map(part => head.querySelector(part)?.textContent).join(' ') + ' | ' + ${folds} : null;
+            })()`, 5000);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.call"] > summary').click()`);
+            const callClosed = await page.waitFor(`(() => {
+                const call = document.querySelector('app-inspector [data-fold="rule.call"]');
+                return call && !call.open ? call.querySelector('.app-fold-digest').textContent + ' | ' + localStorage.getItem('appsInspectorFolds') : null;
+            })()`, 3000);
+            await page.run(`document.querySelector('app-canvas [data-node]:not([data-node="${countRule}"]) [data-node-status]').click()`);
+            const otherTool = await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'echo' ? ${folds} : null`, 3000);
+            const scrollBefore = await page.run(pageScroll);
+            await page.run(`document.querySelector('app-canvas [data-pill="r:${countRule}:0"]').click()`);
+            const wirePart = await page.waitFor(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return head?.dataset.tone === 'answer' ? [head.querySelector('.app-inspector-kind').textContent, ${folds}, document.querySelector('app-inspector .app-ends').innerText.replace(/\\s+/g, ' ').trim()].join(' | ') : null;
+            })()`, 3000);
+            const scrollAfter = await page.run(pageScroll);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.when"] > summary').click()`);
+            await page.run(`document.querySelector('app-inspector .app-end[data-select-rule]').click()`);
+            const backToTool = await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'count' ? ${folds} + ' | ' + localStorage.getItem('appsInspectorFolds') : null`, 3000);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.call"] > summary').click()`);
+            check("Apps: the Inspector heads with what's picked, in its color; its sections open and close, say what's in them closed, and stay as they're left; a wire opens only its part, its ends a click away, without scrolling the page",
+                toolPicked === 'Tool count on modern server | when+ call+ then+' && callClosed === 'count on modern server | {"rule.call":false}' && otherTool === 'when+ call- then+'
+                    && wirePart === 'Where the answer goes | when- call- then+ | count → output2' && scrollAfter === scrollBefore && backToTool === 'when+ call- then+ | {"rule.call":false}',
+                `${toolPicked}; ${callClosed}; ${otherTool}; ${wirePart}; scrolled ${scrollBefore} → ${scrollAfter}; ${backToTool}`);
+
             // Run: the screen takes clicks, and both tools wired to the button answer.
             await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
             await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('output2')`);
@@ -1674,6 +1754,13 @@ async function main() {
             })()`);
             check("Apps: Front desk, under Examples, has four screens, each a card on the canvas in the order people go through them, with an arrow for each way between them, and runs on the first",
                 deskShown === deskOpened && firstScreen === 'welcome* confirm done notfound', `${deskShown || await page.run(deskCanvas)}; ${firstScreen}`);
+            const deskLooks = await page.run(`[
+                [...document.querySelectorAll('app-canvas [data-card-bar]')].map(bar => bar.querySelector('.app-screen-name').textContent + (bar.querySelector('.icon-monitor') ? '' : ' (no monitor)') + ' ' + (bar.querySelector('.app-screen-opens, .app-screen-kind')?.textContent || '')).join(', '),
+                ...[...document.querySelectorAll('app-canvas [data-node]')].map(node => node.querySelector('.app-node-title').textContent + ': ' + [...node.querySelectorAll('[data-out]')].map(row => row.querySelector('.app-node-where').textContent).join(' / ')),
+            ].join(' | ')`);
+            check("Apps: each of Front desk's cards says it's a screen (the first that it opens there), and each tool's outputs say where they go, the screens they go to by name",
+                deskLooks === 'Welcome Opens here, Confirm Screen, Checked in Screen, Not found Screen | find_visit: — / → visit, go to Confirm / → missing, go to Not found | check_in: — / → badge, go to Checked in / → visit | call_front_desk: — / → missing / → missing',
+                deskLooks);
 
             // Picking a card picks its screen and shows the app there; a button that goes to a
             // screen has an arrow into its card.

@@ -15,7 +15,7 @@ import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox 
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
 import {
     answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, jsonIn, newRule, normalizeRule, renameInFlow,
-    renderTemplate, routeSummary, rulesFor, templateValue, triggerIndex, triggersOf,
+    renderTemplate, routeSummary, routeTargets, rulesFor, templateValue, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
 import { canConnect, connect, disconnect, goPairOf, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
 import { clientRoot, packApp, RUN_HASH, runLink, unpackApp } from '../public/apps/link.js';
@@ -1027,6 +1027,18 @@ test("a download's index.html runs the app in the client it came from, and its R
     assert.match(readme, /\n## Run it\n\nOpen `index\.html` in a browser: it runs the app in MCP Browser Client at http:\/\/127\.0\.0\.1:8080\/, which calls its servers for it from your browser, with your sign-ins, and there's nothing to install\. It runs version 3, which travels in the page's link, so a change to app\.dml doesn't change what it runs\./);
     assert.match(readme, /It calls this server, which you add under Servers in the Workbench, or with Add it when the app runs:\n\n- Mock server: http:\/\/127\.0\.0\.1:8081\/\n$/);
     assert.match(readmeFor(app), /MCP Browser Client at https:\/\/patrick-glean\.github\.io\/mcp-browswer-client\//, 'the public client when no other is said');
+});
+
+test("where what comes out of a tool goes: each of its rule's routes for it, once, in order", () => {
+    const [find] = frontDeskApp({ name: 'Front desk' }).flow;
+    assert.deepEqual(routeTargets(find, 'ok'), ['visit', 'confirm']);
+    assert.deepEqual(routeTargets(find, 'error'), ['missing', 'notfound']);
+    assert.deepEqual(routeTargets(find, 'sent'), []);
+    const [chat] = chatApp({ shell: { servers: {} }, model: demoModel(), name: 'Chat' }).flow;
+    assert.deepEqual(routeTargets(chat, 'sent'), ['conversation', 'message'], "a chat's message joins the conversation and its field clears as it's sent");
+    assert.deepEqual(routeTargets(chat, 'ok'), ['conversation']);
+    assert.deepEqual(routeTargets({ then: [{ show: '{{text}}', into: 'a' }, { if: 'ok', into: 'a' }, { if: 'ok', into: '' }] }, 'ok'), ['a'], 'a route without an if is one if it works');
+    assert.deepEqual(routeTargets(null, 'ok'), []);
 });
 
 test('what Start calls: the rules that run as the app opens, which opening it asks about', () => {
