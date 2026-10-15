@@ -43,11 +43,27 @@ function picksOf(values) {
     return picks;
 }
 
+// Brings an element into view in the box that scrolls around it, and no other: in the Inspector,
+// its own scroll and not the page's, below the head that stays at its top.
+function reveal(element) {
+    let box = element.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    if (!box) return;
+    const head = box.querySelector(':scope > .app-inspector-head');
+    const view = box.getBoundingClientRect();
+    const at = element.getBoundingClientRect();
+    const top = at.top - view.top - (head?.offsetHeight || 0) - 8;
+    const bottom = at.bottom - view.bottom + 8;
+    if (top < 0) box.scrollTop += top;
+    else if (bottom > 0) box.scrollTop += Math.min(bottom, top);
+}
+
 export class RuleEditor {
     // `by` is the component the edits come from; `onRemove` and `onMove(step)` change the flow
-    // around the rule; `focus` points at one part of it: { trigger }, { arg } or { route }.
-    constructor({ shell, workbench, apps, container, ruleId, index = 0, count = 1, by = null, focus = null, onRemove = null, onMove = null, signal }) {
-        Object.assign(this, { shell, workbench, apps, container, ruleId, index, count, by, focus, onRemove, onMove, signal });
+    // around the rule; `focus` points at one part of it: { trigger }, { arg } or { route }. With
+    // `folds` ({ open(part) }), its parts open and close, as the Inspector's sections do.
+    constructor({ shell, workbench, apps, container, ruleId, index = 0, count = 1, by = null, focus = null, folds = null, onRemove = null, onMove = null, signal }) {
+        Object.assign(this, { shell, workbench, apps, container, ruleId, index, count, by, focus, folds, onRemove, onMove, signal });
         this.lastShow = null;
         container.addEventListener('click', event => this.clicked(event), { signal });
         container.addEventListener('change', event => this.changed(event), { signal });
@@ -103,6 +119,17 @@ export class RuleEditor {
             .map(element => element.id);
     }
 
+    // A part of the rule under its label; with `folds`, one that opens and closes, saying in a line
+    // what's in it while it's closed.
+    part(part, label, body, attributes = '') {
+        if (!this.folds) return `<div class="app-rule-row" ${attributes}><span class="app-rule-label">${label}</span>${body}</div>`;
+        return `
+            <details class="app-rule-row app-fold" data-fold="rule.${part}" ${attributes}${this.folds.open(part) ? ' open' : ''}>
+                <summary class="app-fold-head"><span class="app-rule-label">${label}</span><span class="app-fold-digest" data-digest="${part}"></span></summary>
+                <div class="app-fold-body">${body}</div>
+            </details>`;
+    }
+
     render() {
         const rule = this.rule;
         if (!rule) {
@@ -112,7 +139,7 @@ export class RuleEditor {
         const triggers = triggersOf(rule);
         const focused = (kind, index) => (this.focus?.[kind] === index ? ' app-focus' : '');
         this.container.innerHTML = `
-            <div class="app-rule" data-rule="${escapeHtml(rule.id)}">
+            <div class="app-rule${this.folds ? ' app-rule-folds' : ''}" data-rule="${escapeHtml(rule.id)}">
                 <div class="app-rule-head">
                     <span class="app-rule-number" aria-hidden="true">${this.index + 1}</span>
                     <p class="app-rule-sentence" data-sentence></p>
@@ -122,8 +149,7 @@ export class RuleEditor {
                         ${this.onRemove ? `<button type="button" class="btn-icon btn-sm btn-tertiary btn-danger" data-remove-rule aria-label="Delete rule ${this.index + 1}"><span class="icon icon-trash" aria-hidden="true"></span></button>` : ''}
                     </span>
                 </div>
-                <div class="app-rule-row">
-                    <span class="app-rule-label">When</span>
+                ${this.part('when', 'When', `
                     <div class="app-rule-when">
                         <ol class="app-trigger-list">${triggers.map((candidate, index) => `
                             <li class="app-trigger${focused('trigger', index)}" data-trigger="${index}">
@@ -134,14 +160,9 @@ export class RuleEditor {
                             </li>`).join('')}
                         </ol>
                         <button type="button" class="btn-sm btn-tertiary app-add-trigger" data-add-trigger><span class="icon icon-plus" aria-hidden="true"></span>${triggers.length ? 'Or when…' : 'When…'}</button>
-                    </div>
-                </div>
-                <div class="app-rule-row">
-                    <span class="app-rule-label">Call</span>
-                    <div class="app-call" data-rule-call></div>
-                </div>
-                <div class="app-rule-row" data-prompt-row hidden>
-                    <span class="app-rule-label">Prompt</span>
+                    </div>`)}
+                ${this.part('call', 'Call', '<div class="app-call" data-rule-call></div>')}
+                ${this.part('prompt', 'Prompt', `
                     <div class="app-prompt">
                         <label class="app-field"><span>The prompt goes in</span><select data-prompt-field aria-label="The field the prompt goes in"></select></label>
                         <div class="app-prompt-more" data-prompt-more>
@@ -150,10 +171,8 @@ export class RuleEditor {
                         </div>
                         <p class="app-note text-secondary" data-prompt-note></p>
                         <details class="app-prompt-preview" data-prompt-details><summary>What it adds to the prompt</summary><pre class="mono" data-prompt-preview></pre></details>
-                    </div>
-                </div>
-                <div class="app-rule-row">
-                    <span class="app-rule-label">Then</span>
+                    </div>`, 'data-prompt-row hidden')}
+                ${this.part('then', 'Then', `
                     <div class="app-routes">
                         <ol class="app-route-list">${(rule.then || []).map((route, index) => `
                             <li class="app-route${focused('route', index)}" data-route="${index}">
@@ -175,8 +194,7 @@ export class RuleEditor {
                             <button type="button" class="btn-sm btn-tertiary" data-add-route="ok"><span class="icon icon-plus" aria-hidden="true"></span>If it works</button>
                             <button type="button" class="btn-sm btn-tertiary" data-add-route="error"><span class="icon icon-plus" aria-hidden="true"></span>If it fails</button>
                         </div>
-                    </div>
-                </div>
+                    </div>`)}
                 <ul class="app-rule-problems" data-problems hidden></ul>
             </div>`;
         this.callEditor = new CallEditor({
@@ -191,8 +209,13 @@ export class RuleEditor {
         this.callEditor.render();
         this.fill();
         const focus = this.container.querySelector('.app-focus');
-        if (this.focus?.arg) this.container.querySelector(`[data-rule-call] [name="${CSS.escape(this.focus.arg)}"]`)?.closest('.tool-input-card')?.classList.add('app-focus');
-        (focus || this.container.querySelector('.app-focus'))?.scrollIntoView({ block: 'nearest' });
+        if (this.focus?.arg) {
+            const card = this.container.querySelector(`[data-rule-call] [name="${CSS.escape(this.focus.arg)}"]`)?.closest('.tool-input-card');
+            card?.classList.add('app-focus');
+            card?.closest('details.wb-optional')?.setAttribute('open', '');
+        }
+        const shown = focus || this.container.querySelector('.app-focus');
+        if (shown) reveal(shown);
     }
 
     // Puts the rule's values into the card's controls.
@@ -294,12 +317,34 @@ export class RuleEditor {
             : '';
     }
 
+    // What each part holds, in a line, for when it's closed.
+    fillDigests() {
+        const rule = this.rule;
+        if (!this.folds || !rule) return;
+        const triggers = triggersOf(rule);
+        const into = [...new Set((rule.then || []).map(route => route.into).filter(Boolean))];
+        const added = [String(rule.instructions ?? '').trim() && 'instructions', rule.tools && 'tools', asksOf(rule, this.apps.elements()).length && 'boxes'].filter(Boolean);
+        const digests = {
+            when: triggers.length ? triggers.map(({ element, event }) => (event === 'open' ? 'the app opens' : `${element} ${EVENTS[event]}`)).join(' or ') : 'nothing yet',
+            call: rule.call?.toolName ? `${rule.call.toolName} on ${this.apps.serverName(rule.call.serverUrl)}` : 'no tool yet',
+            prompt: rule.prompt ? `in ${rule.prompt}${added.length ? `, with ${listed(added)}` : ''}` : 'none',
+            then: rule.then?.length ? `${rule.then.length === 1 ? 'a route' : `${rule.then.length} routes`}: ${into.join(', ')}` : 'nothing yet',
+        };
+        for (const [part, text] of Object.entries(digests)) {
+            const digest = this.container.querySelector(`[data-digest="${part}"]`);
+            if (!digest) continue;
+            digest.textContent = text;
+            digest.title = text;
+        }
+    }
+
     // The sentence and what keeps the rule from running, after any change to it.
     update() {
         const rule = this.rule;
         const card = this.container.querySelector('.app-rule');
         if (!rule || !card) return;
         this.fillPrompt();
+        this.fillDigests();
         card.querySelector('[data-sentence]').textContent = describeRule(rule, {
             elementName: element => element || '…',
             serverName: url => (url ? this.apps.serverName(url) : '…'),

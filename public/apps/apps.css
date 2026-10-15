@@ -2210,9 +2210,8 @@ app-canvas[data-mode='run'] .app-port {
 app-inspector {
     position: sticky;
     top: 0;
-    gap: 10px;
     max-height: calc(100vh - 150px);
-    padding: 14px;
+    padding: 0 14px 14px;
     overflow: auto;
 }
 
@@ -2223,10 +2222,29 @@ app-inspector {
     }
 }
 
+/* The colors of what's picked, as the canvas draws it. */
+.wb-apps [data-tone] { --tone: var(--theme-text-secondary); }
+.wb-apps [data-tone='screen'] { --tone: var(--app-screen); }
+.wb-apps [data-tone='tool'] { --tone: var(--app-tool); }
+.wb-apps :is([data-tone='start'], [data-tone='button'], [data-tone='trigger']) { --tone: var(--theme-warning-foreground); }
+.wb-apps :is([data-tone='input'], [data-tone='arg']) { --tone: var(--theme-link); }
+.wb-apps :is([data-tone='output'], [data-tone='answer']) { --tone: var(--theme-success-foreground); }
+.wb-apps [data-tone='sent'] { --tone: var(--theme-info-foreground); }
+.wb-apps [data-tone='error'] { --tone: var(--theme-error); }
+
+/* What's picked stays at the top while the rest scrolls, under a band of its color. */
 .app-inspector-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    margin: 0 -14px;
+    padding: 11px 14px 9px;
+    border-top: 3px solid var(--tone);
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
 }
 
 .app-inspector-kind,
@@ -2239,6 +2257,25 @@ app-inspector {
     text-transform: uppercase;
 }
 
+.app-inspector-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--tone);
+}
+
+.app-inspector-kind .icon {
+    width: 12px;
+    height: 12px;
+}
+
+.app-inspector-swatch {
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--tone);
+    border-radius: 50%;
+}
+
 .app-inspector-section {
     margin-top: 6px;
 }
@@ -2248,9 +2285,143 @@ app-inspector {
     overflow-wrap: anywhere;
 }
 
+.app-inspector-sub {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
 .app-inspector-note {
-    margin-top: 4px;
+    margin: 8px 0 6px;
     font-size: 0.8125rem;
+}
+
+/* A section that opens and closes; closed, it says in a line what's in it. */
+.app-fold {
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.app-fold[hidden] {
+    display: none;
+}
+
+.app-fold > .app-fold-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 0;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.app-fold > .app-fold-head::-webkit-details-marker {
+    display: none;
+}
+
+.app-fold > .app-fold-head::before {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    background-color: var(--theme-text-secondary);
+    content: '';
+    -webkit-mask: url('../icons/chevron-right.svg') center / contain no-repeat;
+    mask: url('../icons/chevron-right.svg') center / contain no-repeat;
+    transition: transform 0.12s ease;
+}
+
+.app-fold[open] > .app-fold-head::before {
+    transform: rotate(90deg);
+}
+
+.app-fold > .app-fold-head:hover .app-fold-title,
+.app-fold > .app-fold-head:hover .app-rule-label {
+    color: var(--theme-text-primary);
+}
+
+.app-fold > .app-fold-head:focus-visible {
+    border-radius: var(--radius-100);
+    outline: 2px solid var(--theme-link);
+}
+
+.app-fold-title,
+.app-fold > .app-fold-head .app-rule-label {
+    flex: none;
+    padding: 0;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-fold-digest {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-fold[open] > .app-fold-head .app-fold-digest {
+    display: none;
+}
+
+.app-fold-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 0 12px;
+}
+
+/* A rule in the Inspector is its sections, not a card. */
+app-inspector .app-rule.app-rule-folds {
+    gap: 0;
+    padding: 0;
+    border: none;
+}
+
+app-inspector .app-rule-folds > .app-rule-head {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.app-rule-row.app-fold {
+    display: block;
+}
+
+/* A wire's two ends, a click away. */
+.app-ends {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 8px;
+    color: var(--theme-text-secondary);
+}
+
+.app-end {
+    gap: 5px;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 9px;
+    border-color: color-mix(in srgb, var(--tone) 45%, var(--theme-border-light));
+    background: color-mix(in srgb, var(--tone) 10%, var(--theme-background));
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+}
+
+.app-end .icon {
+    width: 12px;
+    height: 12px;
+    color: var(--tone);
+}
+
+.app-end:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--tone) 18%, var(--theme-background));
 }
 
 .app-inspector-tips {
@@ -2290,24 +2461,56 @@ app-inspector .app-rule-label {
     padding-top: 0;
 }
 
+/* In the Inspector's width, a trigger is one line: or, what, what happens, and ×. */
+app-inspector .app-trigger {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr) 24px;
+    gap: 4px;
+}
+
+app-inspector .app-trigger .app-route-word { grid-column: 1; }
+app-inspector .app-trigger [data-when-element] { grid-column: 2; }
+app-inspector .app-trigger [data-when-event] { grid-column: 3; }
+app-inspector .app-trigger [data-remove-trigger] { grid-column: 4; }
+
+app-inspector .app-trigger select {
+    min-width: 0;
+}
+
+/* A route is two lines: when, where it goes and ×; then what it shows there, and how. One into
+   a screen goes there, on its first line. */
 app-inspector .app-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--theme-border-light);
 }
 
-app-inspector .app-route [data-route-show],
+app-inspector .app-route::after {
+    flex-basis: 100%;
+    order: 5;
+    height: 0;
+    content: '';
+}
+
 app-inspector .app-route-where {
-    flex: 1 1 100%;
+    display: contents;
 }
 
-app-inspector .app-route-where select {
-    flex: 1;
-    min-width: 0;
+app-inspector .app-route select {
+    width: auto;
 }
 
-app-inspector .app-route-where [data-route-into] {
-    flex: 2;
-}
+app-inspector .app-route [data-route-if] { order: 1; flex: 0 1 auto; min-width: 0; max-width: 112px; padding-right: 26px; }
+app-inspector .app-route [data-route-into-word] { order: 2; }
+app-inspector .app-route [data-route-into] { order: 3; flex: 1 1 56px; min-width: 0; padding-right: 26px; }
+app-inspector .app-route [data-remove-route] { order: 4; }
+app-inspector .app-route [data-route-put] { order: 6; }
+app-inspector .app-route [data-route-show] { order: 7; flex: 1 1 100px; min-width: 0; }
+app-inspector .app-route [data-route-how] { order: 8; flex: 0 1 104px; min-width: 0; }
+app-inspector .app-route-go [data-route-put] { order: 2; }
 
 .app-connections {
     display: flex;
@@ -2325,6 +2528,7 @@ app-inspector .app-route-where [data-route-into] {
     min-height: 28px;
     padding: 4px 8px;
     border: none;
+    border-left: 3px solid var(--tone, transparent);
     border-radius: var(--radius-100);
     background: var(--theme-background-light);
     font-size: 0.75rem;
@@ -2335,6 +2539,10 @@ app-inspector .app-route-where [data-route-into] {
 
 .app-inspector-actions {
     gap: 6px;
+}
+
+app-inspector > .app-inspector-actions {
+    padding-bottom: 10px;
 }
 
 /* ---------- The servers an app calls, and which of yours could take its calls instead ---------- */
