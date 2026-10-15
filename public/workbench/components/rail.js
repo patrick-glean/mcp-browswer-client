@@ -7,6 +7,8 @@ import { WbElement } from './base.js';
 
 const RECENT_RUNS = 6;
 const EMAIL = /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/;
+// Where Glean shows a company's MCP endpoint, to copy: Your settings, Third party apps and MCP.
+const GLEAN_SETTINGS_URL = 'https://app.glean.com/settings/connected-apps';
 
 export class WbRail extends WbElement {
     setup(signal) {
@@ -48,8 +50,9 @@ export class WbRail extends WbElement {
                     <button type="button" id="addServerToggle" class="btn-icon btn-sm btn-tertiary" title="Add a server" aria-label="Add a server" aria-expanded="false" aria-controls="addServerForm"><span class="icon icon-plus" aria-hidden="true"></span></button>
                 </header>
                 <form id="addServerForm" class="wb-add-server" hidden>
-                    <input type="text" id="serverUrl" placeholder="Server URL, or your work email for Glean" spellcheck="false" autocomplete="off" aria-label="Server URL or work email">
+                    <input type="text" id="serverUrl" placeholder="Server URL or work email" spellcheck="false" autocomplete="off" aria-label="Server URL, or your work email for Glean" aria-describedby="addServerHint">
                     <input type="text" id="serverAlias" placeholder="Name (optional)" autocomplete="off" aria-label="Name for the server">
+                    <p class="wb-add-note" id="addServerHint">A work email finds your company's Glean. Or copy its MCP endpoint from <a href="${GLEAN_SETTINGS_URL}" target="_blank" rel="noopener">Glean's settings</a>.</p>
                     <div class="button-row">
                         <button type="submit" id="addServerBtn" class="btn-primary btn-sm">Add</button>
                         <button type="button" class="btn-sm btn-tertiary" data-cancel-add>Cancel</button>
@@ -239,7 +242,7 @@ export class WbRail extends WbElement {
                         <span class="wb-meta">${escapeHtml(timeAgo(run.startedAt))}</span>
                     </button>
                 </li>`).join('')
-            : '<li class="wb-list-note">No runs yet. Every tool call lands here, from the Workbench and the Chat app.</li>';
+            : '<li class="wb-list-note">No runs yet. Every tool call lands here, from the Workbench and from apps.</li>';
     }
 
     // --- Clicks ---

@@ -5,9 +5,11 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 Everything runs in a web page and a service worker that every open tab shares. There's nothing to install or configure on anyone's machine: open the site, add servers, sign in, and every control is in the page.
 
 - **MCP client libraries, swapped while it runs.** There are two: one on the official TypeScript SDK, which runs by default, and one in Rust compiled to WebAssembly. Both implement the same interface, pass the same browser test and run in the same benchmark. Runtime, in the top bar, switches between them. See [MCP client libraries](#mcp-client-libraries).
-- **The agent loop.** Apps holds the apps built on the libraries. The first, Chat, sends your messages to a model that is an MCP tool, tells it which tools your servers have, and runs the tool calls it writes in its replies. See [The agent loop](#the-agent-loop).
+- **The agent loop.** A rule in an app can call a model that is an MCP tool, tell it which tools your servers have, and run the tool calls it writes in its answers. Chat, one of the examples in Apps, is that loop as an app you can change. See [The agent loop](#the-agent-loop).
+- **Demo servers built in.** The examples come with MCP servers of their own that answer inside the client's service worker: a front desk's visitor system and a stand-in model. They work with nothing to install, and an app moves to your own server once it has the same tools. See [Demo servers built in](#demo-servers-built-in).
+- **Apps you build.** An app is a screen and a flow: *when* something happens on the screen, *call* a tool, *then* put what it returns back on the screen. Start from an example or a blank app, build the screen from components (on one screen or several, for an app in steps) or take HTML a tool returns, and try the app as you go. Launch it on its own in a tab, share a link that runs it, embed it in any page (or in `embed.html`, which runs it when opened), or download it as a folder that runs it once it's served: the app, with its flow written down as DML, beside the client that runs it. See [Building apps](#building-apps).
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
-- **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and conversations live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
+- **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and apps live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
 
 It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions. It works best with servers that describe themselves well, since what a server says about itself is what people and models see. If you're building one, see [Describing your server](#describing-your-server).
 
@@ -15,9 +17,9 @@ It speaks MCP 2026-07-28 and falls back automatically for servers still on the o
 
 Open [patrick-glean.github.io/mcp-browswer-client](https://patrick-glean.github.io/mcp-browswer-client/). The Guide (top right, and open on your first visit) has one-click buttons for public MCP servers that need no account, such as Hugging Face and Microsoft Learn. Choose one, click a tool, fill in its fields and choose Run. The log at the bottom shows what happened.
 
-Runtime, in the top bar, shows which MCP client library is running and switches it. The Workbench is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed. Apps holds the Chat app, an agent loop over your servers' tools.
+Runtime, in the top bar, shows which MCP client library is running and switches it. The Workbench is where you work with servers: Pre-fill a tool's fields, use `{{variables}}`, save the calls that work and run them again to see what changed. Apps holds the apps you build. Its examples, Chat (an agent loop over your servers' tools), Project pulse (a dashboard) and Front desk (a visitor kiosk over four screens), and New app each start one that already works.
 
-For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your Glean MCP server URL) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
+For servers that need an account, the client signs in with OAuth, as desktop MCP clients do. The Guide starts with Glean: enter your work email (or paste your MCP endpoint, which the Guide shows you where to copy in Glean's settings) and choose Add and sign in. See [Glean](#glean) for the one catch: Glean only answers pages from origins it allows.
 
 ## MCP client libraries
 
@@ -47,15 +49,184 @@ The library isn't what limits tool calls. Through the whole app both run at the 
 
 ## The agent loop
 
-Apps, in the top bar, holds the apps built on the libraries. The first, Chat, is an agent loop over your servers' tools, run by the service worker:
+The agent loop is a rule in an app (see [Building apps](#building-apps)) whose call is a model: the rule tells the model which tools your servers have, and runs the tool calls it writes in its answers. **Chat**, under Examples in Apps, is that loop as an app you can change: a conversation, a message field and Send, with one rule.
 
-- **The model is an MCP tool** on any server you've added. Choose it under Model, tick "Your message goes here" on the text field that should get what you type, and tick "The conversation goes here" on a list field to send the conversation.
-- **Tool choice.** With a conversation field, the model gets the built-in instructions (how to ask for a tool call), every server you've added with its tools' names, descriptions and schemas, and the context you add under Instructions and context, followed by the conversation. Static tokens are left out of what the model sees. Without a conversation field, the model gets only your message.
-- **Tool use.** A JSON-RPC request in a code block of the model's reply, `{"jsonrpc": "2.0", "method": "<tool name>", "params": {…}}`, is a tool call. The worker finds a server with that tool, calls it through the library and adds the result to the conversation, at most three such calls per conversation every 10 seconds. The model sees the results with your next message.
-- **Everything is recorded.** The model's calls and the tool calls from its replies are runs like any other. The dock's Runs shows each one with its arguments and result, and any of them can be opened in the Workbench and run again.
-- **Conversation** shows the conversation's ID, with New conversation to start over. Conversations are kept in this browser's IndexedDB.
+- **The model is an MCP tool**: Glean's `chat` if you've added Glean, else a server's `chat` tool (the mock has a stand-in), else the demo model, a stand-in built in, unless you choose another under Model, which the Apps page shows with no app open and Ask a model beside its request: a server, its tool and the field the prompt goes in. Its other required text fields get your own words, as Glean's `_user_goal` asks.
+- **The conversation** is a box that shows each message with who it's from. Its value is the list of them (`User: …`, `Assistant: …`, `Tool: …`), which the rule sends to the model's list field (`context` on Glean, `history` on the mock). As it's sent, your message joins the conversation and the field is cleared; the answer, or why there's none, joins it after.
+- **Tool choice.** The rule's Prompt, in the Inspector, adds to the message its instructions and, with "It can call your servers' tools", how to write a tool call and every server you've added with its tools' names, descriptions and schemas. Static tokens are never part of it.
+- **Tool use.** A JSON-RPC request in a code block of the model's answer, `{"jsonrpc": "2.0", "method": "<tool name>", "params": {…}}`, is a tool call. The app finds a server with that tool, calls it as it calls any tool, and adds the result to the conversation, at most three such calls every 10 seconds. The model sees the results with your next message.
+- **Everything is recorded.** The model's calls and the tool calls from its answers are runs like any other, from App and From a reply. The dock's Runs shows each one with its arguments and result, and any of them can be opened in the Workbench and run again.
 
-The loop is in `public/sw.js` (`handleToolCall`, `modelArguments` and `runReplyToolCall`), and the built-in instructions are in `public/chat-instructions.js`. [DEVELOPMENT.md](DEVELOPMENT.md#the-agent-loop) has its messages and where it keeps what. Next are apps described by a manifest, holding the model, the tools it may use, pinned arguments, instructions and checks on the output, so other apps can be built the same way.
+The loop is in `public/apps/agent.js` (what the model is told, the calls in its answer, the limit) and `public/apps/runner.js` (`run` and `runToolCalls`). Download Chat and its `app.dml` has all of it: the instructions, `tools="yes"`, and the routes as it's sent. [DEVELOPMENT.md](DEVELOPMENT.md#the-agent-loop) has the details.
+
+## Building apps
+
+An app is a **screen** and a **flow**. The screen is what people see. The flow is a list of rules, each of which says *when* something happens on the screen, which tool to *call* with what, and *then* where on the screen its answer goes. Open Apps, then New app: it starts with a title, a text box, a button and an output, and one rule that sends the text box to the first tool on your servers that takes text and puts its answer in the output. It works at once, so you can change it one step at a time and watch what happens. The examples, Chat, Project pulse and Front desk, start the same way, as apps of your own. They come with [demo servers built in](#demo-servers-built-in), so they work before you've added a server of your own.
+
+Choosing an example asks first: it says what the example is, the name its copy gets, what it calls and how to delete it, and adds the copy under Your apps once you choose Add a copy. Choose one you've added before, and it offers to open your copy instead, or to add another. Each of Your apps has a ⋯ menu, always there on the app shown and on the others when you point at them, with Launch in a new tab, Duplicate and Delete (a second click confirms); the header's ⋯ has the same for the app shown. Deleting an app also forgets its zoom and scroll, and whether it runs what Start calls.
+
+### The canvas
+
+An app opens on the canvas, where you wire the screen to tools much as you'd wire an interface to code in Xcode:
+
+- **The screen** runs as people will see it, on a card with a blue title bar, with a ● beside each of its elements (buttons, fields and outputs, by id). The names there widen their column to fit, and one too long for it shows in full when you point at it. An app with several screens is a storyboard: each screen is a card, in the order people go through them (see [Screens](#screens-an-app-in-steps)).
+- **Start**, above the first screen, is where the app begins. Wire it to a tool to call that tool when the app opens, such as one that fills a dashboard. Opening an app whose Start calls a tool asks first, in a bar under the header, whether to run that each time you open it: until you answer, and after Don't run it, the app opens without calling it, and What happened says so. The answer is kept for the app in this browser, and Start's Inspector changes it (Ask, Run it or Don't run it). Restart, Preview and Launch always run it; an example that calls a tool as it opens asks as you add it.
+- **Each rule is a tool** to the right, with a violet head: under **In**, ▶ Run (what starts it) and a row for each of its fields, with what fills it; under **Out**, ↗ Sent, ✓ Answer and ! Error, each saying where it goes: the elements by id, and a screen it goes to by name, in blue with a screen's icon (`→ visit, Confirm`).
+- **Pins.** A ● that starts a tool or fills one of its fields is a ring: a button's, a field's, Start's, and a tool's Run and fields. One that takes what comes out of a tool is solid: a tool's Sent, Answer and Error, an output's, and a screen's own, so a wire joins a ring to a ring or a solid to a solid. A tool's inputs are on its left and its outputs on its right, so what it answers flows on to the next screen; a wire that goes back to the screen left of it, as most answers do, leaves from a second pin on the left, which shows only then. Their colors are the wires': orange starts, blue fills, green answers, red errors. The key under the canvas says so, and pointing at a pin lights up its wires, their transforms and the pins at their other ends while the other wires step back; pointing at a wire lights up its two pins.
+- **Wires** join them. Drag from a ● to another: from a button to a tool's Run to call the tool when the button is clicked, from a field to one of the tool's fields to fill it with what the field holds, and from a tool's Answer or Error back to an element to show it there. Sent goes to the screen as the call goes out, before there's an answer: it shows what was sent (a chat's message, in its conversation), or clears a field. The ●s a wire can reach light up while you drag, and a drop that can't connect says why. Each wire is one part of its rule, so removing it (Delete, or Remove in the Inspector) takes that part away.
+- **Transforms** sit on the wires from a tool, labeled with what of the answer shows (`text` at first). Pick one to change it: one value from the answer (the Inspector lists the last answer's values, a click each), your own words around values, the whole result as JSON, or the HTML in the answer, shown as HTML.
+- **The Library** adds components, your servers' tools and transforms: click one, or drag it onto the canvas. A component goes on the screen picked (or the one it's dropped on); a Screen starts another step of the app, on a card of its own (see [Screens](#screens-an-app-in-steps)).
+- **The Inspector** changes what's picked: an element's id and label, a tool's rule as a sentence with its fields, a wire, or Start. With nothing picked, it's the screen. What's picked heads it in the canvas's color for it (a screen blue, a tool violet with its server, a wire its own) and stays there as you scroll. The rest is in sections that open and close: a tool's When, Call, Prompt and Then; an element's settings and connections; a screen's settings, what's on it and how people get there. A closed one says what's in it in a line ("echo on Mock server", "6 routes: summary, health…"), and the sections stay as you leave them, in this browser; How it works and Prompt start closed. Picking a wire opens only its part of the rule, with its two ends a click away.
+- **Design and Run.** In Design, clicks on the screen pick its elements. In Run, the screen takes them, and wires light up as their rules run. What happened, below, lists each step: what was clicked, the call with the arguments it sent, the answer and where it went. Each call is a run in History, from App. Open in the Workbench, beside an answer, opens that call there: the tool filled in with what the app sent (its screen's values where the rule says `{{message}}`, and what it added to the prompt), ready to run again, and what came back, with the arguments as sent under Sent. Restart runs the app from the start.
+- **Arranging it.** Drag a tool or a screen's card by its title to move it, and the background to move around the canvas. − and + zoom out and in (so does Ctrl or ⌘ with the wheel, or a pinch), 100% goes back, and Fit shows the whole app. Tidy up puts the screens back in the order people go through them, and every tool beside the screen that starts it, level with what it's wired to; a new app starts out that way. Where you put things is part of the app, so it's there next time and in the download, and the zoom and where the canvas was scrolled stay for each app in this browser.
+- **Resizing.** Drag the edge beside the list of apps or the Inspector, or the one under the canvas, to make them wider or the canvas taller; double-click one to put it back. The sizes stay for next time.
+
+**Outline**, beside Canvas at the top, shows the same app as cards: the screen's components, the rules as sentences to edit in place, and Try it, the app running beside them.
+
+**Preview**, beside them, shows the app as it is when it's launched. Its screen fills the window and starts from the beginning (what Start calls runs), with nothing of the builder on it: no ports, wires or What happened. Its calls are real, and the bar above it says what the app is doing, and when a call fails without the screen saying so. Phone, Tablet and Desktop set the width it gets (390 and 820 pixels, or the window's), and keep what's on the screen, as resizing a window would; Restart launches it again, and Escape or Exit preview goes back where you were.
+
+**Launch**, beside Preview, opens the app on its own in a new tab, at an address you can bookmark (`?app=` and its id, at the client's address): the window is its screen, as in Preview, it runs what Start calls as it starts, and its bar has Restart and Open in the builder. It's the app as you saved it, so reloading the tab picks up what you've changed since. That address only works in this browser, where the app is kept.
+
+**Share**, beside Launch, has the ways to run the app somewhere else: embed it in a page, run it on its own (the download, below), or send a link. Embeds and links run the app in MCP Browser Client at **the client's address**, which Share sets: this page's own unless you set another, such as the public client's when you build on your own computer, since an address on this computer works only here. Share checks that the client at the address it's given answers and is a version that runs apps from links and embeds, and says when it isn't.
+
+**A link that runs it.** Copy link, in Share or the header's ⋯, puts the app itself in a link: the client's address, then `#run=` and the app's DML, deflated and in base64url (Front desk's is about 1,500 characters). What follows `#` stays in the browser, so the server that serves the client never sees the app. Whoever opens the link runs the app in their browser, on their own servers and sign-ins: the demo servers it calls are added for them, and its bar offers to add the other servers it calls, to sign in where one needs it, and to add the app to Your apps (nothing of it is kept until then). Since its calls go to their servers as them, an app from a link asks before running what Start calls, as opening an app in the builder does, unless all it calls then are demo servers, with no model there let use your servers' tools, and its bar says it came in a link. A link that was cut short says so.
+
+**An embed.** Share's embed code is an iframe of that link with `?embed`, for any web page:
+
+    <iframe src="https://patrick-glean.github.io/mcp-browswer-client/?embed#run=…" title="Front desk" width="100%" height="640" style="border: 0"></iframe>
+
+In its embed mode the client shows the app with a slim bar: Restart, and Open on its own, which opens the link in a tab of its own. **Download embed.html** saves a page that is that iframe, filling the window: open it, from a disk too, and the app runs, since only the page is a file and the client comes from its address. Inside a page on another site, a browser gives the client storage of its own, so the app has none of your servers or sign-ins there. It adds the demo servers it calls and offers to add the others. Its calls come from the client's address, so a server that takes calls only from some web addresses (CORS) has to allow that one, not the page around it. A sign-in can't finish inside it, because the sign-in comes back to the client's own storage, not the embed's, so its bar says to open the app on its own for a server that needs one.
+
+### Rules
+
+Each rule reads as a sentence, and says what keeps it from running (an element that's gone from the screen, a server you haven't added):
+
+- **When**: a button is clicked, a text box gets Enter (⌘↵ or Ctrl+Enter in a text box with several lines) or changes, or the app opens. A rule can wait for several of these, and any of them starts it.
+- **Call**: a server and a tool, with the tool's own fields, as in the Workbench. In a field, `{{question}}` is what the screen's `question` element holds when the rule runs; a name that isn't on the screen is a variable from the active environment. A field that is exactly one `{{name}}` gets the value in the field's type, so `{{count}}` fills a number field with a number.
+- **Then**: as it's sent, if it works, and if it fails, put something into an element, replacing what it shows, after what it shows, or as HTML. What to put is a template: `{{text}}` is the text the tool returned, `{{structured.name}}` a value from its structured content, `{{json.items.0.title}}` a value from its text read as JSON, `{{html}}` the HTML in the answer, `{{result}}` the whole result, `{{error}}` why it failed, and `{{question}}` what the screen held. As it's sent, there's only what the screen held. A result the tool marks `isError` counts as failing.
+- **Prompt**, for a tool that's a model: the field its prompt goes in, the instructions to put before what it's asked, and whether it can call your servers' tools (see [The agent loop](#the-agent-loop)). What its boxes need goes there too (see [Dashboards](#dashboards-boxes-that-write-the-prompt)).
+
+Rules that wait for the same thing run top to bottom, and each sees what the ones before it put on the screen. A rule whose call is still out (or the tool calls in its answer) doesn't start again. Renaming a component takes the flow with it.
+
+A **conversation** is an output that keeps each thing put into it as an entry, with who it's from: what was sent, the answers and the results of the tools a model called. Its value, in a call, is the list of them, which a list field takes as it is and a text field a line each.
+
+### Parts a model or a tool makes
+
+A screen built from components can hold **HTML parts**: a dashboard, a card or a form that a model writes or a tool returns, among the other components. Add one from the Library, then in the Inspector:
+
+- **Ask a model.** Say what to make, such as "a ticket dashboard with a search field, a Refresh button and a list", and choose Make it. The model is the one under Model, beside it (see [The agent loop](#the-agent-loop)). It's asked for HTML whose buttons, fields and outputs have ids, and the builder takes the HTML from its answer. Change it sends the HTML there is now with what to change, so you can work on a part the way you'd talk it through.
+- **Call a tool** that returns HTML (an embedded `text/html` resource, `structuredContent.html`, or HTML in its text, as a model writes it in a ```` ```html ```` block) and choose Get the HTML.
+
+Either way, or with HTML pasted in, the part keeps the HTML without its scripts, `on…` handlers, frames and forms. Its ids get the part's id in front, so `refresh` in the part `dashboard` is `dashboard.refresh` and two parts can't clash, and its styles reach only inside it. It's laid out as its own styles say: the screen's font and the look of its buttons and fields reach in, but not where the screen puts its own, so a calculator's keys fill their grid. Its elements get ●s like the rest, listed under the part's own by the rest of their id (`.refresh`), so the flow takes over the part's buttons and fields: wire `dashboard.refresh` to a tool's Run, and the tool's Answer to `dashboard.details`. A whole screen can be HTML too: choose HTML for the screen in the Inspector, then ask a model, call a tool or paste it in.
+
+### Dashboards: boxes that write the prompt
+
+A dashboard is a wide screen of **boxes** filled from one question to a model, such as Glean's Assistant. Choose **Project pulse** under Examples for one to start from, with a project's summary, health, activity chart, risks and documents. It asks the model when the app opens: Glean's `chat`, if you've added Glean, else another `chat` tool, else the demo model, which makes up its answers in the shapes the boxes ask for.
+
+A box is an output that says two things: what it **shows** (Text, Number, List, Table, Bar chart, Line chart or HTML), and **what goes here**, in your words: "Tickets opened per week, the last 8 weeks". Wire a tool's Answer to a box, and the box asks the tool for its piece. The call adds a request to the tool's prompt field (`message`, for Glean) for one JSON object, with a key for each box it fills, what goes in it and its shape:
+
+```text
+This answer fills the boxes on an app's screen. Answer with one JSON object in a ```json block, and nothing else, with exactly these keys:
+- "health" (number): The project's health: On track, At risk or Off track, with why in a few words. As {"value": number or short text, "note": string}.
+- "activity" (bar chart): Updates about the project per week, the last 6 weeks, oldest first. As {"labels": [string], "values": [number]}.
+- "panel" (HTML): A status banner. As a string of HTML for a box about 520 px wide: no scripts, nothing from the network, inline styles only.
+Use null for a key you have nothing for.
+```
+
+So the layout writes the format half of the prompt, and the question stays yours. Change a box from a bar chart to a line chart, or say something else goes in it, and the next call asks for that. Each box takes its key of the answer (`{{json.activity}}`) and draws it:
+- **Charts** draw as bars or a line.
+- **Lists** show titles, notes and links that open in a new tab.
+- **Numbers** show large, with their note.
+- **HTML** goes in sanitized, as a part's does.
+
+A box also says when its piece doesn't fit (“A chart takes numbers in "values".”) and when the answer has nothing for it. While the call is out, the boxes shimmer. The rule's **Prompt** row, in the Inspector or the Outline, shows which field the request goes in and exactly what it adds.
+
+A **Wide** screen (in the Inspector, or the Outline's Screen) lays components out in rows. Each component has a width, from a third to the full row, and a narrow window stacks them.
+
+Glean's Assistant answers the request as asked. In a test with Project pulse's question, it sent the five keys in one ```json block, in about 35 seconds, with the conversation's details after the block. It also breaks lines inside strings around its citations, which JSON doesn't allow, so the builder escapes those breaks and drops the citation marks (`[^1]`) before drawing.
+
+**The screen runs on its own.** It's in a sandboxed frame with an origin of its own, so it can't read this page, its storage or your sign-ins. A policy keeps it off the network and keeps its own scripts (and `on…` attributes) from running. A small runtime the builder puts in the frame listens for clicks, Enter and changes on the whole document and reports the ones the flow waits for, so the flow is what makes the screen do things, and only the calls the flow names are made. HTML put on the screen as HTML loses its scripts, frames and forms first.
+
+### Screens: an app in steps
+
+An app can have several **screens**, one showing at a time, for something people go through in steps: a check-in, a form of several pages, a review. Choose **Front desk** under Examples for one: a visitor kiosk over four screens, with no model in it, that calls the mock server's front desk tools.
+
+1. **Welcome** asks for your name and, if you know, who you're here to see. Find my visit calls `find_visit`. If it finds today's visit, the app goes to **Confirm** with it; if it finds none, or more than one, it goes to **Not found** with why.
+2. **Confirm** shows the visit, from the tool's structured content: "Ada Lovelace, Analytical Engines / Here to see Grace Hopper at 10:00, in Babbage, 3rd floor". Yes, check me in calls `check_in`, which prints a badge and tells the host, and goes to **Checked in**. Not me goes to Welcome.
+3. **Checked in** gives the badge number and where to go. Done starts the app over for the next visitor, its fields empty.
+4. **Not found** says why. Try again goes back, with the name still typed, and Call the front desk calls `call_front_desk`.
+
+Every step is fixed, and the one call that changes something (`check_in`) waits for the visitor to say it's them, so what the kiosk does never depends on how a model reads what someone typed. Its rules call its own demo server, Front desk (demo), built in, which creating the app adds and connects. In an office they'd call your visitor system's server: once it's connected, choose it under Servers it calls (see [Demo servers built in](#demo-servers-built-in)). The mock server has the same tools, so you can try that with it.
+
+To build one:
+
+- **Add a Screen** from the Library. What's below it, up to the next screen, is on it, and what's above the first, such as a title, shows on every screen. The first screen added to an app makes what it had a screen too. The app opens on the first.
+- **Each screen is a card** on the canvas, with a ● at the start of its title. The cards go in the order people get to them: Front desk's Welcome first, then Confirm and Not found, where Find my visit goes, then Checked in, with each tool beside the screen that starts it. Each card has the ●s of its own elements; what's above the first screen, on every one, has its ●s on the first card.
+- **The app runs on the card of the screen it's on.** The other cards show their screens as they are before anyone uses them. When the app goes to another screen, it moves to that screen's card, and in the app itself the screen slides in, or back when it goes back. Pick a card's title to pick its screen and show the app there; in Run, a click anywhere on a card the app isn't on does the same.
+- **A button goes somewhere** when it's clicked: drag from its ● to a screen's ●, or choose in the Inspector's When clicked, goes to: a screen, back to the screen before, or start over. An arrow goes from the button to that screen's card; a way back to an earlier screen runs above the cards. A button that also starts a rule sends what the screen held, then goes.
+- **An answer goes somewhere too.** Wire a tool's Answer, Error or Sent to a screen's ●, and the app goes there when the tool works, fails, or is called; the arrow goes from the tool to the card. The rule says so: "if it works, go to confirm".
+- **It's one page.** The screens are parts of one document, so what's typed on one is still there on the next, and a rule on any screen can use any field.
+
+In the Inspector, a screen has its name, what's on it and how people get there (the buttons and rules that go there). Move up and Move down move it with what's on it, and Delete takes that along too, on a second click. The Outline shows each screen with what's on it set in under it, and Preview's bar names the screen showing.
+
+### Demo servers built in
+
+The examples come with MCP servers of their own, built into the client, so they work before you've added a server or run anything:
+
+| Server | Address | What it does |
+| --- | --- | --- |
+| Front desk (demo) | `https://frontdesk.demo.invalid/mcp` | A front desk's visitor system: `find_visit`, `check_in` and `call_front_desk` over four made-up visits today, answering as the mock server's tools do |
+| Demo model | `https://model.demo.invalid/mcp` | A stand-in for a model, `chat`: it repeats what you say, writes the tool call you ask for ("call find_visit with Ada"), fills an app's boxes with made-up data in their shapes, and writes a page when asked for HTML |
+
+They answer inside the client's service worker. Their addresses end in `.invalid`, which no network answers, and the worker answers the requests the MCP client library sends there, so the library talks to them as it talks to any server: they connect, list their tools and answer calls in MCP 2026-07-28, or in the 2025 handshake, and every call is a run in History. Nothing leaves the browser. What they keep, such as the next badge number, lasts while the worker runs.
+
+Front desk adds its demo server when you create it. Chat and Project pulse call the model found among your servers (Glean's `chat`, else another `chat` tool) and add the demo model when there's none, so Chat's agent loop runs end to end in the page: ask the demo model to "call find_visit with Ada" and the call runs on the Front desk server. The Guide lists both servers to add, the Model picker offers the demo model, and importing an app that calls one adds it.
+
+**Moving to your own server.** An app's **Servers it calls** (in the Inspector when nothing is picked, and at the top of the Outline's Flow) lists each server it calls and the tools it calls there. **Call instead** offers your servers that have those tools and take what the app sends; one that can't says what's missing ("it has no find_visit"). Choose one, and every rule's call moves there, with the calls of parts a tool made. So an app built on the Front desk demo server moves to your visitor system's server once it's connected and answers the same calls, or to the mock server, which has the same tools.
+
+### Download and DML
+
+**Download** saves the app as a zip of a folder that runs it, and each download is a version: the first is 1, and a download after any change is the next number. The folder (`front-desk-v1/`, say) is the client's own site, as in `public/`, with the app beside it:
+
+- `app.dml`: the app as markup: its components (or, for an HTML screen, what made it), its flow, and where each tool sits on the canvas
+- `screen.html`: the screen, the base artifact people see, parts included
+- `parts/<id>.html`: each part's HTML, with what made it in `app.dml`
+- `README.md`: the screens and the flow in words, how to run it, and the servers it calls
+- `index.html` and the rest: MCP Browser Client, which runs the app: its page, which names `app.dml`, its service worker, the MCP client libraries, the Workbench and the builder. Nothing comes from a CDN, so it runs offline too, with the demo servers
+
+**Running it.** Serve the folder and open its address: `npx serve` or `python3 -m http.server 8000` in it, or put it on any static host (GitHub Pages, Netlify, an S3 bucket). It opens on the app, as Launch does, running what Start calls, and runs `app.dml` as it is in the folder, so editing it and reloading runs the change; `?builder` after the address opens the builder. The folder can't run opened as a file, from a double-click: browsers start a service worker, which is where the client calls MCP servers and keeps sign-ins and runs, only at a web address, and load its modules only from one. Opened that way, the page says how to serve it, with a link that runs the same version in the client at the client's address (Share's). To run an app from a double-click, use Share's embed.html instead. Served from a new address, the client starts with none of your servers or sign-ins: the app's bar offers to add the servers it calls and to sign in, and a server that takes calls only from some web addresses (CORS) has to allow the new one. Sign-in comes back to the folder's own `oauth-callback.html`, and the folder's `serve.json` keeps `npx serve` from rewriting that address.
+
+Download's menu has `app.dml` alone, with the HTML of the screen or its parts inside it. Import, in the rail, takes either back, or a download's zip; an app with the same id is replaced, so importing a download restores it, and a rule whose server you haven't added offers to add it. Zips from before, whose `index.html` ran the app in the client or was the screen, import as they did. Apps are kept in this browser's IndexedDB (`mcp_apps`).
+
+A DML file reads like the flow it describes:
+
+```xml
+<app dml="1" id="…" name="Ask the docs" version="3">
+  <screen src="screen.html" built-from="components">
+    <title id="title">Ask the docs</title>
+    <textbox id="question" label="Question" placeholder="What do you want to know?"/>
+    <button id="ask" label="Ask"/>
+    <output id="answer" label="Answer"/>
+  </screen>
+  <servers>
+    <server url="https://learn.microsoft.com/api/mcp" name="Microsoft Learn"/>
+  </servers>
+  <flow>
+    <when element="ask" event="click" x="660" y="96">
+      <or element="question" event="enter"/>
+      <call server="https://learn.microsoft.com/api/mcp" tool="microsoft_docs_search">
+        <arg name="query">{{question}}</arg>
+      </call>
+      <then if="ok" into="answer">{{text}}</then>
+      <then if="error" into="answer">{{error}}</then>
+    </when>
+  </flow>
+</app>
+```
+
+A `<when>` names its first trigger and an `<or>` each other one (`event="open"` is Start); `x` and `y` are where its tool sits on the canvas. A part is `<part id="dashboard" src="parts/dashboard.html">`, with `<ask>` holding what the model was asked and `<from>` the call that made it. A box is `<output id="activity" label="Activity" show="bar" width="two-thirds">`, with what goes in it as its text, and a conversation `<output show="conversation">`; a wide screen is `<screen size="wide">`; and the field a rule's prompt goes in is `<arg name="message" role="prompt">`. A rule's `<instructions>` come before that prompt, `tools="yes"` on its `<when>` lets its model call your servers' tools, and `<then if="sent">` runs as the call is sent. An app with several screens has a `<screen id="confirm" label="Confirm">` for each inside the app's `<screen>`, holding its components; a button that goes somewhere has `go="confirm"`, `go="back"` or `go="start"`, and a `<then into="confirm">` goes to that screen.
+
+Next, apps get steps that chain (a tool's Answer wired to another tool, so a model could get its tools' results without waiting for your next message), and MCP Apps' UI resources as parts; after that, deploying an app to an address of its own in one step. Its download already runs from any static host.
 
 ## Workbench
 
@@ -67,7 +238,7 @@ Its layout, from left to right:
 - **The server bar**, across the top: the selected server's status and protocol, sign-in, Connect, Refresh (its tools, resources and prompts) and Info.
 - **Tools, Resources and Prompts**: what the selected server offers, a tab each, with a filter (and, for tools, annotation filters). Resources and Prompts open when the server declares them; see [Resources and prompts](#resources-and-prompts).
 - **The request pane**: the tool's arguments, the required ones filled with test data and each with Fill beside its name, with Pre-fill, Save and Run, and tabs for Sends (the arguments as they'll go out) and Schema.
-- **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON and Runs (every run of this request).
+- **The response pane**: the outcome, how long it took and whether the result changed since the last run, with tabs for Result, Changes, JSON, Sent (the arguments as the call sent them) and Runs (every run of this request).
 - **The dock**, along the bottom: Log, Trace (every HTTP request and response) and Runs (every call). Collapse it, or drag its top edge.
 
 Drag the edges between the rail, the tool list and the request and response panes to resize them, or focus one and use the arrow keys; double-click an edge to put it back. The sizes are kept for next time.
@@ -101,15 +272,15 @@ The top bar switches between the Workbench and Apps, picks the environment and o
   - A saved request's runs compare with each other. Other calls compare with earlier calls of the same tool with the same arguments.
   - `_meta` is ignored, since servers put request IDs and timings there.
 - **Run all** runs a collection's requests in the order they were saved. The response pane fills in a report as they run, then sums up how many were the same, changed or failed. Each row opens that run.
-- **History**: the rail shows the latest runs, and the dock's Runs every tool call, wherever it came from: the Workbench, Run all, the Chat app's model, and tool calls found in its replies.
-  - Open one to see its arguments and result, then run it again or save it.
+- **History**: the rail shows the latest runs, and the dock's Runs every tool call, wherever it came from: the Workbench, Run all, the apps you build, and the tool calls a model writes in its answers to them.
+  - Open one to see its arguments and result, then run it again or save it. A Workbench run opens with its arguments as you wrote them, `{{variables}}` and all. A call an app made opens with what it sent, since its `{{names}}` are the app's screen's; Sent has the arguments as they went out, for either.
   - Only the selected server narrows the dock's list.
 - **Export and Import**, in the ⋯ menu beside Saved, move saved requests, collections and environments as one JSON file. History isn't exported.
 
 Everything stays in this browser, in IndexedDB (`mcp_sandbox`, its name from when the Workbench was called the Sandbox), shared by its tabs.
 
 - History keeps the newest 500 calls with their results, which include whatever the servers sent back. Results over 256 KB keep only their start. Clear history, in the dock's Runs, deletes it.
-- Tokens never go into the Workbench's store: arguments are stored as written, and credentials travel separately. Variables are plain text, so keep secrets out of them.
+- Tokens never go into the Workbench's store: arguments are stored as written and as sent, and credentials travel separately. Variables are plain text, so keep secrets out of them.
 
 ### Inspecting a server
 
@@ -188,11 +359,14 @@ Not supported yet: client ID metadata documents (the spec's preferred alternativ
 ```mermaid
 flowchart LR
     subgraph browser [The browser]
-        Page["Pages: the Workbench and apps"]
-        SW["Service worker: routing, sign-in, runs, the agent loop"]
+        Page["Pages: the Workbench and apps, the agent loop"]
+        SW["Service worker: routing, sign-in, runs"]
         Lib["MCP client library: TypeScript SDK or Rust/WASM"]
-        DB[("IndexedDB: tokens, runs, conversations")]
+        DB[("IndexedDB: tokens, runs, apps")]
+        Screen["An app's screen: a sandboxed frame"]
     end
+    Screen -- "what happened" --> Page
+    Page -- "what to show" --> Screen
     Page -- "messages" --> SW
     SW -- "results, events, log" --> Page
     SW --> Lib
@@ -201,8 +375,8 @@ flowchart LR
     Lib -- "Streamable HTTP" --> Model["A model, as an MCP tool"]
 ```
 
-1. **Pages** draw the UI, in as many tabs as you like. They send the worker messages and never speak MCP or see a token.
-2. **The service worker** is shared by every tab. It loads the chosen library, routes each message to it, keeps sign-ins, runs and conversations in IndexedDB, and runs the Chat app's agent loop.
+1. **Pages** draw the UI, in as many tabs as you like. They send the worker messages and never speak MCP or see a token. An app you build runs its flow in the page, the agent loop included, and its screen in a sandboxed frame that only tells the page what happened and shows what the page sends it.
+2. **The service worker** is shared by every tab. It loads the chosen library, routes each message to it, and keeps sign-ins and runs in IndexedDB.
 3. **The MCP client library** speaks MCP to servers over Streamable HTTP: era detection, sessions, streamed replies, header parameters, and sign-in's network steps. It stores nothing.
 4. **A model is just another MCP tool**, so the loop works with any server that offers one.
 
@@ -242,10 +416,10 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 
 - `npm start`: Start the web server on port 8080 with caching off
 - `npm run start:glean`: The same on `http://127.0.0.1:8888`, an origin Glean allows (see [Glean](#glean))
-- `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`)
+- `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`), then the list of the client's files that an app's download ships (`npm run build:files`, `public/client-files.json`), which `npm run test:unit` checks is up to date
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
-- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, and that the server template is valid MCP and follows its guide
+- `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, that the server template is valid MCP and follows its guide, and the app builder's DML, zips, links and flow
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
@@ -271,6 +445,8 @@ The Workbench is built from components (custom elements in `public/workbench/com
 
 The layout is CSS: each component sits in a named grid area, set by the `data-layout` block for `#workbench` in `workbench.css`. To try another arrangement, add a layout there and set `data-layout` on `#workbench`; the components don't change. Components can share an area and take turns: the request area holds the tool, resource and prompt panes, and the response area the response and contents panes, each showing itself only for its tab. The splitters sit in zero-width grid tracks of their own and set `--rail-width`, `--tools-width`, `--request-fr` and `--response-fr`, which the layout uses with limits, so a size kept from a wider window can't squeeze the others.
 
+The app builder (`public/apps/`) is built the same way: components for the Apps page's rail, the app's header, the canvas and its Inspector, and the Outline's screen, flow and Try it, which share the Apps state (`apps.js`) besides AppShell and the Workbench's. [DEVELOPMENT.md](DEVELOPMENT.md#apps-you-build) has how an app runs and the DML it's written in.
+
 ### Project Structure
 
 ```text
@@ -290,9 +466,36 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   ├── trace.js           # The HTTP trace, with redaction
 │   └── build.mjs          # Bundles it with esbuild into public/sdk_client.js
 ├── public/                 # The site
-│   ├── index.html         # The page: top bar, layout, Apps (Chat), the Guide, and AppShell,
-│   │                      #   which owns the worker, servers, sign-in and calls
-│   ├── sw.js              # The service worker: messages, sign-in, runs, the agent loop
+│   ├── index.html         # The page: top bar, layout, Apps (the builder), the Guide,
+│   │                      #   and AppShell, which owns the worker, servers, sign-in and calls
+│   ├── apps/              # The apps you build (ES modules)
+│   │   ├── index.js       # Starts the Apps page: loads the apps, defines the builder's components
+│   │   ├── apps.js        # Shared state: the shown app, edits, the model, the examples, downloads, imports,
+│   │   │                  #   what Start calls as an app opens, and an app launched on its own
+│   │   ├── apps.css       # The rail, the start page and the builder's styles
+│   │   ├── components/    # Rail and start page, adding an example, header, Share, the question an app asks as
+│   │   │                  #   it opens, the canvas and its Inspector, the Outline's Screen, Flow and Try
+│   │   │                  #   it, Preview (and a launched app's bar), the splitters, and the editors
+│   │   │                  #   they share (rule, HTML source, call, model, trace)
+│   │   ├── link.js        # An app in a link: the client's root, #run= and its DML, deflated
+│   │   ├── flow.js        # Rules: triggers, templates, call arguments, renaming, problems, sentences
+│   │   ├── graph.js       # The flow as the canvas draws it: ports, wires, connecting, placing tools
+│   │   ├── storyboard.js  # The canvas's layout: screens in the order people reach them, tools beside them
+│   │   ├── boxes.js       # Boxes and conversations: what each shows, the request a rule adds to its prompt, drawing answers
+│   │   ├── agent.js       # The agent loop: the tools a model is told about, the calls in its answer, the limit
+│   │   ├── screen.js      # Components to HTML, screens, parts (ids, scoped styles, sanitizing), the elements of HTML
+│   │   ├── ask.js         # Asking the model for a screen or a part, and the arguments of a call to it
+│   │   ├── runner.js      # Runs an app: the sandboxed frame's runtime and the flow in the page
+│   │   ├── dml.js         # An app as DML (XML), read and written without a DOM
+│   │   ├── servers.js     # The servers an app calls, and moving its calls to another with the same tools
+│   │   ├── zip.js         # The download's zip: written and read, stored or deflated
+│   │   └── store.js       # IndexedDB storage for apps (mcp_apps)
+│   ├── demo-servers/      # MCP servers built in, which answer in the service worker
+│   │   ├── index.js       # The catalog (addresses, names, tools) and the worker's fetch() that answers them
+│   │   ├── mcp.js         # A small MCP server: Streamable HTTP in both protocol eras, JSON replies
+│   │   ├── front-desk.js  # Front desk (demo): find_visit, check_in, call_front_desk over made-up visits
+│   │   └── demo-model.js  # The demo model: a chat tool that stands in for a model
+│   ├── sw.js              # The service worker: messages, sign-in, runs
 │   ├── mcp-clients.js     # The MCP client libraries and how to load each
 │   ├── client-runtime.js  # Keeps the chosen library loaded in the worker and forwards its logs
 │   ├── mcp_browser_client_bg.wasm, mcp_browser_client.js  # Built: the Rust/WASM library
@@ -300,7 +503,6 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   ├── build.js, build-sdk.js  # Built: each library's hash, so a rebuild updates the worker
 │   ├── logger.js          # The worker's structured logger
 │   ├── authStore.js       # IndexedDB storage for sign-ins: registered clients, tokens, sign-ins in progress
-│   ├── chatStorage.js     # IndexedDB storage for conversations
 │   ├── workbench/         # The Workbench: its components, state and storage (ES modules)
 │   │   ├── index.js       # Starts it: loads the state, defines the components, wires shortcuts
 │   │   ├── workbench.js   # Shared state and actions: selection, environments, saved requests, runs
@@ -323,23 +525,30 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   │   ├── markdown.js    # The Markdown renderer behind it
 │   │   └── examples/      # The same server on the official Go, TypeScript, Python, Rust, Java and C# SDKs
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
+│   ├── client-files.json  # The client's own files, which an app's download ships (npm run build:files)
+│   ├── serve.json         # Keeps npx serve from rewriting the folder's addresses (clean URLs off)
 │   ├── styles.css         # UI styles (Glean design language)
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
 │   ├── fonts/             # Inter and DM Sans (OFL)
 │   └── icons/             # Feather icons, rendered as CSS masks (MIT)
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
+│   ├── apps.test.mjs      # The app builder's DML, zip, links, flow and screen, the examples and the agent loop
+│   ├── client-files.test.mjs # The client's files a download ships: up to date, and everything it loads
+│   ├── demo-servers.test.mjs # The demo servers built in: both protocol eras, their tools, the demo model
+│   ├── workbench.test.mjs # What opening a run from history fills in: as written, or as an app sent it
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
 │   ├── examples.mjs       # Runs each SDK example and checks it against example.json
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
 ├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS
-├── DEVELOPMENT.md         # The library interface, the worker's messages, the agent loop, logging
+├── DEVELOPMENT.md         # The library interface, the worker's messages, apps and the agent loop, logging
 ├── Cargo.toml             # The Rust library's configuration
 ├── package.json           # Node.js configuration and scripts
 ├── requirements.txt       # Python dependencies (the official MCP SDK, for the reference server)
 ├── wasm-build.sh          # Builds the Rust/WASM library
 ├── generate-build-info.sh # Build metadata for the Rust library
 ├── deploy-gh-pages.sh     # Publishes public/ to the gh-pages branch
+├── scripts/client-files.mjs # Writes public/client-files.json
 └── setup.sh               # Project setup script
 ```
 
@@ -349,21 +558,27 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 
 With `npm start` and `npm run start:mock-mcp` running, open http://localhost:8080:
 
-1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket` and `search_notes`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
+1. **Connect.** In the Guide, choose "Add and connect to 127.0.0.1:8081" (or choose + beside Servers and paste `http://127.0.0.1:8081`). The server bar should say `Connected · MCP 2026-07-28 (modern)`, and Tools should list `echo`, `echo_region`, `count`, `ticket`, `search_notes`, `make_screen`, `chat`, `find_visit`, `check_in` and `call_front_desk`. The mock also offers `broken_header`, which clients must hide; it's listed after them with the reason.
 2. **Run a tool.** Choose `echo`: `text` starts with `hello`, the schema's example. Type `hi` into it and choose Run. The result reads `Echo: hi`.
 3. **Header parameters.** Run `echo_region` with region `Zürich`. The result reads `Echo from Zürich: …`; the mock checks that the `Mcp-Param-Region` header carried the same value, base64-encoded because it isn't ASCII.
 4. **Test data.** Choose `search_notes`, which has 20 fields, 5 of them required. Those 5 start with test data the mock accepts: `test`, a week ago to today, `test@example.com` and `5`. The other 15 are folded away under "15 optional fields". Open them, choose Fill beside `owner` (it becomes `me`, a value its description lists), type `eu-central-1` into `region` and choose Run: the result shows the 7 arguments that went out. `cursor` has no Fill, since a pagination cursor only comes from an earlier response.
-5. **The log.** In the dock you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 5 tools in 5 ms`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Trace has each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
-6. **Chat through a tool.** Open Apps. Under Model, choose the mock and `echo`, tick "Your message goes here" on `text`, and send `hello`. The reply `Echo: hello` joins the conversation.
+5. **The log.** In the dock you should see lines like `Connected to Mock MCP Server 2.0.0 in 9 ms: MCP 2026-07-28 (modern)`, `Listed 10 tools in 5 ms: …`, `Hiding tool broken_header: …` and `echo returned in 3 ms`. Trace has each HTTP request (`→ tools/call echo (id 5)`) and reply (`← HTTP 200 for tools/call echo (id 5) in 3 ms`).
+6. **Chat.** Open Apps. With no app yet, it offers the examples, and Model reads `chat on Mock server, asked in message`: the mock's stand-in for a model. Choose Chat and Add a copy, then Run above the canvas, and send `hello`: it joins the conversation at once, and the answer `You said: hello` after it. Send `call echo with hi`: the answer asks for `echo`, which runs, and `echo: Echo: hi` joins the conversation. Send one more message, and the answer says the earlier ones came with it.
 7. **Save and run again.** Back in the Workbench, choose `ticket`, then Fill beside `prefix` (it takes its default, `T-`) and Save. In the rail, run it twice with ▶. The second result says Changed since the last run, and Changes has the line that differs, because `ticket` returns the next number every time. A saved `echo` says Same as the last run.
-8. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including the chat's.
+8. **Variables.** Under Variables, add `greeting` = `hi`. Run `echo` with text `{{greeting}} world`; the field shows `→ hi world`, Sends shows `"hi world"`, and so does the result. The dock's Runs lists every call so far, including Chat's, from App, and its tool call, From a reply.
 9. **The legacy fallback.** Stop the mock, start it with `npm run start:mock-mcp -- --mode legacy`, and choose Connect. The protocol becomes `2025-11-25 (legacy)`, and the log explains why: `server/discover got HTTP 400, …, so this looks like a 2025-era server; falling back to the initialize handshake`.
 10. **The other library.** Open Runtime and choose Rust/WASM under Library, then run the saved `echo` again. The log shows "Loaded the Rust/WASM client", the server connects again, and the result is Same as the last run.
 11. **Resources and prompts.** Open Resources beside Tools: it lists `Read me`, `Configuration` and `A pixel` (over two pages, as the mock lists two at a time) and the template `A note`. Read `Read me` to see its Markdown, and `A pixel` to see a one-pixel image. Pick `A note`: its `id` field starts with test data, and the URI below it follows what you type. Set it to `42` and Read; the note comes from `mock://notes/42`. Then open Prompts, pick `greet`, change `name` from `Test` to `Ada` and choose Get: the message reads `Write a casual greeting for Ada.`
+12. **Build an app.** In Apps, choose New app. It opens on the canvas: the app's screen, running, wired to `echo`. Choose Run above the canvas, type `hi` into the app's Input and choose its Run button: the wires light up, the Output shows `Echo: hi`, and What happened lists the click, the call, the answer and where it went. Choose Design, add an Output and the `count` tool from the Library, then drag from the ● beside `run` to count's ▶ Run, and from count's ✓ Answer to the ● beside `output2`. Run the app again and `output2` shows `Counted to 3`. Pick the `text` label on that wire, choose `structured.counted` among the last answer's values in the Inspector and type ` steps` after it: `output2` shows `3 steps`. Choose Preview: the app fills the window and starts again, as when it's launched; Phone shows it 390 pixels wide, and Escape brings the builder back. Download saves `new-app-v1.zip`: unzip it, run `npx serve` in its folder and open the address it prints. The app runs there on its own; add the mock server when its bar offers, and it answers.
+13. **A part a model makes.** Add an HTML part from the Library, and in the Inspector ask for `a ticket dashboard` and choose Make it; Model, below, is the mock's `chat`. The dashboard appears on the screen without its script (its details box stays empty), and its elements get ●s under the part's own, such as `.refresh`, which the flow calls `part.refresh`. Add `ticket`, wire `.refresh` to its Run and its Answer to `.details`, and in Run, Refresh shows the next ticket number. Outline, at the top, shows the same app as cards; there, choose HTML for the screen and Call a tool with `make_screen` for a whole screen a tool made.
+14. **A dashboard.** Choose Project pulse under Examples. It asks first, and since it calls the model as it opens, whether to run that each time it opens; leave it checked and choose Add a copy. It opens on a wide screen and fills every box from one answer: `On track` in Health, six bars in Activity, three risks and three documents. Pick the chat tool and open its Prompt section in the Inspector: the request it adds to `message` names each box, its kind and what goes in it. Pick Activity, set Shows to Line chart and choose Restart: the request now asks for a line chart, and the box draws one. Choose a document in Run, and it opens in a new tab.
+15. **Screens.** Choose Front desk under Examples, then Add a copy. It adds Front desk (demo), its server built in, which connects at once. The canvas shows its four screens as blue cards: Welcome, then Confirm and Not found, then Checked in, with arrows between them and the whole app in view, and its three tools as violet nodes beside them. find_visit's Answer says it goes to `visit` and to the screen Confirm; point at its pin and those two wires light up. Choose Run, type `ada` on Welcome's card and choose Find my visit: the app moves to Confirm's card. Drag Confirm's card by its title, then Tidy up to put it back. Choose Preview, then Tablet. Type `ada` and choose Find my visit: Confirm shows Ada Lovelace's visit at 10:00. Choose Yes, check me in, and Checked in gives a badge number (`V-1001` on the first check-in); Done starts over. Type `Bob`: Not found says there's no visit for him; Call the front desk answers there, and Try again goes back with `Bob` still typed. `Alan` matches two visits, so it asks for a full name.
+16. **Your own server instead.** With nothing picked on Front desk's canvas, the Inspector's Servers it calls lists Front desk (demo) and its three tools. Under Call instead, Mock server is offered, since it has the same tools; a server without them says so ("it has no find_visit"). Choose Mock server, and the next check-in in Preview is a run on the mock, with a badge number from the mock's own count.
+17. **Launch, a link, and asking first.** Choose Launch: Front desk opens on its own in a new tab, the whole window, with Restart and Open in the builder above it. Back in the builder, choose Copy a link that runs it in the header's ⋯, and open the link in a private window: the app runs there too, its bar offers to add Mock server and to add the app to Your apps. Choose Share, then Download embed.html, and open the file: Front desk runs in it, from the client, with Open on its own above it, and offers to add Mock server, since an embed has storage of its own. Then pick Project pulse under Your apps, pick Start on its canvas and choose Ask in the Inspector; pick Front desk and Project pulse again. It asks whether to run its call as it opens and calls nothing until you answer. Choose Don't run it, and opening it again runs nothing, which What happened says; Restart runs it. Under Your apps, ⋯ beside an app deletes it, on a second click.
 
 ### More server behaviors
 
-`test_mcp_server.py` needs only Python's standard library. Besides its tools, it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
+`test_mcp_server.py` needs only Python's standard library. Besides its tools (among them `make_screen`, which returns an app's screen as an HTML resource; `chat`, a stand-in for a model that writes the call when asked to call one of the tools an app lists, answers an app's boxes with made-up JSON, and writes a page when you ask for HTML, a ticket dashboard if you ask for one; and a front desk's `find_visit`, `check_in` and `call_front_desk`, over four made-up visits today, for the Front desk example), it offers three resources (text, JSON and a PNG), a resource template and two prompts, listed two to a page so clients have to follow the cursor. Its flags simulate the situations a browser client has to handle:
 
 | Flag | What the mock does |
 | --- | --- |
@@ -401,7 +616,7 @@ They're third-party services, so their behavior can change; `npm run test:public
 
 ### Glean
 
-Glean's MCP server signs you in with your work account through dynamic client registration, which the client handles. Its URL looks like `https://your-company-be.glean.com/mcp/default`. You don't need to look it up: enter your work email in the Guide's Glean field, and the page asks `app.glean.com/config/search` which deployment your email belongs to, the way Glean's own sign-in page does. It then uses that deployment's default MCP server. Only the email's domain is logged. That endpoint isn't a documented API, so you can also paste the URL yourself, from Glean's Your settings, then Third party apps and MCP, on the "Connect to your AI apps with Glean MCP" card. Use the pasted URL if your company uses a server other than `default`.
+Glean's MCP server signs you in with your work account through dynamic client registration, which the client handles. Its URL looks like `https://your-company-be.glean.com/mcp/default`. You don't need to look it up: enter your work email in the Guide's Glean field, and the page asks `app.glean.com/config/search` which deployment your email belongs to, the way Glean's own sign-in page does. It then uses that deployment's default MCP server. Only the email's domain is logged. That endpoint isn't a documented API, so you can also paste your MCP endpoint yourself. Glean shows it at [app.glean.com/settings/connected-apps](https://app.glean.com/settings/connected-apps) (Your settings, then Third party apps and MCP), which the Guide links to: on the "Connect to your AI apps with Glean MCP" card, pick the server (Default Tools is `mcp/default`) and copy its Endpoint. Paste the endpoint if your company uses a server other than `default`.
 
 Glean only sends CORS headers to page origins on its allowlist, so from an origin that isn't on it every request fails as "Couldn't reach". Glean's own deployment allows `http://127.0.0.1:8888` (and not `localhost:8888`), so:
 
@@ -412,7 +627,7 @@ npx --yes http-server public -a 127.0.0.1 -p 8888 -c-1   # the same, without ins
 
 Avoid `python3 -m http.server` for the app: it resets connections when the page and the worker load their modules at the same time, which can stop the service worker from starting.
 
-Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in, or enter it under + beside Servers. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. Glean shows the client under Third party apps and MCP as "MCP Browser Client", where you can revoke it.
+Open http://127.0.0.1:8888, enter your work email (or the URL) in the Guide's Glean field and choose Add and sign in, or enter it under + beside Servers. `app.glean.com` answers the same origins as Glean's MCP servers, so the email lookup works from here too. Sign in with your SSO in the pop-up; the server then connects and lists its tools. Try its search tool (`enterprise_search` on the default server) with query `onboarding`. The same settings page then lists the client under Connected apps, as "Mcp Browser Client", with when its access was granted, when it expires and when it was last used; you can revoke it there.
 
 What to expect in the log: `server/discover` is blocked (Glean's CORS policy doesn't allow the 2026-07-28 headers), so the client connects with the 2025 handshake; the 401's challenge isn't readable, so the client finds `/.well-known/oauth-protected-resource/mcp/default`, registers, and signs in with `https://your-company-be.glean.com/oauth` for `mcp offline_access`.
 
@@ -432,14 +647,14 @@ When you connect to `http://127.0.0.1:8081`, Chrome asks whether the site may ac
 npm run test:browser                 # the real UI in headless Chrome against every mock variant, on the default TypeScript SDK library
 npm run test:browser:wasm            # the same on the Rust/WASM library (--client= picks any library in mcp-clients.js)
 npm run test:browser -- --reference  # plus the official Python SDK server
-npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, and the server template
+npm run test:unit                    # Pre-fill's test data against a dozen kinds of tool schema and real servers' descriptions, resource template URIs, the server template, the app builder's DML, zips, links, flow, screens, examples and agent loop, and the demo servers built in
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
 npm run test:examples                # the server template on each official SDK, against example.json
 ```
 
-The browser test starts its own servers on ports 18080-18093 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; the server template's replies, shown where its guide says; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
+The browser test starts its own servers on ports 18080-18093 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; the server template's replies, shown where its guide says; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info with everything a server says about itself and its icons, the report download); what each server is told about the client (its name and version, and only the fields of Settings its Info ticks); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the apps' calls and their models' tool calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Apps page with no app (the examples, and the model found among your servers, chosen and back); the Chat example (the message in the conversation as it's sent, the field cleared, the answer after, the conversation sent as a list with the instructions and the tools, a tool call in the answer run as a reply with its result in the conversation, the limit of three in 10 seconds, and the tools without tokens), and that the Chat app's old settings and conversations are gone; Preview (the whole window, the app started again with nothing of the builder running, the bar saying what it did, a phone's width, and Escape on the app's screen and off it); building an app (the starter app, its screen in a sandboxed frame with no network or storage, a click's call and where its answer goes, the run it records, templates, the failure route, renaming a component, a screen `make_screen` made, without its script, the zip with its DML, versions, and Delete then Import); the canvas (wiring by dragging between ports, a drop that can't connect, Run with both tools answering, a transform picked from the last answer, Start calling a tool when the app opens, a dashboard part the stand-in model writes, wired to a tool, and the zip with the part and where each tool sits); dashboards (the Project pulse starter filled from one answer, the request its boxes add to the prompt, a box changed to a line chart, an HTML box sized in the request, a link opening in a new tab, and an answer that isn't JSON); screens (Front desk's tabs on the canvas, wires ending at another screen's tab, a button dragged to a tab and its menu, a screen added from the Library and deleted with what's on it, the Outline, and in Preview a check-in, Done starting over, a visit not found, Call the front desk, Try again going back and Not me); the demo servers built in (one connecting in the worker on each library, and Front desk running on its own, then moved to the mock server, which has the same tools, while servers without them say what's missing); switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide and the server guide it links to; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
 
 The benchmark picks free ports, starts the mock with `--keep-alive`, and prints its results as tables, saving every round as JSON.
 

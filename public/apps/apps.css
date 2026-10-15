@@ -1,0 +1,2723 @@
+/*
+ * The Apps page's rail and the app builder (public/apps/), on top of styles.css and the
+ * Workbench's shared pieces (.wb-row, .wb-chip, .wb-form). Colors come from the --theme-* tokens.
+ */
+
+apps-rail,
+app-header,
+app-screen,
+app-flow,
+app-try {
+    display: block;
+    min-width: 0;
+}
+
+/* ---------- The rail ---------- */
+
+apps-rail {
+    overflow-y: auto;
+    border-right: 1px solid var(--theme-border-light);
+    background: var(--theme-background-light);
+}
+
+.apps-rail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 6px 4px;
+}
+
+/* One of your apps: its row, and its ⋯ menu, which the shown app always has. */
+.apps-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border-radius: var(--radius-200);
+}
+
+.apps-row:hover {
+    background: var(--theme-hover);
+}
+
+.apps-row:has(> [aria-current='true']) {
+    background: var(--theme-selected);
+}
+
+.apps-row > .wb-row,
+.apps-row > .wb-row:hover:not(:disabled),
+.apps-row > .wb-row[aria-current='true'] {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+}
+
+.apps-row-menu {
+    flex: none;
+    margin-right: 3px;
+    opacity: 0;
+}
+
+.apps-row:hover .apps-row-menu,
+.apps-row:focus-within .apps-row-menu,
+.apps-row:has(> [aria-current='true']) .apps-row-menu,
+.apps-row-menu[open] {
+    opacity: 1;
+}
+
+.apps-row-menu .menu-list {
+    min-width: 160px;
+}
+
+@media (max-width: 860px) {
+    apps-rail {
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid var(--theme-border-light);
+    }
+}
+
+/* ---------- The start page: the examples, and the model they call ---------- */
+
+apps-start {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 820px;
+    padding: 24px;
+}
+
+apps-start[hidden] {
+    display: none;
+}
+
+.apps-start-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.apps-start-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.apps-start-card:hover {
+    border-color: var(--theme-border-dark);
+    background: var(--theme-hover);
+}
+
+.apps-start-name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+}
+
+.apps-start-model {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* ---------- Adding an example: a copy, once you've said so ---------- */
+
+.apps-dialog {
+    width: min(480px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-modal);
+    color: var(--theme-text-primary);
+}
+
+.apps-dialog::backdrop {
+    background: rgb(0 0 0 / 35%);
+}
+
+.apps-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px 22px 18px;
+    font-size: 0.8125rem;
+}
+
+.apps-dialog-body h2 {
+    font-size: 1.0625rem;
+}
+
+.apps-dialog-body p {
+    margin: 0;
+}
+
+.apps-dialog-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.apps-dialog-check input {
+    flex: none;
+    margin-top: 2px;
+}
+
+.apps-dialog-have {
+    padding: 8px 10px;
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+}
+
+.apps-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+/* ---------- Share: embed it, run it on its own, or a link; and the client's address ---------- */
+
+.apps-share {
+    width: min(620px, calc(100vw - 32px));
+}
+
+.app-share-option {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+}
+
+.app-share-option h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+}
+
+.app-share-option h3 .icon {
+    width: 14px;
+    height: 14px;
+    color: var(--theme-text-secondary);
+}
+
+.app-share-code {
+    width: 100%;
+    min-height: 64px;
+    padding: 8px 10px;
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    word-break: break-all;
+    resize: vertical;
+}
+
+.app-share-option .button-row,
+.app-share-address .button-row {
+    gap: 6px;
+}
+
+.app-share-address {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 2px 0;
+}
+
+.app-share-address input {
+    width: 100%;
+}
+
+/* ---------- Preview: the app as it is when it's launched, over the whole window ---------- */
+
+/* Above the top bar and the Guide; Go to and status messages stay above it. */
+app-preview {
+    position: fixed;
+    inset: 0;
+    z-index: 1150;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-background-mid);
+}
+
+app-preview[hidden] {
+    display: none;
+}
+
+.app-preview-bar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-height: 44px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+}
+
+.app-preview-badge {
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: var(--theme-info-background);
+    color: var(--theme-info-foreground);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.app-preview-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.app-preview-screen {
+    padding: 1px 8px;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.app-preview-screen[hidden] {
+    display: none;
+}
+
+.app-preview-status {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-preview-bar kbd {
+    margin-left: 6px;
+}
+
+.app-preview-stage {
+    display: flex;
+    flex: 1;
+    align-items: flex-start;
+    justify-content: center;
+    min-height: 0;
+    overflow: auto;
+}
+
+.app-preview-frame {
+    flex: none;
+    width: var(--device-w, 100%);
+    max-width: 100%;
+    height: var(--device-h, 100%);
+    max-height: 100%;
+    border: 0;
+    background: var(--theme-background);
+}
+
+.app-preview-stage:is([data-device='phone'], [data-device='tablet']) {
+    padding: 20px;
+}
+
+/* A launched app's notes: what it needs first, and where it came from. */
+.app-launch-notes {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+    font-size: 0.8125rem;
+}
+
+.app-launch-notes[hidden] {
+    display: none;
+}
+
+.app-launch-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    margin: 0;
+}
+
+/* ---------- An app launched on its own (index.html?app= or #run=): the app, and nothing else ---------- */
+
+body.launched .wb-topbar,
+body.launched #workbench,
+body.launched wb-dock,
+body.launched .guide-drawer,
+body.launched #appsPage > apps-rail,
+body.launched #appsPage > apps-splitter,
+body.launched #appBuilder > :not(app-preview) {
+    display: none;
+}
+
+body.launched .wb-app {
+    grid-template-rows: minmax(0, 1fr);
+}
+
+body.launched .wb-apps {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+/* In another page's iframe (?embed): a slimmer bar, which says where to run it on its own. */
+body.embedded .app-preview-bar {
+    min-height: 34px;
+    padding: 3px 8px;
+    font-size: 0.75rem;
+}
+
+a.app-preview-own {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-full);
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+a.app-preview-own:hover {
+    background: var(--theme-hover);
+}
+
+a.app-preview-own .icon {
+    width: 12px;
+    height: 12px;
+}
+
+/* The app gets the device's whole width, and the border sits outside it. */
+.app-preview-stage:is([data-device='phone'], [data-device='tablet']) .app-preview-frame {
+    box-sizing: content-box;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: 20px;
+    box-shadow: 0 10px 36px rgb(0 0 0 / 18%);
+}
+
+/* ---------- The model the builder asks, and the examples call ---------- */
+
+.app-model > summary {
+    width: fit-content;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-model[open] > summary {
+    margin-bottom: 6px;
+}
+
+.app-model-name {
+    font-weight: 600;
+}
+
+.app-model-menus {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+/* ---------- The builder ---------- */
+
+.app-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 16px 32px;
+}
+
+.app-builder-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.app-build {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+app-try {
+    position: sticky;
+    top: 0;
+}
+
+@media (max-width: 1100px) {
+    .app-builder-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    app-try {
+        position: static;
+    }
+}
+
+.app-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+
+.app-head-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 240px;
+}
+
+.app-head-text input {
+    min-height: 0;
+    padding: 2px 8px;
+    margin-left: -8px;
+    border-color: transparent;
+    background: transparent;
+}
+
+.app-head-text input:hover:not(:focus) {
+    border-color: var(--theme-border-light);
+}
+
+.app-name {
+    font-family: var(--font-heading);
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.75rem;
+    letter-spacing: -0.03rem;
+}
+
+.app-description {
+    color: var(--theme-text-secondary);
+    font-size: 0.8125rem;
+}
+
+.app-version {
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.app-menu .menu-list {
+    right: 0;
+}
+
+/* ---------- The question an app asks as it opens: run what Start calls? ---------- */
+
+app-open-ask {
+    display: block;
+}
+
+app-open-ask[hidden] {
+    display: none;
+}
+
+.app-open-ask {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px 14px;
+    border: 1px solid var(--theme-border-light);
+    border-left: 3px solid var(--theme-info-foreground);
+    border-radius: var(--radius-200);
+    background: var(--theme-info-background);
+    font-size: 0.8125rem;
+}
+
+.app-open-ask-text {
+    flex: 1 1 320px;
+    margin: 0;
+}
+
+.app-open-ask-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.app-intro {
+    max-width: 860px;
+    margin-top: 6px;
+    font-size: 0.8125rem;
+}
+
+/* A numbered part of the builder: Screen, Flow, Try it. */
+.app-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+}
+
+.app-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.app-section-head h3 {
+    display: flex;
+    align-items: center;
+    font-size: 1rem;
+    line-height: 1.5rem;
+}
+
+.app-step {
+    display: inline-grid;
+    width: 22px;
+    height: 22px;
+    margin-right: 10px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.app-section-note {
+    margin-top: -4px;
+    font-size: 0.8125rem;
+}
+
+.app-section code,
+.app-found code {
+    padding: 0 4px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background-mid);
+    font-size: 0.75rem;
+}
+
+/* Small labelled fields, side by side where there's room. */
+.app-field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 120px;
+}
+
+.app-field > span {
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+.app-field-narrow {
+    flex: 0 0 72px;
+    min-width: 72px;
+}
+
+.app-section input:where([type='text']),
+.app-section textarea,
+.app-section select {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 0.8125rem;
+}
+
+.app-section select {
+    padding-right: 30px;
+}
+
+.app-invalid {
+    border-color: var(--theme-error) !important;
+}
+
+/* ---------- Screen ---------- */
+
+.app-components {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-component {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+}
+
+.app-component:hover {
+    border-color: var(--theme-border-dark);
+}
+
+/* A screen starts a step of the app; what's on it is set in under it. */
+.app-component-screen {
+    margin-top: 6px;
+    border-color: var(--theme-border-dark);
+    background: var(--theme-background);
+}
+
+.app-component-screen .badge {
+    border-color: var(--theme-primary-highlight);
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+}
+
+.app-component-on-screen {
+    margin-left: 18px;
+}
+
+.app-component-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.app-id-mark {
+    color: var(--theme-text-secondary);
+    font: 0.75rem var(--font-mono);
+}
+
+.app-section .app-id input {
+    width: 150px;
+    min-height: 24px;
+    padding: 0 6px;
+    border-color: transparent;
+    background: transparent;
+    font-size: 0.75rem;
+}
+
+.app-section .app-id input:hover,
+.app-section .app-id input:focus {
+    border-color: var(--theme-border-dark);
+    background: var(--theme-background);
+}
+
+.app-component-props {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+}
+
+.app-component-props textarea {
+    min-height: 0;
+}
+
+.app-field-error {
+    font-size: 0.75rem;
+}
+
+.app-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-add-label,
+.app-chips-label {
+    margin-right: 2px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+.app-chips-label + .wb-chip ~ .app-chips-label {
+    margin-left: 8px;
+}
+
+.app-html-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-html-status {
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.app-html-status.text-error {
+    color: var(--theme-error);
+}
+
+.app-html-source {
+    font-size: 0.75rem !important;
+    line-height: 1.125rem;
+    white-space: pre;
+}
+
+.app-found {
+    font-size: 0.75rem;
+    line-height: 1.375rem;
+}
+
+/* An id moves to the next line whole, rather than breaking at its hyphen. */
+.app-found code {
+    display: inline-block;
+    max-width: 100%;
+    line-height: 1.125rem;
+    overflow-wrap: anywhere;
+}
+
+.app-kind {
+    color: var(--theme-text-secondary);
+}
+
+/* ---------- A call: server, tool and its fields ---------- */
+
+.app-call {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.app-call-pick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+}
+
+.app-call-help {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 0.75rem;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.app-note {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+/* ---------- Asks: where a rule's call asks for what its boxes show ---------- */
+
+.app-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.app-prompt-more {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.app-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-check input {
+    flex: none;
+    margin: 2px 0 0;
+}
+
+.app-prompt-preview summary {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-prompt-preview pre {
+    max-height: 240px;
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    overflow: auto;
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.app-args {
+    gap: 10px;
+}
+
+.app-args:empty {
+    display: none;
+}
+
+.app-args .tool-input-card > label {
+    font-size: 0.75rem;
+}
+
+.app-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-chips .wb-chip {
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    font-size: 0.6875rem;
+}
+
+/* ---------- Flow ---------- */
+
+.app-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-rule {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--theme-border-light);
+    border-left: 3px solid var(--theme-primary-highlight);
+    border-radius: var(--radius-300);
+}
+
+.app-rule:hover {
+    border-color: var(--theme-border-dark);
+    border-left-color: var(--theme-link);
+}
+
+.app-rule-incomplete {
+    border-left-color: var(--theme-warning-dark);
+}
+
+.app-rule-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.app-rule-number {
+    flex: none;
+    width: 20px;
+    color: var(--theme-text-secondary);
+    font: 600 0.75rem/1.25rem var(--font-mono);
+}
+
+.app-rule-sentence {
+    display: -webkit-box;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.app-rule-actions {
+    display: flex;
+    flex: none;
+    gap: 2px;
+}
+
+.app-rule-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.app-rule-label {
+    padding-top: 7px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-rule-when {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.app-trigger-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-trigger {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-trigger select {
+    flex: 1;
+    min-width: 120px;
+}
+
+.app-focus {
+    border-radius: var(--radius-200);
+    outline: 2px solid var(--theme-link);
+    outline-offset: 3px;
+}
+
+.app-picks {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-pick {
+    gap: 6px;
+    max-width: 100%;
+    height: 22px;
+    min-height: 22px;
+    padding: 0 8px;
+    border-color: var(--theme-border-light);
+    border-radius: var(--radius-100);
+    background: var(--theme-background-light);
+    font-size: 0.6875rem;
+    font-weight: 400;
+}
+
+.app-pick-value {
+    max-width: 180px;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    text-overflow: ellipsis;
+}
+
+.app-routes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.app-route-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+}
+
+.app-section .app-route select {
+    width: auto;
+}
+
+.app-route [data-route-show] {
+    flex: 1 1 150px;
+    width: auto;
+}
+
+.app-route-word {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+}
+
+/* "into", where and how wrap to the next line together. */
+.app-route-where {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* A route into a screen goes there: it shows nothing. */
+.app-route-go [data-route-show],
+.app-route-go [data-route-how],
+.app-route-go [data-route-into-word] {
+    display: none;
+}
+
+.app-route-add {
+    display: flex;
+    gap: 4px;
+}
+
+.app-rule-problems {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: var(--radius-200);
+    background: var(--theme-warning-background);
+    color: var(--theme-warning-foreground);
+    font-size: 0.75rem;
+    list-style: none;
+}
+
+/* ---------- Try it ---------- */
+
+.app-frame-box {
+    overflow: hidden;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-300);
+    box-shadow: var(--shadow-sm);
+}
+
+.app-frame {
+    display: block;
+    width: 100%;
+    height: clamp(220px, var(--app-frame-height, 360px), 640px);
+    border: none;
+}
+
+.app-trace-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.app-trace-head h4 {
+    color: var(--theme-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-trace {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    margin: 0;
+    padding: 8px 10px;
+    overflow-y: auto;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+    font-size: 0.75rem;
+    list-style: none;
+}
+
+.app-trace-entry {
+    display: grid;
+    grid-template-columns: auto 14px minmax(0, 1fr);
+    gap: 6px;
+    align-items: baseline;
+}
+
+.app-trace-time {
+    color: var(--theme-text-secondary);
+    font: 0.6875rem var(--font-mono);
+}
+
+.app-trace-mark {
+    color: var(--theme-text-secondary);
+    text-align: center;
+}
+
+.app-trace-text {
+    overflow-wrap: anywhere;
+}
+
+.app-trace-event {
+    margin-top: 6px;
+    font-weight: 600;
+}
+
+.app-trace-event:first-child {
+    margin-top: 0;
+}
+
+.app-trace-ok .app-trace-mark {
+    color: var(--theme-success-foreground);
+}
+
+.app-trace-error .app-trace-mark,
+.app-trace-error .app-trace-text {
+    color: var(--theme-error);
+}
+
+.app-trace-note .app-trace-text {
+    color: var(--theme-text-secondary);
+}
+
+.app-trace .link-button {
+    font-size: 0.75rem;
+}
+
+/* ---------- Where HTML comes from: a model or a tool ---------- */
+
+.app-source {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.app-html-details > summary {
+    width: fit-content;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.app-html-details[open] > summary {
+    margin-bottom: 6px;
+}
+
+.app-part-source {
+    padding: 10px;
+    border: 1px dashed var(--theme-border-dark);
+    border-radius: var(--radius-200);
+    background: var(--theme-background);
+}
+
+.app-views {
+    flex: none;
+}
+
+/* ---------- The canvas ---------- */
+
+/* What the canvas and the Inspector color by: a screen is blue, a tool violet. A pin that starts a
+   tool or fills its field is a ring, and one that takes what comes out of a tool is solid. */
+.wb-apps {
+    --app-screen: var(--theme-link);
+    --app-tool: #7c4ddb;
+    --app-screen-soft: color-mix(in srgb, var(--app-screen) 9%, var(--theme-background));
+    --app-tool-soft: color-mix(in srgb, var(--app-tool) 10%, var(--theme-background));
+    --app-out-soft: color-mix(in srgb, var(--theme-text-secondary) 7%, var(--theme-background));
+}
+
+.dark-theme .wb-apps {
+    --app-tool: #a98bff;
+}
+
+/* The Inspector's splitter fills the gap beside it and sets its width. */
+.app-canvas-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 16px clamp(260px, var(--inspector-width, 300px), 45vw);
+    align-items: start;
+}
+
+@media (max-width: 1180px) {
+    .app-canvas-view {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+    }
+
+    .app-canvas-view > apps-splitter {
+        display: none;
+    }
+}
+
+/* ---------- The splitters: the list of apps', the Inspector's and the canvas's ---------- */
+
+apps-splitter {
+    position: relative;
+    z-index: 5;
+    display: block;
+    align-self: stretch;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+}
+
+apps-splitter::before,
+apps-splitter::after {
+    position: absolute;
+    inset: 0 -4px;
+    content: '';
+}
+
+.app-canvas-view > apps-splitter::before {
+    inset: 0;
+}
+
+apps-splitter::after {
+    inset: 0 -1px;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+.app-canvas-view > apps-splitter::after {
+    inset: 0 7px;
+}
+
+apps-splitter:hover::after,
+apps-splitter:focus-visible::after,
+apps-splitter[data-dragging]::after {
+    background: var(--theme-link);
+}
+
+apps-splitter[data-pane='canvas'] {
+    height: 6px;
+    border-top: 1px solid var(--theme-border-light);
+    cursor: row-resize;
+}
+
+apps-splitter[data-pane='canvas']::before {
+    inset: -4px 0;
+}
+
+apps-splitter[data-pane='canvas']::after {
+    inset: -1px 0 auto;
+    height: 3px;
+}
+
+app-canvas,
+app-inspector {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-400);
+    background: var(--theme-background);
+}
+
+app-canvas {
+    overflow: hidden;
+}
+
+app-canvas:empty,
+app-inspector:empty {
+    display: none;
+}
+
+.app-canvas-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.app-canvas-hint {
+    min-width: 0;
+    font-size: 0.75rem;
+}
+
+.app-canvas-hint.text-error {
+    color: var(--theme-error);
+}
+
+.app-canvas-scroll {
+    height: var(--canvas-height, clamp(420px, calc(100vh - 300px), 1100px));
+    overflow: auto;
+    outline: none;
+}
+
+/* The surface is scaled to the zoom; the box around it is its size once scaled, which the
+   scroll area scrolls. */
+.app-zoom {
+    position: relative;
+    min-width: 100%;
+    min-height: 100%;
+}
+
+.app-surface {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-image: radial-gradient(var(--theme-border-dark) 1px, transparent 1px);
+    background-size: 18px 18px;
+    transform-origin: 0 0;
+    user-select: none;
+}
+
+app-canvas.app-panning,
+app-canvas.app-panning * {
+    cursor: grabbing !important;
+}
+
+.app-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.app-zoom-controls .btn-icon {
+    min-width: 28px;
+    padding: 0;
+    font-size: 1rem;
+}
+
+.app-zoom-level {
+    min-width: 52px;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-wires {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.app-wire {
+    --wire: var(--theme-text-secondary);
+}
+
+.app-wire-trigger { --wire: var(--theme-warning-foreground); }
+.app-wire-arg { --wire: var(--theme-link); }
+.app-wire-sent { --wire: var(--theme-info-foreground); }
+.app-wire-answer { --wire: var(--theme-success-foreground); }
+.app-wire-error { --wire: var(--theme-error); }
+.app-wire-go { --wire: var(--theme-text-primary); }
+
+.app-arrow-trigger path { fill: var(--theme-warning-foreground); }
+.app-arrow-arg path { fill: var(--theme-link); }
+.app-arrow-sent path { fill: var(--theme-info-foreground); }
+.app-arrow-answer path { fill: var(--theme-success-foreground); }
+.app-arrow-error path { fill: var(--theme-error); }
+.app-arrow-go path { fill: var(--theme-text-primary); }
+
+/* A way to another screen, from a button or a tool's answer, is a thicker arrow into its card. */
+.app-wire-transition .app-wire-line {
+    stroke-width: 3;
+}
+
+.app-wire-transition:hover .app-wire-line {
+    stroke-width: 4;
+}
+
+.app-wire-hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14;
+    cursor: pointer;
+    pointer-events: stroke;
+}
+
+.app-wire-line {
+    fill: none;
+    stroke: var(--wire);
+    stroke-width: 2;
+    transition: stroke-width 0.1s ease;
+}
+
+.app-wire:hover .app-wire-line {
+    stroke-width: 3;
+}
+
+.app-wire.app-selected .app-wire-line {
+    stroke-width: 3.5;
+    filter: drop-shadow(0 0 3px var(--wire));
+}
+
+.app-wire.app-live .app-wire-line {
+    stroke-width: 3;
+    stroke-dasharray: 8 6;
+    animation: app-wire-flow 0.5s linear infinite;
+}
+
+@keyframes app-wire-flow {
+    to { stroke-dashoffset: -14; }
+}
+
+.app-wire-draft {
+    fill: none;
+    stroke: var(--theme-link);
+    stroke-dasharray: 6 4;
+    stroke-width: 2;
+}
+
+.app-entry {
+    fill: none;
+    stroke: var(--theme-warning-foreground);
+    stroke-width: 2;
+}
+
+.app-start {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 6;
+    gap: 6px;
+    transform: translate(var(--x, 24px), var(--y, 20px));
+    height: 30px;
+    min-height: 30px;
+    padding: 0 18px 0 12px;
+    border-color: var(--theme-primary-highlight);
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+    font-weight: 600;
+}
+
+.app-start:hover:not(:disabled) {
+    background: var(--theme-primary-hover);
+}
+
+.app-start.app-selected {
+    box-shadow: 0 0 0 3px var(--theme-text-highlight-background);
+}
+
+.app-start-mark {
+    font-size: 0.6875rem;
+}
+
+.app-port-start {
+    position: absolute;
+    top: 50%;
+    right: -7px;
+    transform: translateY(-50%);
+}
+
+/* The cards are above the wires, so the ports in their gutters take clicks before the wires that
+   leave them. Above the cards, in order: the running app, the boxes that pick elements in
+   Design, the tools, and the transforms on the wires. */
+.app-cards {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+
+.app-screen-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    transform: translate(var(--x), var(--y));
+    pointer-events: auto;
+}
+
+.app-screen-card[data-front] {
+    z-index: 1;
+}
+
+.app-screen-window {
+    width: var(--screen-w);
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--app-screen) 40%, var(--theme-border-dark));
+    border-radius: var(--radius-300);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-md);
+}
+
+.app-screen-card[data-live] .app-screen-window {
+    border-color: var(--app-screen);
+}
+
+.app-screen-bar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: var(--screen-bar);
+    padding: 0 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-screen) 25%, var(--theme-border-light));
+    background: var(--app-screen-soft);
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    cursor: grab;
+    outline: none;
+}
+
+.app-screen-icon {
+    width: 13px;
+    height: 13px;
+    color: var(--app-screen);
+}
+
+.app-screen-kind {
+    flex: none;
+    margin-left: auto;
+    color: color-mix(in srgb, var(--app-screen) 80%, var(--theme-text-secondary));
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-screen-bar:active {
+    cursor: grabbing;
+}
+
+.app-screen-bar:focus-visible,
+.app-screen-bar.app-selected {
+    box-shadow: inset 0 0 0 2px var(--app-screen);
+    color: var(--theme-text-primary);
+}
+
+.app-screen-card[data-live] .app-screen-bar {
+    color: var(--theme-text-primary);
+    font-weight: 600;
+}
+
+.app-screen-opens {
+    flex: none;
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: var(--radius-100);
+    background: color-mix(in srgb, var(--app-screen) 16%, var(--theme-background));
+    color: color-mix(in srgb, var(--app-screen) 80%, var(--theme-text-primary));
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+/* A screen's ● is where the ways there end, at the start of its card's title. */
+.app-screen-bar .app-port-screen {
+    position: relative;
+    margin-left: -16px;
+}
+
+.app-screen-dots {
+    flex: none;
+    width: 38px;
+    height: 10px;
+    background:
+        radial-gradient(circle at 5px 5px, #ff5f57 4px, transparent 4.5px),
+        radial-gradient(circle at 19px 5px, #febc2e 4px, transparent 4.5px),
+        radial-gradient(circle at 33px 5px, #28c840 4px, transparent 4.5px);
+}
+
+.app-screen-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-screen-body {
+    position: relative;
+    height: var(--body-h);
+}
+
+.app-canvas-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: var(--theme-background);
+}
+
+/* A still shows its screen and takes no input; under the running app, it's hidden. */
+.app-still {
+    pointer-events: none;
+}
+
+.app-still[data-covered] {
+    visibility: hidden;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-still {
+    opacity: 0.55;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-screen-body {
+    cursor: pointer;
+}
+
+app-canvas[data-mode='run'] .app-screen-card:not([data-live]) .app-screen-body:hover .app-still {
+    opacity: 0.8;
+}
+
+/* The running app, over the body of its card. It slides to the next card when it goes there. */
+.app-player {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 4;
+    width: var(--screen-w);
+    height: var(--h);
+    border-bottom-right-radius: var(--radius-300);
+    border-bottom-left-radius: var(--radius-300);
+    transform: translate(var(--x), var(--y));
+}
+
+.app-player-moving {
+    transition: transform 0.45s ease, height 0.45s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-player-moving {
+        transition: none;
+    }
+}
+
+.app-overlays {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.app-screen-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--screen-w);
+    height: var(--h);
+    transform: translate(var(--x), var(--y));
+    pointer-events: auto;
+}
+
+app-canvas[data-mode='run'] .app-screen-overlay {
+    pointer-events: none;
+}
+
+.app-element-box {
+    position: absolute;
+    top: var(--top);
+    left: var(--left);
+    width: var(--width);
+    height: var(--height);
+    min-height: 0;
+    padding: 0;
+    border: 1.5px dashed transparent;
+    border-radius: var(--radius-100);
+    background: transparent;
+    cursor: pointer;
+}
+
+.app-element-box:hover:not(:disabled) {
+    border-color: var(--theme-link);
+    background: color-mix(in srgb, var(--theme-link) 6%, transparent);
+}
+
+.app-element-box.app-selected {
+    border-style: solid;
+    border-color: var(--theme-link);
+    background: color-mix(in srgb, var(--theme-link) 10%, transparent);
+}
+
+.app-screen-gutter {
+    position: relative;
+    width: var(--gutter-w);
+}
+
+.app-leads {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.app-leads path {
+    fill: none;
+    stroke: var(--theme-border-dark);
+    stroke-width: 1;
+}
+
+.app-gutter-row {
+    position: absolute;
+    top: var(--y);
+    right: 0;
+    left: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    height: 18px;
+    transform: translateY(-50%);
+    cursor: pointer;
+}
+
+.app-gutter-label {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-gutter-row.app-selected .app-gutter-label {
+    color: var(--theme-link);
+    font-weight: 600;
+}
+
+/* Pointed at, a name too long for the gutter shows in full, over the screen's edge. */
+.app-gutter-row:hover {
+    left: auto;
+    z-index: 1;
+}
+
+.app-gutter-row:hover .app-gutter-label {
+    overflow: visible;
+    padding: 1px 5px;
+    border-radius: var(--radius-100);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-md);
+    color: var(--theme-text-primary);
+}
+
+.app-port {
+    --port: var(--theme-text-secondary);
+    flex: none;
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--port);
+    border-radius: 50%;
+    background: var(--theme-background);
+    cursor: crosshair;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.app-port:hover {
+    transform: scale(1.3);
+}
+
+/* A press a few pixels off a port still starts its wire. */
+.app-port::before {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    content: '';
+}
+
+.app-port-element {
+    position: relative;
+}
+
+.app-node .app-port:hover,
+.app-port-start:hover {
+    transform: translateY(-50%) scale(1.3);
+}
+
+/* In: what starts a tool (a button, Start, its Run) and what fills its fields, as rings. */
+.app-port-button,
+.app-port-run,
+.app-port-start { --port: var(--theme-warning-foreground); }
+.app-port-input,
+.app-port-arg { --port: var(--theme-link); }
+
+/* Out: what comes out of a tool and where it lands (an output, a screen to go to), solid. */
+.app-port-sent { --port: var(--theme-info-foreground); }
+.app-port-output,
+.app-port-answer { --port: var(--theme-success-foreground); }
+.app-port-error { --port: var(--theme-error); }
+.app-port-screen { --port: var(--app-screen); }
+
+.app-port-sent,
+.app-port-answer,
+.app-port-error,
+.app-port-output,
+.app-port-screen {
+    background: var(--port);
+    box-shadow: inset 0 0 0 2px var(--theme-background);
+}
+
+/* What's pointed at, and what it's connected to; the other wires step back. */
+.app-port.app-hot {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--port) 32%, transparent);
+}
+
+.app-port-sent.app-hot,
+.app-port-answer.app-hot,
+.app-port-error.app-hot,
+.app-port-output.app-hot,
+.app-port-screen.app-hot {
+    box-shadow: inset 0 0 0 2px var(--theme-background), 0 0 0 4px color-mix(in srgb, var(--port) 32%, transparent);
+}
+
+app-canvas.app-pointing .app-wire:not(.app-hot) .app-wire-line {
+    opacity: 0.22;
+}
+
+app-canvas.app-pointing .app-pill:not(.app-hot) {
+    opacity: 0.35;
+}
+
+.app-wire.app-hot .app-wire-line {
+    stroke-width: 3.5;
+}
+
+.app-port-can {
+    border-color: var(--theme-link);
+    background: var(--theme-link);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-link) 30%, transparent);
+}
+
+app-canvas.app-wiring {
+    cursor: crosshair;
+}
+
+app-canvas[data-mode='run'] .app-port {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.app-nodes,
+.app-pills {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.app-nodes {
+    z-index: 6;
+}
+
+.app-pills {
+    z-index: 7;
+}
+
+.app-node {
+    position: absolute;
+    top: var(--y);
+    left: var(--x);
+    width: var(--tool-w);
+    border: 1px solid color-mix(in srgb, var(--app-tool) 45%, var(--theme-border-dark));
+    border-radius: var(--radius-300);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-md);
+    font-size: 0.75rem;
+    pointer-events: auto;
+    outline: none;
+}
+
+.app-node:focus-visible,
+.app-node.app-selected {
+    border-color: var(--app-tool);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-tool) 28%, transparent), var(--shadow-md);
+}
+
+.app-node-incomplete {
+    border-color: var(--theme-warning-dark);
+}
+
+.app-node-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-tool) 25%, var(--theme-border-light));
+    border-radius: var(--radius-300) var(--radius-300) 0 0;
+    background: var(--app-tool-soft);
+    cursor: grab;
+    user-select: none;
+}
+
+.app-node-icon {
+    width: 13px;
+    height: 13px;
+    color: var(--app-tool);
+}
+
+/* In and Out: what goes into the tool, and what comes out of it, each under a caption. */
+.app-node-band {
+    padding: 0 0 4px;
+}
+
+.app-node-outputs {
+    border-top: 1px solid var(--theme-border-light);
+    background: var(--app-out-soft);
+}
+
+.app-node-caption {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    height: 18px;
+    padding: 4px 10px 0 14px;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.625rem;
+    white-space: nowrap;
+}
+
+.app-node-caption span {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.app-node-inputs .app-node-caption span {
+    color: var(--theme-warning-foreground);
+}
+
+.app-node-outputs .app-node-caption span {
+    color: var(--theme-success-foreground);
+}
+
+.app-node-where {
+    font-family: var(--font-mono);
+}
+
+.app-node-screen {
+    color: var(--app-screen);
+    font-family: var(--font-body);
+    font-weight: 600;
+}
+
+.app-node-screen .icon {
+    width: 11px;
+    height: 11px;
+    margin-right: 2px;
+    vertical-align: -1px;
+}
+
+.app-node-head:active {
+    cursor: grabbing;
+}
+
+.app-node-title {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The tool's name takes the room it needs first, and the server what's left. */
+.app-node-server {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    text-align: right;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-node-running .app-node-head {
+    background: linear-gradient(90deg, var(--theme-background-light), var(--theme-info-background), var(--theme-background-light));
+    background-size: 200% 100%;
+    animation: app-node-busy 1s linear infinite;
+}
+
+@keyframes app-node-busy {
+    to { background-position: -200% 0; }
+}
+
+.app-node-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 26px;
+    padding: 0 10px 0 14px;
+}
+
+.app-node .app-port {
+    position: absolute;
+    top: 50%;
+    left: -7px;
+    transform: translateY(-50%);
+}
+
+.app-node .app-port[data-side='right'] {
+    right: -7px;
+    left: auto;
+}
+
+/* A pin on a tool's other side shows only while a wire leaves from it. */
+.app-node .app-port-back:not(.app-port-used) {
+    display: none;
+}
+
+.app-node-outputs .app-node-row {
+    padding-right: 16px;
+}
+
+.app-node-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.app-node-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-node-status {
+    min-height: 22px;
+    padding: 2px 10px 6px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    overflow-wrap: anywhere;
+}
+
+.app-node-failed .app-node-status {
+    color: var(--theme-error);
+}
+
+.app-pill {
+    --pill: var(--theme-success-foreground);
+    position: absolute;
+    top: var(--y);
+    left: var(--x);
+    max-width: 104px;
+    height: 20px;
+    min-height: 20px;
+    padding: 0 8px;
+    overflow: hidden;
+    border-color: var(--pill);
+    background: var(--theme-background);
+    color: var(--pill);
+    font: 500 0.6875rem/1 var(--font-mono);
+    text-overflow: ellipsis;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+}
+
+.app-pill-error {
+    --pill: var(--theme-error);
+}
+
+.app-pill-sent {
+    --pill: var(--theme-info-foreground);
+}
+
+.app-pill-custom {
+    background: var(--pill);
+    color: var(--theme-alternate);
+}
+
+.app-pill:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--pill) 14%, var(--theme-background));
+}
+
+.app-pill-custom:hover:not(:disabled) {
+    background: var(--pill);
+    filter: brightness(1.1);
+}
+
+.app-pill.app-selected {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--pill) 30%, transparent);
+}
+
+.app-pill.app-live {
+    animation: app-pill-pulse 0.8s ease 2;
+}
+
+@keyframes app-pill-pulse {
+    50% { transform: translate(-50%, -50%) scale(1.15); }
+}
+
+.app-canvas-trace {
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--theme-border-light);
+}
+
+/* The key to the canvas: a screen, a tool, and the two kinds of pin. */
+.app-canvas-key {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    padding: 5px 12px;
+    border-top: 1px solid var(--theme-border-light);
+    font-size: 0.6875rem;
+}
+
+.app-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.app-key .icon {
+    width: 12px;
+    height: 12px;
+}
+
+.app-key-screen .icon {
+    color: var(--app-screen);
+}
+
+.app-key-tool .icon {
+    color: var(--app-tool);
+}
+
+.app-key-screen,
+.app-key-tool {
+    padding: 1px 7px;
+    border-radius: var(--radius-100);
+    font-weight: 600;
+}
+
+.app-key-screen {
+    background: var(--app-screen-soft);
+}
+
+.app-key-tool {
+    background: var(--app-tool-soft);
+}
+
+.app-key-pin {
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--theme-warning-foreground);
+    border-radius: 50%;
+}
+
+.app-key-out .app-key-pin {
+    border-color: var(--theme-success-foreground);
+    background: var(--theme-success-foreground);
+}
+
+.app-key-tip {
+    margin-left: auto;
+}
+
+.app-canvas-trace .app-trace {
+    max-height: 96px;
+    margin-top: 6px;
+}
+
+/* ---------- The Library ---------- */
+
+.app-library-anchor {
+    position: relative;
+}
+
+.app-library {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    width: 330px;
+    max-height: min(480px, 70vh);
+    padding: 8px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+    background: var(--theme-background);
+    box-shadow: var(--shadow-modal);
+}
+
+.app-library input[type='search'] {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 0.8125rem;
+}
+
+.app-library-scroll {
+    flex: 1;
+    min-height: 0;
+    margin-top: 6px;
+    overflow: auto;
+}
+
+.app-library-scroll h4 {
+    margin: 8px 6px 4px;
+    color: var(--theme-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-library-group {
+    margin: 6px 6px 2px;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+}
+
+.app-library-item {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 0;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius-200);
+    background: transparent;
+    font-weight: 400;
+    text-align: left;
+    white-space: normal;
+    cursor: grab;
+}
+
+.app-library-item:hover:not(:disabled) {
+    background: var(--theme-hover);
+}
+
+.app-library-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.app-library-help {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.app-library-note {
+    margin: 6px 4px 0;
+    font-size: 0.6875rem;
+}
+
+/* ---------- The Inspector ---------- */
+
+app-inspector {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - 150px);
+    padding: 0 14px 14px;
+    overflow: auto;
+}
+
+@media (max-width: 1180px) {
+    app-inspector {
+        position: static;
+        max-height: none;
+    }
+}
+
+/* The colors of what's picked, as the canvas draws it. */
+.wb-apps [data-tone] { --tone: var(--theme-text-secondary); }
+.wb-apps [data-tone='screen'] { --tone: var(--app-screen); }
+.wb-apps [data-tone='tool'] { --tone: var(--app-tool); }
+.wb-apps :is([data-tone='start'], [data-tone='button'], [data-tone='trigger']) { --tone: var(--theme-warning-foreground); }
+.wb-apps :is([data-tone='input'], [data-tone='arg']) { --tone: var(--theme-link); }
+.wb-apps :is([data-tone='output'], [data-tone='answer']) { --tone: var(--theme-success-foreground); }
+.wb-apps [data-tone='sent'] { --tone: var(--theme-info-foreground); }
+.wb-apps [data-tone='error'] { --tone: var(--theme-error); }
+
+/* What's picked stays at the top while the rest scrolls, under a band of its color. */
+.app-inspector-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 -14px;
+    padding: 11px 14px 9px;
+    border-top: 3px solid var(--tone);
+    border-bottom: 1px solid var(--theme-border-light);
+    background: var(--theme-background);
+}
+
+.app-inspector-kind,
+.app-inspector-section {
+    color: var(--theme-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-inspector-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--tone);
+}
+
+.app-inspector-kind .icon {
+    width: 12px;
+    height: 12px;
+}
+
+.app-inspector-swatch {
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--tone);
+    border-radius: 50%;
+}
+
+.app-inspector-section {
+    margin-top: 6px;
+}
+
+.app-inspector-title {
+    font-size: 1rem;
+    overflow-wrap: anywhere;
+}
+
+.app-inspector-sub {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+.app-inspector-note {
+    margin: 8px 0 6px;
+    font-size: 0.8125rem;
+}
+
+/* A section that opens and closes; closed, it says in a line what's in it. */
+.app-fold {
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.app-fold[hidden] {
+    display: none;
+}
+
+.app-fold > .app-fold-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 0;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.app-fold > .app-fold-head::-webkit-details-marker {
+    display: none;
+}
+
+.app-fold > .app-fold-head::before {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    background-color: var(--theme-text-secondary);
+    content: '';
+    -webkit-mask: url('../icons/chevron-right.svg') center / contain no-repeat;
+    mask: url('../icons/chevron-right.svg') center / contain no-repeat;
+    transition: transform 0.12s ease;
+}
+
+.app-fold[open] > .app-fold-head::before {
+    transform: rotate(90deg);
+}
+
+.app-fold > .app-fold-head:hover .app-fold-title,
+.app-fold > .app-fold-head:hover .app-rule-label {
+    color: var(--theme-text-primary);
+}
+
+.app-fold > .app-fold-head:focus-visible {
+    border-radius: var(--radius-100);
+    outline: 2px solid var(--theme-link);
+}
+
+.app-fold-title,
+.app-fold > .app-fold-head .app-rule-label {
+    flex: none;
+    padding: 0;
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-fold-digest {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-fold[open] > .app-fold-head .app-fold-digest {
+    display: none;
+}
+
+.app-fold-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 0 12px;
+}
+
+/* A rule in the Inspector is its sections, not a card. */
+app-inspector .app-rule.app-rule-folds {
+    gap: 0;
+    padding: 0;
+    border: none;
+}
+
+app-inspector .app-rule-folds > .app-rule-head {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+.app-rule-row.app-fold {
+    display: block;
+}
+
+/* A wire's two ends, a click away. */
+.app-ends {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 8px;
+    color: var(--theme-text-secondary);
+}
+
+.app-end {
+    gap: 5px;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 9px;
+    border-color: color-mix(in srgb, var(--tone) 45%, var(--theme-border-light));
+    background: color-mix(in srgb, var(--tone) 10%, var(--theme-background));
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+}
+
+.app-end .icon {
+    width: 12px;
+    height: 12px;
+    color: var(--tone);
+}
+
+.app-end:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--tone) 18%, var(--theme-background));
+}
+
+.app-inspector-tips {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--theme-text-secondary);
+    font-size: 0.8125rem;
+}
+
+app-inspector input:where([type='text']),
+app-inspector textarea,
+app-inspector select {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 0.8125rem;
+}
+
+app-inspector select {
+    padding-right: 30px;
+}
+
+app-inspector .app-rule {
+    padding: 10px;
+}
+
+/* In the Inspector's width, a rule's labels sit above what they label, and each phrase of a
+   route gets a line of its own. */
+app-inspector .app-rule-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+}
+
+app-inspector .app-rule-label {
+    padding-top: 0;
+}
+
+/* In the Inspector's width, a trigger is one line: or, what, what happens, and ×. */
+app-inspector .app-trigger {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr) 24px;
+    gap: 4px;
+}
+
+app-inspector .app-trigger .app-route-word { grid-column: 1; }
+app-inspector .app-trigger [data-when-element] { grid-column: 2; }
+app-inspector .app-trigger [data-when-event] { grid-column: 3; }
+app-inspector .app-trigger [data-remove-trigger] { grid-column: 4; }
+
+app-inspector .app-trigger select {
+    min-width: 0;
+}
+
+/* A route is two lines: when, where it goes and ×; then what it shows there, and how. One into
+   a screen goes there, on its first line. */
+app-inspector .app-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--theme-border-light);
+}
+
+app-inspector .app-route::after {
+    flex-basis: 100%;
+    order: 5;
+    height: 0;
+    content: '';
+}
+
+app-inspector .app-route-where {
+    display: contents;
+}
+
+app-inspector .app-route select {
+    width: auto;
+}
+
+app-inspector .app-route [data-route-if] { order: 1; flex: 0 1 auto; min-width: 0; max-width: 112px; padding-right: 26px; }
+app-inspector .app-route [data-route-into-word] { order: 2; }
+app-inspector .app-route [data-route-into] { order: 3; flex: 1 1 56px; min-width: 0; padding-right: 26px; }
+app-inspector .app-route [data-remove-route] { order: 4; }
+app-inspector .app-route [data-route-put] { order: 6; }
+app-inspector .app-route [data-route-show] { order: 7; flex: 1 1 100px; min-width: 0; }
+app-inspector .app-route [data-route-how] { order: 8; flex: 0 1 104px; min-width: 0; }
+app-inspector .app-route-go [data-route-put] { order: 2; }
+
+.app-connections {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-connection {
+    justify-content: flex-start;
+    width: 100%;
+    height: auto;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: none;
+    border-left: 3px solid var(--tone, transparent);
+    border-radius: var(--radius-100);
+    background: var(--theme-background-light);
+    font-size: 0.75rem;
+    font-weight: 400;
+    text-align: left;
+    white-space: normal;
+}
+
+.app-inspector-actions {
+    gap: 6px;
+}
+
+app-inspector > .app-inspector-actions {
+    padding-bottom: 10px;
+}
+
+/* ---------- The servers an app calls, and which of yours could take its calls instead ---------- */
+
+.app-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-server-use {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-200);
+    background: var(--theme-background-light);
+}
+
+.app-server-use-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-server-use-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.app-server-use-tools {
+    color: var(--theme-text-secondary);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.app-server-use .btn-sm {
+    align-self: flex-start;
+}
+
+.app-flow-servers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.app-flow-servers-title {
+    color: var(--theme-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.app-flow-servers .app-servers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
