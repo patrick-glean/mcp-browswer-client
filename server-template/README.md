@@ -13,7 +13,7 @@ To see how replies look in the client, serve them with the mock server and conne
 python3 test_mcp_server.py --replies server-template/example.json
 ```
 
-Add `http://127.0.0.1:8081` with + beside Servers, or from the [deployed client](https://patrick-glean.github.io/mcp-browswer-client/) after adding `--allow-origin https://patrick-glean.github.io`. Write your own server's replies in the same shape to preview them before the server exists. The mock answers any argument with the file's result for that tool, except that it reports missing required arguments as a tool error, and it adds the 2025 face (`--mode dual`, the default) from the same file.
+Add `http://127.0.0.1:8081` with + beside Servers, or from the [deployed client](https://patrick-glean.github.io/mcp-browswer-client/) after adding `--allow-origin https://patrick-glean.github.io`. Write your own server's replies in the same shape to preview them before the server exists. The mock returns the file's result for a tool whatever the arguments, except that missing required arguments come back as a tool error, and in its default `--mode dual` it answers 2025 clients from the same file.
 
 ## Who reads what
 
@@ -36,7 +36,7 @@ A 2026-07-28 server describes itself in its `server/discover` result: `serverInf
 | `serverInfo.version` | After the title, and in the log | The server's release |
 | `serverInfo.websiteUrl` | Info, as a link (`http` and `https` only) | Where people learn about the server and get help |
 | `serverInfo.description` | Not shown yet; the Chat app's model gets it | One sentence on what the server is for |
-| `serverInfo.icons` | Not shown yet | `src`, `mimeType` and `sizes` for each, an `https` URL on your own domain (or a `data:` URI), with `theme` `light` and `dark` versions |
+| `serverInfo.icons` | Not shown yet | Each with a `src` (an `https` URL on your own domain, or a `data:` URI), `mimeType` and `sizes`; a version for light and dark backgrounds, marked with `theme` |
 | `instructions` | Info, under "Instructions from the server", as plain text with its line breaks; the Chat app's model gets them | How the tools fit together: which to use for what and in what order, conventions (ID formats, time zones), limits, and what not to do without asking |
 | `capabilities` | Info, a badge each, with the flags set to `true` | Declare `tools`, `resources` and `prompts` when you have them: the client only lists resources and prompts, and only opens their tabs, when they're declared |
 
@@ -74,7 +74,7 @@ The request pane builds a form from `inputSchema.properties`: required propertie
 | `"type": "array"` of strings, numbers, booleans or an `enum` | A list, with Add item |
 | Anything else, such as an array of objects | JSON text |
 
-A list of types, such as `["integer", "null"]`, counts as its first type other than `null`. A property without `type` gets a text box and its value is sent as text, so give every property a `type` and its `enum` directly. That includes optional ones: the Python SDK, for one, writes `str | None` as `anyOf` with `null`, which loses the list to choose from and sends numbers as text. Leave an optional property out of `required` instead of making it nullable. Empty optional fields aren't sent.
+A list of types, such as `["integer", "null"]`, counts as its first type other than `null`. A property without `type` gets a text box and its value is sent as text, so give every property a `type` and its `enum` directly. That includes optional ones: the Python SDK, for one, writes a parameter typed `int | None` or `Literal[…] | None` as `anyOf` with `null`, which sends the number as text and loses the list to choose from. Leave an optional property out of `required` instead of making it nullable. Empty optional fields aren't sent.
 
 **Pre-fill.** Opening a tool fills its required fields with test data, and Fill beside a field's name fills that one. A field's test data is the first of: its `const`; a variable named like it in the person's environment; its `default`, unless that's `null` or empty; its first `examples` entry; a value its description gives after a cue ("such as T-1042", `one of "open" or "pending"`); and otherwise a value made to fit its `format`, `pattern`, `minLength` and `maxLength`, `minimum` and `maximum`, `multipleOf` and `enum`. So:
 
@@ -134,7 +134,7 @@ The response pane's Result tab draws each content block of a `tools/call` result
 
 ## A model for the Chat app
 
-The Chat app's model is an MCP tool, on any server. To offer one, give its input schema a `"type": "string"` property for the newest message and a `"type": "array"` property, of strings, for the conversation: the person ticks "Your message goes here" and "The conversation goes here" on them. The conversation starts with the client's instructions for calling tools, then the server list as JSON and any context the person added, then the messages so far. Answer with the reply as `text`. A JSON-RPC request in a code block of the reply, `{"jsonrpc": "2.0", "method": "<tool name>", "params": {…}}`, runs as a tool call (at most three every 10 seconds), and its result joins the conversation.
+The Chat app's model is an MCP tool, on any server. To offer one, give its input schema a `"type": "string"` property for the newest message and a `"type": "array"` property, of strings, for the conversation: the person ticks "Your message goes here" and "The conversation goes here" on them. The conversation starts with the client's instructions for calling tools, then the server list as JSON and any context the person added, then the messages so far. Answer with the reply as `text`. A JSON-RPC request in a code block of the reply, `{"jsonrpc": "2.0", "method": "<tool name>", "params": {…}}`, runs as a tool call (at most three every 10 seconds in a conversation), and its result joins the conversation.
 
 ## What the client tells your server
 
@@ -148,7 +148,7 @@ From a web page, requests also need CORS: the server has to allow the page's ori
 - [ ] `instructions` say how the tools fit together, and what not to do without asking.
 - [ ] `capabilities` declare `tools`, `resources` and `prompts`, for each one the server has.
 - [ ] Every tool has a `title`, a `description` and all four annotation hints.
-- [ ] Every input property has a `type` and a `description`; IDs and free text have `examples`; closed sets are `enum`s; dates, emails and URLs have a `format`; numbers have a range and a `default`.
+- [ ] Every input property has a `type` and a `description`; IDs and free text have `examples`; closed sets are `enum`s; dates, emails and URLs have a `format`; numbers have a range, and a `default` when one makes sense.
 - [ ] Tools that return data declare an `outputSchema`, and return matching `structuredContent` with the same JSON as text.
 - [ ] Failures a caller can fix come back as `isError` results that say what to change.
 - [ ] Values that change on every call, such as request IDs and timings, are in `_meta`.

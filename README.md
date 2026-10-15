@@ -9,7 +9,7 @@ Everything runs in a web page and a service worker that every open tab shares. T
 - **Tool use by hand.** The [Workbench](#workbench) inspects a server, calls its tools, saves the calls that work and runs them again to see what changed. Every call, whether from you, an app or a model, is recorded.
 - **Web delivery and controls.** It's a static site. Sign-in is OAuth in the browser, tokens stay in the browser, and saved requests, history and conversations live in IndexedDB. Servers, the client library, the log and the HTTP trace are all in the page.
 
-It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions. It works best with servers that describe themselves well, since what a server says about itself is what people and models see: building one? See [Describing your server](#describing-your-server).
+It speaks MCP 2026-07-28 and falls back automatically for servers still on the older, `initialize`-based revisions. It works best with servers that describe themselves well, since what a server says about itself is what people and models see. If you're building one, see [Describing your server](#describing-your-server).
 
 ## Try it
 
@@ -137,10 +137,10 @@ This client is only as good as what servers say about themselves. MCP has a fiel
 
 - **People see** the server's name, title, version, website and instructions in the server bar and Info; each tool's title, description and annotations in the tool list and the request pane; and the form each input schema makes, with each property's description.
 - **Pre-fill** makes its test data from input schemas: their defaults, examples, enums, formats and ranges.
-- **Results show by content type**: JSON text indented, images and audio drawn, links to follow, structured content beside them.
+- **Results show by content type**: JSON text indented, images and audio drawn, links with their titles, structured content beside them.
 - **The Chat app's model** is told every server's instructions and every tool's definition, and chooses tools from their names and descriptions alone.
 
-A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client it is and what it can do.
+A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do; see [what the client tells your server](server-template/README.md#what-the-client-tells-your-server).
 
 [`server-template/`](server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](server-template/example.json), the replies of a well-described server to copy. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies server-template/example.json`, and add `http://127.0.0.1:8081`.
 
