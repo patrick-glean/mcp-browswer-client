@@ -1977,6 +1977,20 @@ app-canvas[data-mode='run'] .app-port {
     transform: translateY(-50%);
 }
 
+.app-node .app-port[data-side='right'] {
+    right: -7px;
+    left: auto;
+}
+
+/* A pin on a tool's other side shows only while a wire leaves from it. */
+.app-node .app-port-back:not(.app-port-used) {
+    display: none;
+}
+
+.app-node-outputs .app-node-row {
+    padding-right: 16px;
+}
+
 .app-node-name {
     font-weight: 600;
     white-space: nowrap;

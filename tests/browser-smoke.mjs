@@ -1290,12 +1290,14 @@ async function main() {
                     'tool ' + hue(node.querySelector('.app-node-head')) + (node.querySelector('.app-node-head .icon-tool') ? ' with a tool' : ''),
                     [...node.querySelectorAll('.app-node-caption span')].map(caption => caption.textContent).join(' and '),
                     ['run:', 'arg:', 'sent:', 'ok:', 'err:', 'el:run', 'el:input', 'el:output2'].map(port => port.replace(':', '') + ' ' + pin(port)).join(', '),
+                    // Which edge each of count's ports has a pin on: Answer's wire goes back to the screen on its left.
+                    ['run', 'sent', 'ok', 'err'].map(port => port + ' ' + [...node.querySelectorAll('[data-port^="' + port + ':"]')].filter(found => found.offsetParent).map(found => found.dataset.side + (found.getBoundingClientRect().left > node.getBoundingClientRect().left + node.offsetWidth / 2 ? ' edge' : '')).join(' and ')).join(', '),
                     [...node.querySelectorAll('[data-out]')].map(row => row.dataset.out + ' ' + row.querySelector('.app-node-where').textContent).join(', '),
                     document.querySelector('app-canvas .app-canvas-key').innerText.replace(/\\s+/g, ' ').trim(),
                 ].join(' | ');
             })()`);
-            check('Apps: a screen is blue and a tool violet; pins into a tool are rings and those out of it solid, under In and Out, each output says where it goes, and a key says so',
-                looks === 'screen blue with a monitor | tool violet with a tool | In and Out | run ring, arg ring, sent solid, ok solid, err solid, elrun ring, elinput ring, eloutput2 solid | sent —, ok → output2, error — | Screen Tool In: starts a tool, fills a field Out: what comes out of a tool Point at a pin to see its wires.',
+            check("Apps: a screen is blue and a tool violet; pins into a tool are rings on its left and those out of it solid on its right, a wire back to the screen leaving from one on the left, under In and Out, each output says where it goes, and a key says so",
+                looks === 'screen blue with a monitor | tool violet with a tool | In and Out | run ring, arg ring, sent solid, ok solid, err solid, elrun ring, elinput ring, eloutput2 solid | run left, sent right edge, ok right edge and left, err right edge | sent —, ok → output2, error — | Screen Tool In: starts a tool, fills a field Out: what comes out of a tool Point at a pin to see its wires.',
                 looks);
 
             // Pointing at a pin lights up its wires and the pins at their other ends, and the rest dim.
@@ -1309,7 +1311,7 @@ async function main() {
             const lit = await page.waitFor(`(() => {
                 const canvas = document.querySelector('app-canvas');
                 if (!canvas.classList.contains('app-pointing')) return null;
-                return [...canvas.querySelectorAll('.app-hot')].map(element => element.dataset.port || (element.dataset.pill ? 'pill ' + element.dataset.pill : 'wire ' + element.dataset.wire)).sort().join(', ');
+                return [...new Set([...canvas.querySelectorAll('.app-hot')].map(element => element.dataset.port || (element.dataset.pill ? 'pill ' + element.dataset.pill : 'wire ' + element.dataset.wire)))].sort().join(', ');
             })()`, 3000);
             await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
             const unlit = await page.waitFor(`!document.querySelector('app-canvas').classList.contains('app-pointing') && !document.querySelector('app-canvas .app-hot') ? 'nothing lit' : null`, 3000);

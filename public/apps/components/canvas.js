@@ -33,7 +33,7 @@ const GUTTER_MAX = 220;
 const GUTTER_ROOM = 38;
 // Room between a card's ports and the tools beside it, for a transform's label on a wire.
 const TOOLS_GAP = 120;
-const TOOL_WIDTH = 220;
+const TOOL_WIDTH = 240;
 const ROW = 26;
 // A tool's title, and a band's caption with the room under its rows.
 const NODE_HEAD = 35;
@@ -638,9 +638,18 @@ export class AppCanvas extends AppElement {
         }).join('');
     }
 
+    // A port's pins on a tool: one on its own side (`side`: In's on the left, Out's on the right),
+    // first, which wires start from; and one on the other side, which shows while a wire leaves
+    // from there, toward what's on that side: an answer back to the screen it came from.
+    pins(port, kind, title, side) {
+        const other = side === 'left' ? 'right' : 'left';
+        const pin = (on, back) => `<span class="app-port app-port-${kind}${back ? ` app-port-back${this.usedPins?.has(`${port}|${on}`) ? ' app-port-used' : ''}` : ''}" data-port="${escapeHtml(port)}" data-side="${on}" title="${escapeHtml(title)}"></span>`;
+        return pin(side, false) + pin(other, true);
+    }
+
     // A tool is a node in two bands: In, what starts it and what it's called with, whose pins are
-    // rings; and Out, what comes out of it (as it's sent, its answer, its error), whose pins are
-    // solid, each saying where it goes.
+    // rings on its left; and Out, what comes out of it (as it's sent, its answer, its error),
+    // whose pins are solid, on its right, each saying where it goes.
     renderNodes() {
         const app = this.app;
         const problems = new Map(flowProblems(app.flow, { elements: this.elements(), servers: this.shell.servers }));
@@ -665,7 +674,7 @@ export class AppCanvas extends AppElement {
                 const where = goesTo(rule, phase);
                 return `
                     <div class="app-node-row app-node-out" data-out="${phase}">
-                        <span class="app-port app-port-${port === 'ok' ? 'answer' : port === 'err' ? 'error' : 'sent'}" data-port="${port}:${escapeHtml(rule.id)}" title="${escapeHtml(help)}"></span>
+                        ${this.pins(`${port}:${rule.id}`, port === 'ok' ? 'answer' : port === 'err' ? 'error' : 'sent', help, 'right')}
                         <span class="app-node-name">${name}</span><span class="app-node-value app-node-where"${full(where && `${name.slice(2)}: ${where}`)}>${where ? `→ ${goesTo(rule, phase, { html: true })}` : '—'}</span>
                     </div>`;
             };
@@ -679,7 +688,7 @@ export class AppCanvas extends AppElement {
                     <div class="app-node-band app-node-inputs">
                         <div class="app-node-caption"><span>In</span>starts it and fills it</div>
                         <div class="app-node-row app-node-run">
-                            <span class="app-port app-port-run" data-port="run:${escapeHtml(rule.id)}" title="Run: wire a button, a field or Start here to start it"></span>
+                            ${this.pins(`run:${rule.id}`, 'run', 'Run: wire a button, a field or Start here to start it', 'left')}
                             <span class="app-node-name">▶ Run</span><span class="app-node-value"${full(`When ${when}`)}>when ${escapeHtml(when)}</span>
                         </div>
                         ${this.shownArgs(rule).map(arg => {
@@ -687,7 +696,7 @@ export class AppCanvas extends AppElement {
                             const shown = value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
                             return `
                         <div class="app-node-row">
-                            <span class="app-port app-port-arg" data-port="arg:${escapeHtml(rule.id)}:${escapeHtml(arg)}" title="${escapeHtml(`${arg}: wire a field here to fill it`)}"></span>
+                            ${this.pins(`arg:${rule.id}:${arg}`, 'arg', `${arg}: wire a field here to fill it`, 'left')}
                             <span class="app-node-name">${escapeHtml(arg)}</span><span class="app-node-value mono"${full(shown && `${arg} = ${shown}`)}>${escapeHtml(shown.length > 28 ? `${shown.slice(0, 27)}…` : shown || '—')}</span>
                         </div>`;
                         }).join('')}
@@ -849,10 +858,11 @@ export class AppCanvas extends AppElement {
     // --- Wires ---
 
     // A port on the surface: where it is, the way a wire leaves it, and what it's on, so a wire
-    // can end on the side that faces the other end. Elements' ports are right of their card, and
-    // a tool's on its left.
-    portPoint(port) {
-        const element = this.surface.querySelector(`[data-port="${CSS.escape(port)}"]`);
+    // can end on the side that faces the other end. Elements' ports are right of their card; a
+    // tool's inputs are on its left and its outputs on its right (`side`), or at `pin`, the one
+    // pressed.
+    portPoint(port, pin = null) {
+        const element = pin || this.surface.querySelector(`[data-port="${CSS.escape(port)}"]`);
         if (!element) return null;
         const box = element.getBoundingClientRect();
         const { x, y } = this.toSurface(box.left + box.width / 2, box.top + box.height / 2);
@@ -865,15 +875,21 @@ export class AppCanvas extends AppElement {
             return screen ? { x, y, dir: LEFT, entry: card } : { x, y, dir: RIGHT, card };
         }
         const tool = this.at.tools.get(parsed.ruleId);
-        return tool ? { x, y, dir: LEFT, tool } : null;
+        const side = element.dataset.side === 'right' ? 'right' : 'left';
+        return tool ? { x, y, dir: side === 'right' ? RIGHT : LEFT, tool, side } : null;
     }
 
-    // A wire's end on the side that faces its other end: from a tool to what's right of it, the
-    // tool's right edge; to an element from left of its card, the card's left edge, level with
-    // the element. A wire into a screen comes into its title bar from the left; from beside the
-    // card, into the bar's right end; and from further right, a way back, down from above.
+    // A wire's end on the side that faces its other end: at a tool, its own side, unless the other
+    // end is past the tool's other edge (an answer back to the screen left of it, a field right
+    // of it); to an element from left of its card, the card's left edge, level with the element.
+    // A wire into a screen comes into its title bar from the left; from beside the card, into the
+    // bar's right end; and from further right, a way back, down from above.
     facing(end, other) {
-        if (end.tool && other.x > end.tool.x + TOOL_WIDTH) return { x: end.tool.x + TOOL_WIDTH, y: end.y, dir: RIGHT };
+        if (end.tool) {
+            const toward = other.x > end.tool.x + TOOL_WIDTH ? 'right' : other.x < end.tool.x ? 'left' : end.side;
+            if (toward === end.side) return end;
+            return { ...end, x: toward === 'right' ? end.tool.x + TOOL_WIDTH : end.tool.x, dir: toward === 'right' ? RIGHT : LEFT, side: toward };
+        }
         if (end.card && other.x < end.card.x) return { x: end.card.x, y: end.y, dir: LEFT };
         if (end.entry && other.x > end.entry.x + 24) {
             const right = end.entry.x + this.screenWidth();
@@ -958,10 +974,15 @@ export class AppCanvas extends AppElement {
             if (to.dir !== UP) return this.curve(from, to);
             return { d: this.backPath(from, to, this.laneAbove(from, to, backs++)), middle: null };
         };
+        // The pins on a tool's other side that wires leave from: `${port}|${side}`.
+        this.usedPins = new Set();
         for (const wire of wires) {
             const ends = this.ends(wire.from, wire.to);
             if (!ends) continue;
             this.wireEnds.set(wire.id, [wire.from, wire.to]);
+            ends.forEach((end, index) => {
+                if (end.tool) this.usedPins.add(`${index ? wire.to : wire.from}|${end.side}`);
+            });
             const { d, middle } = pathOf(ends);
             if (middle) middles.set(wire.id, middle);
             const transition = ROUTE_KINDS.has(wire.kind) && this.kindOf(wire.element) === 'screen' ? ' app-wire-transition' : '';
@@ -987,6 +1008,7 @@ export class AppCanvas extends AppElement {
             pill.style.setProperty('--x', `${middle.x}px`);
             pill.style.setProperty('--y', `${y}px`);
         }
+        for (const pin of this.querySelectorAll('.app-port-back')) pin.classList.toggle('app-port-used', this.usedPins.has(`${pin.dataset.port}|${pin.dataset.side}`));
         this.markSelection();
         this.lightPointed();
     }
@@ -1363,7 +1385,7 @@ export class AppCanvas extends AppElement {
         if (event.target.closest('[data-canvas-scroll]')) this.pendingView = null;
         // A wire starts from a port, or from the label or row it's on.
         const port = event.target.closest('[data-port]') || event.target.closest('[data-gutter-row], .app-node-row, [data-start]')?.querySelector('[data-port]');
-        if (port && this.mode === 'design') return this.startWiring(event, port.dataset.port);
+        if (port && this.mode === 'design') return this.startWiring(event, port.dataset.port, port);
         const head = event.target.closest('[data-drag-node]');
         if (head) return this.startMoving(event, head.closest('[data-node]'));
         const bar = event.target.closest('[data-card-bar]');
@@ -1371,12 +1393,12 @@ export class AppCanvas extends AppElement {
         if (event.target.closest('[data-canvas-scroll]') && !event.target.closest('button, [data-node], [data-card], [data-overlay], [data-wire], [data-go-wire], iframe')) this.startPanning(event);
     }
 
-    startWiring(event, from) {
+    startWiring(event, from, pin = null) {
         event.preventDefault();
         this.pointed = null;
         this.lightPointed();
         const draft = this.$('[data-draft]');
-        const start = this.portPoint(from);
+        const start = this.portPoint(from, pin);
         if (!start) return;
         const kindOf = id => this.kindOf(id);
         this.querySelectorAll('[data-port]').forEach(port => port.classList.toggle('app-port-can', canConnect(from, port.dataset.port, { kindOf })));
