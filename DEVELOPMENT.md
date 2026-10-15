@@ -80,6 +80,7 @@ Both pass the same smoke test and send the same requests in the same order, with
 - **Legacy servers get one more request** from the SDK, a `GET` for a server-sent stream after the handshake (the mock answers 405).
 - **Sign-in differs a little.** The SDK adds `scope` to the client registration and `prompt=consent` when it asks for a refresh token.
 - **Some wording is the SDK's**: hidden-tool reasons and the wrong-issuer error.
+- **The Rust library sorts JSON keys.** Its `serde_json` has no `preserve_order`, so every object it passes on has its keys in alphabetical order: a tool's fields show that way (required ones still first), as do structured content and the raw JSON. The SDK keeps the order the server sent.
 - **The SDK checks 2026-07-28 results more strictly.** It rejects list results (tools, resources, templates, prompts) and `resources/read` results that lack `ttlMs` and `cacheScope`, which that version requires; the Rust library accepts them. So a modern server that leaves them out lists its resources on Rust/WASM but not on the SDK, which says `Invalid result for resources/list`.
 - **One fragile spot**: the SDK only says why it hid a tool through `console.warn`, so `sdk-client/mcp.js` overrides its internal `_excludeInvalidXMcpHeaderTools` to catch the reason. Check it when upgrading the SDK.
 

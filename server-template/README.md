@@ -62,7 +62,7 @@ A tool with an invalid `x-mcp-header` annotation (on a parameter that isn't a st
 
 ### Input schemas
 
-The request pane builds a form from `inputSchema.properties`: required properties first, marked `*`, then the others. With more than three fields, at least one of them required, the optional ones fold away under "N optional fields". Each field is labelled with its property's name and type, with its `description` beneath (a property's `title` isn't shown).
+The request pane builds a form from `inputSchema.properties`: required properties first, marked `*`, then the others, each in the order the schema lists them, so list them in the order a person fills them in (the Rust/WASM library sorts them by name). With more than three fields, at least one of them required, the optional ones fold away under "N optional fields". Each field is labelled with its property's name and type, with its `description` beneath (a property's `title` isn't shown).
 
 | Property | Field |
 | --- | --- |
