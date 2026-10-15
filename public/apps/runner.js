@@ -263,6 +263,31 @@ export function frameDocument(html, { config, token, screen = null }) {
 
 const PAST = { click: 'was clicked', enter: 'got Enter', change: 'changed' };
 
+// A frame given a new srcdoc while the last one is still loading can keep the last one (Chrome
+// sometimes drops the new one), so a frame that's loading takes the newest of the documents
+// that come in the meantime once it has loaded: frame -> that document, or null for none yet.
+const nextDocument = new WeakMap();
+
+function showDocument(frame, html) {
+    if (nextDocument.has(frame)) {
+        nextDocument.set(frame, html);
+        return;
+    }
+    nextDocument.set(frame, null);
+    const loaded = () => {
+        const next = nextDocument.get(frame);
+        if (next === null) {
+            nextDocument.delete(frame);
+            frame.removeEventListener('load', loaded);
+            return;
+        }
+        nextDocument.set(frame, null);
+        frame.srcdoc = next;
+    };
+    frame.addEventListener('load', loaded);
+    frame.srcdoc = html;
+}
+
 // A frame's layout message as its owner gets it: { height, rects, screen }, `screen` the one of
 // the app's screens it shows, or ''.
 const layoutOf = message => ({
@@ -330,7 +355,7 @@ export class AppRunner {
         const elements = elementsOf(app.screen);
         this.screenAfterLoad = !start && elements.some(element => element.id === screen && element.kind === 'screen') ? screen : null;
         this.elementIds = elements.map(element => element.id);
-        frame.srcdoc = frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token, screen: this.screenAfterLoad });
+        showDocument(frame, frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token, screen: this.screenAfterLoad }));
     }
 
     // Shows one of the app's screens, as a button that goes there would.
@@ -614,7 +639,7 @@ export class ScreenStill {
         this.ready = false;
         this.screen = screen;
         const track = elementsOf(app.screen).map(element => element.id);
-        frame.srcdoc = frameDocument(screenHtml(app), { config: { watch: [], read: [], track, still: true }, token: this.token, screen });
+        showDocument(frame, frameDocument(screenHtml(app), { config: { watch: [], read: [], track, still: true }, token: this.token, screen }));
     }
 
     stop() {
