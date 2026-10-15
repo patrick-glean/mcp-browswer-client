@@ -31,7 +31,7 @@ const HOST = 'http://127.0.0.1';
 const PORTS = {
     app: 18080, modern: 18081, sse: 18082, legacy: 18083, legacySse: 18084, dual: 18085, reference: 18086,
     strictLegacy: 18087, token: 18088, strictModern: 18089, oauth: 18090, oauthWrongIss: 18091,
-    oauthNoExpiry: 18092,
+    oauthNoExpiry: 18092, template: 18093,
     // Chosen per run (see freePort), so a Chrome from an earlier run that's still exiting
     // can't answer for this one.
     devtools: null,
@@ -397,6 +397,7 @@ async function main() {
     mock('oauth', PORTS.oauth, '--mode', 'modern', '--oauth', '--hide-www-authenticate', '--token-ttl', '62');
     mock('oauth+wrong iss', PORTS.oauthWrongIss, '--mode', 'modern', '--oauth', '--oauth-wrong-iss');
     mock('oauth+no expires_in', PORTS.oauthNoExpiry, '--mode', 'modern', '--oauth', '--token-ttl', '2', '--omit-expires-in');
+    mock('server template', PORTS.template, '--mode', 'modern', '--replies', 'server-template/example.json');
     if (WITH_REFERENCE) {
         start('reference', referencePython, ['tests/reference_server.py', '--port', String(PORTS.reference)]);
     }
@@ -654,6 +655,74 @@ async function main() {
         const toolsBack = await page.run(`['requestPane', 'responsePane'].every(id => !document.getElementById(id).hidden)
             && ['resourcePane', 'promptPane', 'contentsPane'].every(id => document.getElementById(id).hidden)`);
         check('resources and prompts: back on Tools, the tool panes return', toolsBack);
+
+        // The server template's replies, served by the mock: each field shows where
+        // server-template/README.md says it does.
+        const templateUrl = `${HOST}:${PORTS.template}/`;
+        const helpdesk = await addAndConnect(page, templateUrl, '');
+        const helpdeskTools = await toolNames(page, templateUrl);
+        check('server template: connects, and the rail names it after its serverInfo.name',
+            helpdesk?.status === 'connected' && helpdesk.name === 'example-helpdesk' && helpdeskTools.length === 6
+                && (await page.run(`${serverRow(templateUrl)}.querySelector('.wb-row-label').textContent`)) === 'example-helpdesk',
+            `${helpdesk?.name}: ${helpdeskTools.join(', ')}`);
+        const shownHelpdesk = await page.run(`(() => {
+            ${serverRow(templateUrl)}.click();
+            const detail = document.querySelector('wb-server-bar [data-detail]').textContent;
+            document.getElementById('serverInfoBtn').click();
+            const info = document.getElementById('serverConnection').innerText.replace(/\\s+/g, ' ');
+            const website = document.querySelector('#serverConnection a')?.href || '';
+            const instructions = document.querySelector('wb-sheet .instructions p')?.textContent || '';
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            const hints = [...document.querySelectorAll('#toolList .wb-tool')]
+                .map(row => row.dataset.tool + ' ' + [...row.querySelectorAll('.hint')].map(hint => hint.textContent).join(' ')).join('; ');
+            const pane = document.getElementById('requestPane');
+            const heading = () => [pane.querySelector('.wb-request-title').textContent, ...[...pane.querySelectorAll('.badge')].map(b => b.textContent)].join(', ');
+            ${toolRow('search_tickets')}.click();
+            const search = heading();
+            const query = document.querySelector('#requestForm [name="query"]').value;
+            const folded = document.querySelector('#requestForm .wb-optional summary')?.textContent || '';
+            ${toolRow('delete_ticket')}.click();
+            return { detail, info, website, instructions, hints, search, query, folded, remove: heading() };
+        })()`);
+        check('server template: the server bar and Info show its title, version, website and instructions',
+            shownHelpdesk.detail.endsWith('Example Helpdesk 1.4.0') && shownHelpdesk.info.includes('Server Example Helpdesk 1.4.0 (example-helpdesk)')
+                && shownHelpdesk.website === 'https://helpdesk.example.com/docs/mcp' && shownHelpdesk.instructions.includes('\n- To find a ticket, use search_tickets'),
+            `${shownHelpdesk.detail} | ${shownHelpdesk.info}`);
+        check('server template: each tool\'s annotations mark its row',
+            shownHelpdesk.hints === 'search_tickets ro; get_ticket ro; update_ticket writes; delete_ticket del; ticket_volume_chart ro; fetch_help_article ro web', shownHelpdesk.hints);
+        check('server template: a tool shows its title and badges, and Pre-fill fills its required field from its examples',
+            shownHelpdesk.search === 'Search tickets, read-only, idempotent, structured output' && shownHelpdesk.remove === 'Delete a ticket, destructive, idempotent'
+                && shownHelpdesk.query === 'printer offline' && shownHelpdesk.folded.startsWith('6 optional fields'),
+            `${shownHelpdesk.search}; ${shownHelpdesk.remove}; query: ${shownHelpdesk.query}; ${shownHelpdesk.folded}`);
+        const found = await callTool(page, templateUrl, 'search_tickets', {});
+        check('server template: a result shows its JSON, its links and its structured content, which matches the output schema',
+            /^OK/.test(found || '') && /"id": "T-1042"/.test(found || '') && /link T-1042: Printer on floor 3 shows offline open, high priority/.test(found || '') && /Structured content/.test(found || ''),
+            found?.slice(0, 200));
+        await callTool(page, templateUrl, 'ticket_volume_chart', {});
+        const chart = await page.waitFor(`(() => {
+            const image = document.querySelector('#responsePane img.wb-content-image');
+            return image?.complete && image.naturalWidth ? image.naturalWidth + 'x' + image.naturalHeight + ' ' + document.querySelector('#responsePane .wb-content-text')?.textContent : null;
+        })()`, 5000);
+        check('server template: an image result shows as an image', /^160x80 Last 30 days: 214 new tickets/.test(chart || ''), chart);
+        await page.waitFor(`!document.querySelector('wb-tools [data-view="resources"]').disabled && !document.querySelector('wb-tools [data-view="prompts"]').disabled`, 5000);
+        await showView('resources');
+        const helpdeskResources = await page.waitFor(`(() => {
+            const labels = [...document.querySelectorAll('#toolList .wb-pick .wb-row-label')].map(label => label.textContent);
+            return labels.length === 4 ? labels.join(', ') : null;
+        })()`, 5000);
+        const schemaRead = await readItem('resource', 'helpdesk://schemas/ticket');
+        const indented = await page.run(`document.querySelector('#contentsPane .wb-content-json')?.textContent.startsWith('{\\n  "$schema"')`);
+        check('server template: resources are listed by title, and JSON reads are indented',
+            helpdeskResources === 'Getting started, Ticket schema, Ticket volume, last 30 days, Ticket by ID' && /application\/schema\+json/.test(schemaRead || '') && indented,
+            `${helpdeskResources}; ${schemaRead?.slice(0, 100)}`);
+        await showView('prompts');
+        const ticketSummary = await getPrompt('summarize_ticket');
+        const promptId = await page.run(`document.querySelector('#promptForm [name="id"]').value`);
+        check('server template: a prompt\'s argument is filled from its description, and its messages come back',
+            promptId === 'T-1042' && /A summary of T-1042 for the support team/.test(ticketSummary || '') && /helpdesk:\/\/tickets\/T-1042/.test(ticketSummary || ''),
+            `id: ${promptId}; ${ticketSummary?.slice(0, 160)}`);
+        await page.run(`${serverRow(modernUrl)}.click()`);
+        await showView('tools');
 
         // Splitters, at a width where request and response sit side by side.
         await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
