@@ -16,7 +16,7 @@
 
 import { debounce, escapeHtml, schemaOf, serverLabel } from '../../workbench/util.js';
 import { answerKey, BOX_KINDS, BOX_WIDTHS, isBox, promptFieldOf } from '../boxes.js';
-import { EVENTS, FlowError, flowProblems, isDefaultShow, newRule, routeSummary, triggersOf } from '../flow.js';
+import { EVENTS, FlowError, flowProblems, isDefaultShow, newRule, routeSummary, routeTargets, triggersOf } from '../flow.js';
 import { canConnect, connect, goPairOf, parsePort, wiresOf } from '../graph.js';
 import { AppRunner, ScreenStill } from '../runner.js';
 import { COMPONENT_TYPES, endOfScreen, freeId, GO_PLACES, newComponent, screenOfEach, screensOf } from '../screen.js';
@@ -35,6 +35,9 @@ const GUTTER_ROOM = 38;
 const TOOLS_GAP = 120;
 const TOOL_WIDTH = 220;
 const ROW = 26;
+// A tool's title, and a band's caption with the room under its rows.
+const NODE_HEAD = 35;
+const BAND = 22;
 const TRANSFORMS = [
     ['text', 'Text', 'The text the tool returned', { show: '{{text}}', how: 'replace' }],
     ['value', 'A value', 'One value from its structured content or JSON; pick it in the Inspector', { show: '{{structured}}', how: 'replace' }],
@@ -157,6 +160,8 @@ export class AppCanvas extends AppElement {
             this.clicked(event);
         }, { signal });
         this.addEventListener('pointerdown', event => this.pointerDown(event), { signal });
+        this.addEventListener('pointerover', event => this.pointAt(event.target), { signal });
+        this.addEventListener('pointerleave', () => this.pointAt(null), { signal });
         this.addEventListener('keydown', event => this.keyDown(event), { signal });
         this.addEventListener('wheel', event => this.wheeled(event), { signal, passive: false });
         this.addEventListener('input', event => {
@@ -231,6 +236,13 @@ export class AppCanvas extends AppElement {
                         <div class="app-pills" data-pills></div>
                     </div>
                 </div>
+            </div>
+            <div class="app-canvas-key" role="note" aria-label="What the canvas's colors and pins mean">
+                <span class="app-key app-key-screen"><span class="icon icon-monitor" aria-hidden="true"></span>Screen</span>
+                <span class="app-key app-key-tool"><span class="icon icon-tool" aria-hidden="true"></span>Tool</span>
+                <span class="app-key app-key-in" title="A ring: a button, a field or Start, and the Run and fields of a tool they start or fill"><span class="app-key-pin" aria-hidden="true"></span>In: starts a tool, fills a field</span>
+                <span class="app-key app-key-out" title="Solid: a tool's Sent, Answer and Error, and the outputs and screens they go to"><span class="app-key-pin" aria-hidden="true"></span>Out: what comes out of a tool</span>
+                <span class="app-key-tip text-secondary">Point at a pin to see its wires.</span>
             </div>
             <apps-splitter data-pane="canvas"></apps-splitter>
             <section class="app-canvas-trace" aria-label="What happened">
@@ -454,8 +466,10 @@ export class AppCanvas extends AppElement {
         return (this.shell.servers[rule.call?.serverUrl]?.tools || []).find(tool => tool.name === rule.call?.toolName) || null;
     }
 
+    // Its title, the In band's caption and rows (Run and the fields shown), the Out band's caption
+    // and its three rows, and the status line, as the styles draw them.
     nodeHeight(rule) {
-        return 40 + (1 + this.shownArgs(rule).length) * ROW + 10 + 3 * ROW + 22;
+        return NODE_HEAD + BAND + (1 + this.shownArgs(rule).length) * ROW + 1 + BAND + 3 * ROW + 22 + 2;
     }
 
     screenWidth() {
@@ -539,7 +553,7 @@ export class AppCanvas extends AppElement {
             card.element.querySelector('.app-screen-body').title = id === live ? '' : 'The app isn\'t on this screen. In Run, click to show it here.';
             const bar = card.element.querySelector('[data-card-bar]');
             if (id === ONE) {
-                bar.innerHTML = `<span class="app-screen-dots" aria-hidden="true"></span><span class="app-screen-name">${escapeHtml(this.app.name || 'App')}</span>`;
+                bar.innerHTML = `<span class="app-screen-dots" aria-hidden="true"></span><span class="icon icon-monitor app-screen-icon" aria-hidden="true"></span><span class="app-screen-name">${escapeHtml(this.app.name || 'App')}</span><span class="app-screen-kind">Screen</span>`;
                 bar.title = 'The app\'s screen. Drag it by here to move it.';
                 continue;
             }
@@ -547,8 +561,9 @@ export class AppCanvas extends AppElement {
             const first = id === ids[0];
             bar.innerHTML = `
                 <span class="app-port app-port-screen" data-port="${escapeHtml(elementPort(id))}" title="${escapeHtml(`${label} (${id}): wire a button or a tool's Answer here to go to this screen`)}"></span>
+                <span class="icon icon-monitor app-screen-icon" aria-hidden="true"></span>
                 <span class="app-screen-name">${escapeHtml(label)}</span>
-                ${first ? '<span class="app-screen-opens">Opens here</span>' : ''}`;
+                ${first ? '<span class="app-screen-opens">Opens here</span>' : '<span class="app-screen-kind">Screen</span>'}`;
             bar.title = `${label} (${id})${first ? ', where the app opens' : ''}: pick it, or drag it by here to move it.`;
             bar.setAttribute('aria-label', `${label}${id === live ? ', the screen the app is on' : ''}`);
         }
@@ -623,9 +638,14 @@ export class AppCanvas extends AppElement {
         }).join('');
     }
 
+    // A tool is a node in two bands: In, what starts it and what it's called with, each with a
+    // ring of a pin on its left; and Out, what comes out of it (as it's sent, its answer, its
+    // error), each with a solid pin and where it goes.
     renderNodes() {
         const app = this.app;
         const problems = new Map(flowProblems(app.flow, { elements: this.elements(), servers: this.shell.servers }));
+        const goesTo = (rule, phase) => routeTargets(rule, phase)
+            .map(id => (this.kindOf(id) === 'screen' ? `go to ${this.component(id)?.label || id}` : id)).join(', ');
         this.$('[data-nodes]').innerHTML = app.flow.map(rule => {
             const at = this.at.tools.get(rule.id);
             const server = this.shell.servers[rule.call?.serverUrl];
@@ -637,37 +657,42 @@ export class AppCanvas extends AppElement {
             const status = this.statuses?.get(rule.id);
             // Text a node shortens to fit has a title with all of it.
             const full = text => (text ? ` title="${escapeHtml(text)}"` : '');
+            const out = (phase, port, name, help) => {
+                const where = goesTo(rule, phase);
+                return `
+                    <div class="app-node-row app-node-out" data-out="${phase}">
+                        <span class="app-port app-port-${port === 'ok' ? 'answer' : port === 'err' ? 'error' : 'sent'}" data-port="${port}:${escapeHtml(rule.id)}" title="${escapeHtml(help)}"></span>
+                        <span class="app-node-name">${name}</span><span class="app-node-value app-node-where"${full(where && `${name.slice(2)}: ${where}`)}>${where ? `→ ${escapeHtml(where)}` : '—'}</span>
+                    </div>`;
+            };
             return `
-                <div class="app-node${issues.length ? ' app-node-incomplete' : ''}" data-node="${escapeHtml(rule.id)}" tabindex="0" style="--x: ${at.x}px; --y: ${at.y}px" aria-label="${escapeHtml(`${rule.call?.toolName || 'A tool'} on ${server ? serverLabel(server) : 'no server'}`)}" title="${escapeHtml(issues.join(' '))}">
+                <div class="app-node${issues.length ? ' app-node-incomplete' : ''}" data-node="${escapeHtml(rule.id)}" tabindex="0" style="--x: ${at.x}px; --y: ${at.y}px" aria-label="${escapeHtml(`Tool ${rule.call?.toolName || ''} on ${server ? serverLabel(server) : 'no server'}`)}" title="${escapeHtml(issues.join(' '))}">
                     <div class="app-node-head" data-drag-node>
+                        <span class="icon icon-tool app-node-icon" aria-hidden="true"></span>
                         <span class="app-node-title mono"${full(rule.call?.toolName)}>${escapeHtml(rule.call?.toolName || 'Choose a tool')}</span>
                         <span class="app-node-server"${full(server ? `${serverLabel(server)}: ${rule.call.serverUrl}` : rule.call?.serverUrl)}>${escapeHtml(server ? serverLabel(server) : rule.call?.serverUrl ? 'not added' : '')}</span>
                     </div>
-                    <div class="app-node-row app-node-run">
-                        <span class="app-port app-port-run" data-port="run:${escapeHtml(rule.id)}" title="Run: wire a button, a field or Start here to start it"></span>
-                        <span class="app-node-name">▶ Run</span><span class="app-node-value"${full(`When ${when}`)}>when ${escapeHtml(when)}</span>
+                    <div class="app-node-band app-node-inputs">
+                        <div class="app-node-caption"><span>In</span>starts it and fills it</div>
+                        <div class="app-node-row app-node-run">
+                            <span class="app-port app-port-run" data-port="run:${escapeHtml(rule.id)}" title="Run: wire a button, a field or Start here to start it"></span>
+                            <span class="app-node-name">▶ Run</span><span class="app-node-value"${full(`When ${when}`)}>when ${escapeHtml(when)}</span>
+                        </div>
+                        ${this.shownArgs(rule).map(arg => {
+                            const value = rule.call?.args?.[arg];
+                            const shown = value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+                            return `
+                        <div class="app-node-row">
+                            <span class="app-port app-port-arg" data-port="arg:${escapeHtml(rule.id)}:${escapeHtml(arg)}" title="${escapeHtml(`${arg}: wire a field here to fill it`)}"></span>
+                            <span class="app-node-name">${escapeHtml(arg)}</span><span class="app-node-value mono"${full(shown && `${arg} = ${shown}`)}>${escapeHtml(shown.length > 28 ? `${shown.slice(0, 27)}…` : shown || '—')}</span>
+                        </div>`;
+                        }).join('')}
                     </div>
-                    ${this.shownArgs(rule).map(arg => {
-                        const value = rule.call?.args?.[arg];
-                        const shown = value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
-                        return `
-                    <div class="app-node-row">
-                        <span class="app-port app-port-arg" data-port="arg:${escapeHtml(rule.id)}:${escapeHtml(arg)}" title="${escapeHtml(`${arg}: wire a field here to fill it`)}"></span>
-                        <span class="app-node-name">${escapeHtml(arg)}</span><span class="app-node-value mono"${full(shown && `${arg} = ${shown}`)}>${escapeHtml(shown.length > 28 ? `${shown.slice(0, 27)}…` : shown || '—')}</span>
-                    </div>`;
-                    }).join('')}
-                    <div class="app-node-split"></div>
-                    <div class="app-node-row app-node-out">
-                        <span class="app-port app-port-sent" data-port="sent:${escapeHtml(rule.id)}" title="Sent: wire it to where what's sent shows as it goes, such as a chat's conversation, or to a field to clear it"></span>
-                        <span class="app-node-name">↗ Sent</span>
-                    </div>
-                    <div class="app-node-row app-node-out">
-                        <span class="app-port app-port-answer" data-port="ok:${escapeHtml(rule.id)}" title="Answer: wire it to where it goes on the screen"></span>
-                        <span class="app-node-name">✓ Answer</span>
-                    </div>
-                    <div class="app-node-row app-node-out">
-                        <span class="app-port app-port-error" data-port="err:${escapeHtml(rule.id)}" title="Error: wire it to where a failure shows"></span>
-                        <span class="app-node-name">! Error</span>
+                    <div class="app-node-band app-node-outputs">
+                        <div class="app-node-caption"><span>Out</span>where it goes</div>
+                        ${out('sent', 'sent', '↗ Sent', "Sent: wire it to where what's sent shows as it goes, such as a chat's conversation, or to a field to clear it")}
+                        ${out('ok', 'ok', '✓ Answer', 'Answer: wire it to where it goes on the screen, or to a screen to go there')}
+                        ${out('error', 'err', '! Error', 'Error: wire it to where a failure shows')}
                     </div>
                     <div class="app-node-status" data-node-status>${escapeHtml(status || (issues.length ? issues[0] : ''))}</div>
                 </div>`;
@@ -913,6 +938,9 @@ export class AppCanvas extends AppElement {
         const wires = wiresOf(this.app.flow, this.elementIds());
         const paths = [];
         const middles = new Map();
+        // The two pins of each wire, by the id its path and transform carry (a button's way to a
+        // screen is g:<button>), for lighting up what's pointed at.
+        this.wireEnds = new Map();
         // Start points into the screen it begins on.
         const start = this.$('[data-start]');
         const first = this.at.cards.get(this.cardIds()[0]);
@@ -929,6 +957,7 @@ export class AppCanvas extends AppElement {
         for (const wire of wires) {
             const ends = this.ends(wire.from, wire.to);
             if (!ends) continue;
+            this.wireEnds.set(wire.id, [wire.from, wire.to]);
             const { d, middle } = pathOf(ends);
             if (middle) middles.set(wire.id, middle);
             const transition = ROUTE_KINDS.has(wire.kind) && this.kindOf(wire.element) === 'screen' ? ' app-wire-transition' : '';
@@ -937,6 +966,7 @@ export class AppCanvas extends AppElement {
         for (const wire of this.goWires()) {
             const ends = this.ends(wire.from, wire.to);
             if (!ends) continue;
+            this.wireEnds.set(wire.id, [wire.from, wire.to]);
             const { d } = pathOf(ends);
             paths.push(`<g class="app-wire app-wire-go app-wire-transition" data-go-wire="${escapeHtml(wire.button)}"><path class="app-wire-hit" d="${d}"/><path class="app-wire-line" d="${d}" marker-end="url(#app-arrow-go)"/></g>`);
         }
@@ -954,6 +984,34 @@ export class AppCanvas extends AppElement {
             pill.style.setProperty('--y', `${y}px`);
         }
         this.markSelection();
+        this.lightPointed();
+    }
+
+    // Pointing at a pin lights up its wires, their transforms and the pins at their other ends;
+    // pointing at a wire or its transform, the wire and its two pins. The rest of the wires dim.
+    pointAt(target) {
+        if (this.classList.contains('app-wiring')) return;
+        const port = target?.closest?.('[data-port]')?.dataset.port;
+        const wire = port ? null : target?.closest?.('[data-wire], [data-pill], [data-go-wire]');
+        const pointed = port ? { port } : wire ? { wire: wire.dataset.wire || wire.dataset.pill || `g:${wire.dataset.goWire}` } : null;
+        if (JSON.stringify(pointed) === JSON.stringify(this.pointed ?? null)) return;
+        this.pointed = pointed;
+        this.lightPointed();
+    }
+
+    lightPointed() {
+        this.querySelectorAll('.app-hot').forEach(element => element.classList.remove('app-hot'));
+        const pointed = this.pointed;
+        const ends = this.wireEnds || new Map();
+        const wires = !pointed ? [] : pointed.wire ? [pointed.wire].filter(id => ends.has(id)) : [...ends].filter(([, pins]) => pins.includes(pointed.port)).map(([id]) => id);
+        const pins = new Set(pointed?.port ? [pointed.port] : []);
+        for (const id of wires) {
+            ends.get(id).forEach(pin => pins.add(pin));
+            const selector = id.startsWith('g:') ? `[data-go-wire="${CSS.escape(id.slice(2))}"]` : `[data-wire="${CSS.escape(id)}"], [data-pill="${CSS.escape(id)}"]`;
+            this.querySelectorAll(selector).forEach(element => element.classList.add('app-hot'));
+        }
+        for (const pin of pins) this.querySelectorAll(`[data-port="${CSS.escape(pin)}"]`).forEach(element => element.classList.add('app-hot'));
+        this.classList.toggle('app-pointing', wires.length > 0);
     }
 
     markSelection() {
@@ -1311,6 +1369,8 @@ export class AppCanvas extends AppElement {
 
     startWiring(event, from) {
         event.preventDefault();
+        this.pointed = null;
+        this.lightPointed();
         const draft = this.$('[data-draft]');
         const start = this.portPoint(from);
         if (!start) return;

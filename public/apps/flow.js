@@ -63,6 +63,10 @@ export const DEFAULT_SHOW = { ok: '{{text}}', error: '{{error}}', sent: '' };
 export const ROUTE_WHEN = { sent: "as it's sent", ok: 'if it works', error: 'if it fails' };
 export const routeWhen = route => (Object.hasOwn(ROUTE_WHEN, route?.if) ? route.if : 'ok');
 
+// Where a rule puts what comes out of its call as it's sent, if it works or if it fails
+// (`phase`): the elements and screens its routes for that go into, each once, in order.
+export const routeTargets = (rule, phase) => [...new Set((rule?.then || []).filter(route => routeWhen(route) === phase && route.into).map(route => route.into))];
+
 // A rule's triggers. Rules saved before a rule could have several keep their one as an object.
 export function triggersOf(rule) {
     const when = rule?.when;

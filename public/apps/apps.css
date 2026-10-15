@@ -1150,6 +1150,20 @@ app-open-ask[hidden] {
 
 /* ---------- The canvas ---------- */
 
+/* What the canvas and the Inspector color by: a screen is blue, a tool violet. A pin that starts a
+   tool or fills its field is a ring, and one that takes what comes out of a tool is solid. */
+.wb-apps {
+    --app-screen: var(--theme-link);
+    --app-tool: #7c4ddb;
+    --app-screen-soft: color-mix(in srgb, var(--app-screen) 9%, var(--theme-background));
+    --app-tool-soft: color-mix(in srgb, var(--app-tool) 10%, var(--theme-background));
+    --app-out-soft: color-mix(in srgb, var(--theme-text-secondary) 7%, var(--theme-background));
+}
+
+.dark-theme .wb-apps {
+    --app-tool: #a98bff;
+}
+
 /* The Inspector's splitter fills the gap beside it and sets its width. */
 .app-canvas-view {
     display: grid;
@@ -1450,28 +1464,44 @@ app-canvas.app-panning * {
 .app-screen-window {
     width: var(--screen-w);
     overflow: hidden;
-    border: 1px solid var(--theme-border-dark);
+    border: 1px solid color-mix(in srgb, var(--app-screen) 40%, var(--theme-border-dark));
     border-radius: var(--radius-300);
     background: var(--theme-background);
     box-shadow: var(--shadow-md);
 }
 
 .app-screen-card[data-live] .app-screen-window {
-    border-color: var(--theme-link);
+    border-color: var(--app-screen);
 }
 
 .app-screen-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     height: var(--screen-bar);
     padding: 0 10px;
-    border-bottom: 1px solid var(--theme-border-light);
-    background: var(--theme-background-light);
+    border-bottom: 1px solid color-mix(in srgb, var(--app-screen) 25%, var(--theme-border-light));
+    background: var(--app-screen-soft);
     color: var(--theme-text-secondary);
     font-size: 0.75rem;
     cursor: grab;
     outline: none;
+}
+
+.app-screen-icon {
+    width: 13px;
+    height: 13px;
+    color: var(--app-screen);
+}
+
+.app-screen-kind {
+    flex: none;
+    margin-left: auto;
+    color: color-mix(in srgb, var(--app-screen) 80%, var(--theme-text-secondary));
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
 .app-screen-bar:active {
@@ -1480,7 +1510,7 @@ app-canvas.app-panning * {
 
 .app-screen-bar:focus-visible,
 .app-screen-bar.app-selected {
-    box-shadow: inset 0 0 0 2px var(--theme-link);
+    box-shadow: inset 0 0 0 2px var(--app-screen);
     color: var(--theme-text-primary);
 }
 
@@ -1494,15 +1524,14 @@ app-canvas.app-panning * {
     margin-left: auto;
     padding: 0 6px;
     border-radius: var(--radius-100);
-    background: var(--theme-background-mid);
-    color: var(--theme-text-secondary);
+    background: color-mix(in srgb, var(--app-screen) 16%, var(--theme-background));
+    color: color-mix(in srgb, var(--app-screen) 80%, var(--theme-text-primary));
     font-size: 0.6875rem;
-    font-weight: 400;
+    font-weight: 500;
 }
 
 /* A screen's ● is where the ways there end, at the start of its card's title. */
 .app-screen-bar .app-port-screen {
-    --port: var(--theme-text-primary);
     position: relative;
     margin-left: -16px;
 }
@@ -1722,15 +1751,53 @@ app-canvas[data-mode='run'] .app-screen-overlay {
     transform: translateY(-50%) scale(1.3);
 }
 
+/* In: what starts a tool (a button, Start, its Run) and what fills its fields, as rings. */
 .app-port-button,
 .app-port-run,
 .app-port-start { --port: var(--theme-warning-foreground); }
 .app-port-input,
 .app-port-arg { --port: var(--theme-link); }
-.app-port-output,
+
+/* Out: what comes out of a tool and where it lands (an output, a screen to go to), solid. */
 .app-port-sent { --port: var(--theme-info-foreground); }
+.app-port-output,
 .app-port-answer { --port: var(--theme-success-foreground); }
 .app-port-error { --port: var(--theme-error); }
+.app-port-screen { --port: var(--app-screen); }
+
+.app-port-sent,
+.app-port-answer,
+.app-port-error,
+.app-port-output,
+.app-port-screen {
+    background: var(--port);
+    box-shadow: inset 0 0 0 2px var(--theme-background);
+}
+
+/* What's pointed at, and what it's connected to; the other wires step back. */
+.app-port.app-hot {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--port) 32%, transparent);
+}
+
+.app-port-sent.app-hot,
+.app-port-answer.app-hot,
+.app-port-error.app-hot,
+.app-port-output.app-hot,
+.app-port-screen.app-hot {
+    box-shadow: inset 0 0 0 2px var(--theme-background), 0 0 0 4px color-mix(in srgb, var(--port) 32%, transparent);
+}
+
+app-canvas.app-pointing .app-wire:not(.app-hot) .app-wire-line {
+    opacity: 0.22;
+}
+
+app-canvas.app-pointing .app-pill:not(.app-hot) {
+    opacity: 0.35;
+}
+
+.app-wire.app-hot .app-wire-line {
+    stroke-width: 3.5;
+}
 
 .app-port-can {
     border-color: var(--theme-link);
@@ -1767,7 +1834,7 @@ app-canvas[data-mode='run'] .app-port {
     top: var(--y);
     left: var(--x);
     width: var(--tool-w);
-    border: 1px solid var(--theme-border-dark);
+    border: 1px solid color-mix(in srgb, var(--app-tool) 45%, var(--theme-border-dark));
     border-radius: var(--radius-300);
     background: var(--theme-background);
     box-shadow: var(--shadow-md);
@@ -1778,8 +1845,8 @@ app-canvas[data-mode='run'] .app-port {
 
 .app-node:focus-visible,
 .app-node.app-selected {
-    border-color: var(--theme-link);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-link) 28%, transparent), var(--shadow-md);
+    border-color: var(--app-tool);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-tool) 28%, transparent), var(--shadow-md);
 }
 
 .app-node-incomplete {
@@ -1788,14 +1855,61 @@ app-canvas[data-mode='run'] .app-port {
 
 .app-node-head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--theme-border-light);
+    height: 34px;
+    padding: 0 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--app-tool) 25%, var(--theme-border-light));
     border-radius: var(--radius-300) var(--radius-300) 0 0;
-    background: var(--theme-background-light);
+    background: var(--app-tool-soft);
     cursor: grab;
     user-select: none;
+}
+
+.app-node-icon {
+    width: 13px;
+    height: 13px;
+    color: var(--app-tool);
+}
+
+/* In and Out: what goes into the tool, and what comes out of it, each under a caption. */
+.app-node-band {
+    padding: 0 0 4px;
+}
+
+.app-node-outputs {
+    border-top: 1px solid var(--theme-border-light);
+    background: var(--app-out-soft);
+}
+
+.app-node-caption {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    height: 18px;
+    padding: 4px 10px 0 14px;
+    overflow: hidden;
+    color: var(--theme-text-secondary);
+    font-size: 0.625rem;
+    white-space: nowrap;
+}
+
+.app-node-caption span {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.app-node-inputs .app-node-caption span {
+    color: var(--theme-warning-foreground);
+}
+
+.app-node-outputs .app-node-caption span {
+    color: var(--theme-success-foreground);
+}
+
+.app-node-where {
+    font-family: var(--font-mono);
 }
 
 .app-node-head:active {
@@ -1860,12 +1974,6 @@ app-canvas[data-mode='run'] .app-port {
     text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.app-node-split {
-    height: 1px;
-    margin: 4px 0;
-    background: var(--theme-border-light);
 }
 
 .app-node-status {
@@ -1936,6 +2044,68 @@ app-canvas[data-mode='run'] .app-port {
 .app-canvas-trace {
     padding: 8px 12px 10px;
     border-top: 1px solid var(--theme-border-light);
+}
+
+/* The key to the canvas: a screen, a tool, and the two kinds of pin. */
+.app-canvas-key {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    padding: 5px 12px;
+    border-top: 1px solid var(--theme-border-light);
+    font-size: 0.6875rem;
+}
+
+.app-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.app-key .icon {
+    width: 12px;
+    height: 12px;
+}
+
+.app-key-screen .icon {
+    color: var(--app-screen);
+}
+
+.app-key-tool .icon {
+    color: var(--app-tool);
+}
+
+.app-key-screen,
+.app-key-tool {
+    padding: 1px 7px;
+    border-radius: var(--radius-100);
+    font-weight: 600;
+}
+
+.app-key-screen {
+    background: var(--app-screen-soft);
+}
+
+.app-key-tool {
+    background: var(--app-tool-soft);
+}
+
+.app-key-pin {
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--theme-warning-foreground);
+    border-radius: 50%;
+}
+
+.app-key-out .app-key-pin {
+    border-color: var(--theme-success-foreground);
+    background: var(--theme-success-foreground);
+}
+
+.app-key-tip {
+    margin-left: auto;
 }
 
 .app-canvas-trace .app-trace {
