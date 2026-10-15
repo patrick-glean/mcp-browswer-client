@@ -16,6 +16,9 @@ Examples:
   python3 test_mcp_server.py --allow-origin https://example.github.io
   python3 test_mcp_server.py --mode legacy --allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"
                                                   # a CORS policy written before 2026-07-28
+  python3 test_mcp_server.py --replies server-template/example.json
+                                                  # a file's replies instead of the mock's tools,
+                                                  # resources and prompts
 """
 
 import argparse
@@ -240,6 +243,18 @@ def origin_matches(pattern, origin):
     return origin == pattern
 
 
+def load_replies(path):
+    """Replies keyed by method, shaped like server-template/example.json. Only server/discover is required."""
+    with open(path, encoding="utf-8") as file:
+        replies = json.load(file)
+    discover = replies.get("server/discover") if isinstance(replies, dict) else None
+    if not isinstance(discover, dict) or not isinstance(discover.get("capabilities"), dict):
+        raise ValueError('it needs a "server/discover" reply with capabilities')
+    if not isinstance((discover.get("_meta") or {}).get("io.modelcontextprotocol/serverInfo"), dict):
+        raise ValueError('its "server/discover" reply needs _meta["io.modelcontextprotocol/serverInfo"]')
+    return replies
+
+
 class Server(ThreadingHTTPServer):
     # HTTP/1.0 opens a connection per request, and a browser keeps up to six open per server, so
     # the default backlog of 5 refuses some of them under load (npm run bench).
@@ -351,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
         name_field = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}.get(method)
         if name_field and decode_header(self.headers.get("Mcp-Name")) != params.get(name_field):
             return f"Mcp-Name is {self.headers.get('Mcp-Name')!r} but params.{name_field} is {params.get(name_field)!r}"
-        tool = TOOLS_BY_NAME.get(params.get("name")) if method == "tools/call" else None
+        tool = self.server.tools_by_name.get(params.get("name")) if method == "tools/call" else None
         for header, path in header_params(tool["inputSchema"]) if tool else ():
             value = lookup(params.get("arguments") or {}, path)
             if value is None:
@@ -381,12 +396,22 @@ class Handler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.sessions[session_id] = version
         self.label += f" (legacy {version})"
-        self.respond(message["id"], {
+        result = {
             "protocolVersion": version,
             "capabilities": {"tools": {"listChanged": False}, "resources": {}, "prompts": {}},
             "serverInfo": SERVER_INFO,
             "instructions": "A mock server for testing MCP clients.",
-        }, headers={"Mcp-Session-Id": session_id})
+        }
+        if self.server.replies:
+            # 2025 revisions carry server/discover's identity here, with serverInfo at the top level.
+            discover = self.server.replies["server/discover"]
+            result = {
+                "protocolVersion": version,
+                "capabilities": discover["capabilities"],
+                "serverInfo": discover["_meta"]["io.modelcontextprotocol/serverInfo"],
+                **({"instructions": discover["instructions"]} if "instructions" in discover else {}),
+            }
+        self.respond(message["id"], result, headers={"Mcp-Session-Id": session_id})
 
     def handle_legacy(self, message, params):
         if self.server.mode == "modern":
@@ -408,6 +433,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self, message, params, modern):
         method, request_id = message["method"], message["id"]
+        if self.server.replies:
+            return self.dispatch_replies(method, request_id, params, modern)
         if method == "server/discover" and modern:
             return self.respond(request_id, {
                 "resultType": "complete",
@@ -520,6 +547,51 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(request_id, {**result, "content": [text_content("This tool shouldn't be callable.")], "isError": True})
         progress_token = (params.get("_meta") or {}).get("progressToken")
         self.respond(request_id, {**result, "content": [text_content(text)]}, steps=steps, progress_token=progress_token)
+
+    # --- Replies from a file (--replies), such as server-template/example.json ---
+
+    def dispatch_replies(self, method, request_id, params, modern):
+        replies, source = self.server.replies, self.server.replies_file
+        if method == "server/discover" and modern:
+            return self.respond(request_id, {**replies[method], "supportedVersions": self.supported_versions()})
+        if method in ("tools/list", "resources/list", "resources/templates/list", "prompts/list") and method in replies:
+            return self.respond(request_id, self.for_era(replies[method], modern))
+        if method == "tools/call":
+            name, args = params.get("name"), params.get("arguments") or {}
+            tool = self.server.tools_by_name.get(name)
+            if tool is None:
+                return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"Unknown tool: {name}"))
+            missing = [key for key in (tool.get("inputSchema") or {}).get("required", []) if args.get(key) in (None, "")]
+            result = replies.get(method, {}).get(name)
+            if missing:
+                result = {"content": [text_content(f"Missing required arguments: {', '.join(missing)}")], "isError": True}
+            elif result is None:
+                result = {"content": [text_content(f"{source} has no result for {name}.")], "isError": True}
+            return self.respond(request_id, self.for_era(result, modern))
+        if method == "resources/read":
+            uri = params.get("uri") or ""
+            result = replies.get(method, {}).get(uri)
+            if result is None:
+                return self.send_json(200, rpc_error(request_id, RESOURCE_NOT_FOUND, f"Resource not found: {uri}", {"uri": uri}))
+            return self.respond(request_id, self.for_era(result, modern))
+        if method == "prompts/get":
+            name, args = params.get("name"), params.get("arguments") or {}
+            prompt = next((p for p in replies.get("prompts/list", {}).get("prompts", []) if p.get("name") == name), None)
+            if prompt is None:
+                return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"Unknown prompt: {name}"))
+            missing = [a["name"] for a in prompt.get("arguments", []) if a.get("required") and not args.get(a["name"])]
+            if missing:
+                return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"{name} needs the argument {', '.join(missing)}"))
+            result = replies.get(method, {}).get(name)
+            if result is None:
+                return self.send_json(200, rpc_error(request_id, INVALID_PARAMS, f"{source} has no messages for {name}"))
+            return self.respond(request_id, self.for_era(result, modern))
+        return self.send_json(404 if modern else 200, rpc_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}"))
+
+    @staticmethod
+    def for_era(result, modern):
+        """2025 revisions have neither resultType nor the cache fields."""
+        return result if modern else {key: value for key, value in result.items() if key not in ("resultType", "ttlMs", "cacheScope")}
 
     # --- OAuth (--oauth): metadata, registration, an authorize endpoint that approves at once, tokens ---
 
@@ -790,8 +862,19 @@ def main():
         help="speak HTTP/1.1 and keep connections open between requests, as most servers do, "
              "instead of HTTP/1.0's connection per request (npm run bench)",
     )
+    parser.add_argument(
+        "--replies", metavar="FILE",
+        help="answer with the replies in FILE, keyed by method (see server-template/example.json), instead of "
+             "the mock's own tools, resources and prompts",
+    )
     parser.add_argument("--verbose", action="store_true", help="print request headers and bodies")
     args = parser.parse_args()
+    replies = None
+    if args.replies:
+        try:
+            replies = load_replies(args.replies)
+        except (OSError, ValueError) as error:
+            parser.error(f"--replies {args.replies}: {error}")
 
     if args.keep_alive:
         Handler.protocol_version = "HTTP/1.1"
@@ -811,10 +894,14 @@ def main():
     server.sessions = {}
     server.tickets = 0
     server.lock = threading.Lock()
+    server.replies, server.replies_file = replies, args.replies
+    server.tools_by_name = {tool["name"]: tool for tool in replies.get("tools/list", {}).get("tools", [])} if replies else TOOLS_BY_NAME
     url = f"http://{args.host}:{args.port}"
     features = [args.mode] + (["SSE replies"] if args.sse else []) + (["bearer token required"] if args.token else [])
     if args.oauth:
         features.append(f"OAuth sign-in, tokens last {args.token_ttl} s")
+    if args.replies:
+        features.append(f"replies from {args.replies}")
     print(f"Mock MCP server ({', '.join(features)}) on {url}", flush=True)
     print(f"  Browser origins allowed: {', '.join(server.allowed_origins)}", flush=True)
     if args.allow_headers:
