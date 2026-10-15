@@ -36,8 +36,8 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 - Each build writes a hash file (`public/build.js`, `public/build-sdk.js`) that `mcp-clients.js` imports, so a rebuild is a worker update
 
 ## Server template
-- [server-template/README.md](mdc:server-template/README.md): for people building servers and their agents, each field a server sends, where this client shows it and what to put in it. Keep it in step with what the Workbench shows
-- [server-template/example.json](mdc:server-template/example.json): a well-described server's replies, by method; `python3 test_mcp_server.py --replies FILE` serves a file like it
+- [public/server-template/README.md](mdc:public/server-template/README.md): for people building servers and their agents, each field a server sends, where this client shows it and what to put in it. Keep it in step with what the Workbench shows
+- [public/server-template/example.json](mdc:public/server-template/example.json): a well-described server's replies, by method; `python3 test_mcp_server.py --replies FILE` serves a file like it
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`

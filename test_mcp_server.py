@@ -16,7 +16,7 @@ Examples:
   python3 test_mcp_server.py --allow-origin https://example.github.io
   python3 test_mcp_server.py --mode legacy --allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"
                                                   # a CORS policy written before 2026-07-28
-  python3 test_mcp_server.py --replies server-template/example.json
+  python3 test_mcp_server.py --replies public/server-template/example.json
                                                   # a file's replies instead of the mock's tools,
                                                   # resources and prompts
 """
@@ -244,7 +244,7 @@ def origin_matches(pattern, origin):
 
 
 def load_replies(path):
-    """Replies keyed by method, shaped like server-template/example.json. Only server/discover is required."""
+    """Replies keyed by method, shaped like public/server-template/example.json. Only server/discover is required."""
     with open(path, encoding="utf-8") as file:
         replies = json.load(file)
     discover = replies.get("server/discover") if isinstance(replies, dict) else None
@@ -548,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
         progress_token = (params.get("_meta") or {}).get("progressToken")
         self.respond(request_id, {**result, "content": [text_content(text)]}, steps=steps, progress_token=progress_token)
 
-    # --- Replies from a file (--replies), such as server-template/example.json ---
+    # --- Replies from a file (--replies), such as public/server-template/example.json ---
 
     def dispatch_replies(self, method, request_id, params, modern):
         replies, source = self.server.replies, self.server.replies_file
@@ -864,7 +864,7 @@ def main():
     )
     parser.add_argument(
         "--replies", metavar="FILE",
-        help="answer with the replies in FILE, keyed by method (see server-template/example.json), instead of "
+        help="answer with the replies in FILE, keyed by method (see public/server-template/example.json), instead of "
              "the mock's own tools, resources and prompts",
     )
     parser.add_argument("--verbose", action="store_true", help="print request headers and bodies")

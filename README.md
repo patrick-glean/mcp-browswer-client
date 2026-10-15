@@ -141,9 +141,9 @@ This client is only as good as what servers say about themselves. MCP has a fiel
 - **Results show by content type**: JSON text indented, images and audio drawn, links with their titles, structured content beside them.
 - **The Chat app's model** is told every server's instructions and every tool's definition, and chooses tools from their names and descriptions alone.
 
-A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do: its name and version, plus whichever fields of its description in Settings the person chose for that server. See [what the client tells your server](server-template/README.md#what-the-client-tells-your-server).
+A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do: its name and version, plus whichever fields of its description in Settings the person chose for that server. See [what the client tells your server](public/server-template/README.md#what-the-client-tells-your-server).
 
-[`server-template/`](server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](server-template/example.json), the replies of a well-described server to copy. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies server-template/example.json`, and add `http://127.0.0.1:8081`.
+[`public/server-template/`](public/server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](public/server-template/example.json), the replies of a well-described server to copy. The site has the same guide as a page, [Describing your server](https://patrick-glean.github.io/mcp-browswer-client/server-template/), rendered from that README so the two never differ; the in-app Guide links to it. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies public/server-template/example.json`, and add `http://127.0.0.1:8081`.
 
 ## MCP Support
 
@@ -313,14 +313,16 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   │   ├── diff.js        # The line diff behind Changes
 │   │   └── util.js        # Small shared helpers (escaping, badges, time)
 │   ├── bench/             # The tool-call benchmark, with its own service worker and an in-memory server
+│   ├── server-template/   # For people building servers: where the client shows each field a server sends
+│   │   ├── README.md      # The guide: each descriptive field, where the client shows it and what to put in it
+│   │   ├── example.json   # A well-described server's replies, by method (test_mcp_server.py --replies serves them)
+│   │   ├── index.html     # The guide as a page of the site, rendered from README.md (guide.js, guide.css)
+│   │   └── markdown.js    # The Markdown renderer behind it
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── styles.css         # UI styles (Glean design language)
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
 │   ├── fonts/             # Inter and DM Sans (OFL)
 │   └── icons/             # Feather icons, rendered as CSS masks (MIT)
-├── server-template/       # For people building servers: where the client shows each field a server sends
-│   ├── README.md          #   The guide: each descriptive field, where it shows and what to put in it
-│   └── example.json       #   A well-described server's replies, by method (test_mcp_server.py --replies serves them)
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
@@ -372,7 +374,7 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 | `--allow-headers "Content-Type, Mcp-Session-Id, MCP-Protocol-Version"` | Uses a CORS policy written before 2026-07-28. With `--mode legacy` the client still connects; with `--mode modern` it explains which headers to allow |
 | `--allow-origin https://example.github.io` | Accepts requests from another page origin (repeatable) |
 | `--keep-alive` | Speaks HTTP/1.1 and keeps connections open between requests, as most servers do, instead of a connection per request (the benchmark uses it) |
-| `--replies server-template/example.json` | Answers with the replies in a file, keyed by method, instead of its own tools, resources and prompts: the [server template](server-template/README.md)'s, or your own server's, to see how the client shows them |
+| `--replies public/server-template/example.json` | Answers with the replies in a file, keyed by method, instead of its own tools, resources and prompts: the [server template](public/server-template/README.md)'s, or your own server's, to see how the client shows them |
 | `--verbose` | Prints every request's headers and body |
 
 `--port` and `--host` change where it listens. Every request is printed with its result, such as `POST tools/call (modern) -> 200`.

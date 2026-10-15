@@ -2,7 +2,7 @@
 
 MCP Browser Client shows people, and the models in its apps, what a server says about itself. Each name, title, description, annotation and schema a server sends ends up somewhere: in the Workbench, where people inspect the server and call its tools; in what the Chat app's model is told; or in the test data Pre-fill makes. A server that describes itself well is one people can use without reading its code, and one a model picks the right tool from.
 
-This folder is for people building a server this client connects to, and for the coding agents helping them:
+This folder is for people building a server this client connects to, and for the coding agents helping them. It's also [a page on the site](https://patrick-glean.github.io/mcp-browswer-client/server-template/), rendered from this file:
 
 - **This guide**: each descriptive field MCP 2026-07-28 has, where this client shows it, and what to put in it.
 - **[`example.json`](example.json)**: the replies of a well-described server, Example Helpdesk, keyed by method: `server/discover`, each list, and a result for each of its tools, resources and prompts. Copy its shapes; `npm run test:unit` checks that it's valid MCP and follows this guide.
@@ -10,7 +10,7 @@ This folder is for people building a server this client connects to, and for the
 To see how replies look in the client, serve them with the mock server and connect to it:
 
 ```bash
-python3 test_mcp_server.py --replies server-template/example.json
+python3 test_mcp_server.py --replies public/server-template/example.json
 ```
 
 Add `http://127.0.0.1:8081` with + beside Servers, or from the [deployed client](https://patrick-glean.github.io/mcp-browswer-client/) after adding `--allow-origin https://patrick-glean.github.io`. Write your own server's replies in the same shape to preview them before the server exists. The mock returns the file's result for a tool whatever the arguments, except that missing required arguments come back as a tool error, and in its default `--mode dual` it answers 2025 clients from the same file.
@@ -155,7 +155,7 @@ Every 2026-07-28 request carries `_meta["io.modelcontextprotocol/clientInfo"]` a
 
 The client can't answer sampling, elicitation or roots requests, and shows an `input_required` result as Needs input, so a tool has to work without them. It registers for sign-in as "MCP Browser Client".
 
-From a web page, requests also need CORS: the server has to allow the page's origin and the 2026-07-28 headers. See [MCP Support](../README.md#mcp-support) for the list.
+From a web page, requests also need CORS: the server has to allow the page's origin and the 2026-07-28 headers. See [MCP Support](../../README.md#mcp-support) for the list.
 
 ## A checklist
 

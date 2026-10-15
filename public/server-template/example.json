@@ -1,5 +1,5 @@
 {
-  "$comment": "The replies of a well-described MCP server, Example Helpdesk, by method (MCP 2026-07-28). README.md, next to this file, says where MCP Browser Client shows each field. python3 test_mcp_server.py --replies server-template/example.json serves them.",
+  "$comment": "The replies of a well-described MCP server, Example Helpdesk, by method (MCP 2026-07-28). README.md, next to this file, says where MCP Browser Client shows each field. python3 test_mcp_server.py --replies public/server-template/example.json serves them.",
   "server/discover": {
     "resultType": "complete",
     "supportedVersions": ["2026-07-28"],

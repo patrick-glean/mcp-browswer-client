@@ -1,4 +1,4 @@
-// The server template (server-template/example.json): valid MCP 2026-07-28 replies, with every field
+// The server template (public/server-template/example.json): valid MCP 2026-07-28 replies, with every field
 // the guide beside it recommends, input schemas Pre-fill fills with valid arguments, and results
 // that match their output schemas.
 //
@@ -17,7 +17,7 @@ const addFormats = addFormatsModule.default ?? addFormatsModule;
 // Strict, so a misspelled keyword (minimun, exmaples) fails instead of being ignored.
 const ajv = addFormats(new Ajv2020({ strict: true, allErrors: true }));
 
-const replies = JSON.parse(readFileSync(new URL('../server-template/example.json', import.meta.url), 'utf8'));
+const replies = JSON.parse(readFileSync(new URL('../public/server-template/example.json', import.meta.url), 'utf8'));
 const discover = replies['server/discover'];
 const serverInfo = discover._meta['io.modelcontextprotocol/serverInfo'];
 const tools = replies['tools/list'].tools;

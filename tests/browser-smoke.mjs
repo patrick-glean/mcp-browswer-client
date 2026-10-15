@@ -397,7 +397,7 @@ async function main() {
     mock('oauth', PORTS.oauth, '--mode', 'modern', '--oauth', '--hide-www-authenticate', '--token-ttl', '62');
     mock('oauth+wrong iss', PORTS.oauthWrongIss, '--mode', 'modern', '--oauth', '--oauth-wrong-iss');
     mock('oauth+no expires_in', PORTS.oauthNoExpiry, '--mode', 'modern', '--oauth', '--token-ttl', '2', '--omit-expires-in');
-    mock('server template', PORTS.template, '--mode', 'modern', '--replies', 'server-template/example.json');
+    mock('server template', PORTS.template, '--mode', 'modern', '--replies', 'public/server-template/example.json');
     if (WITH_REFERENCE) {
         start('reference', referencePython, ['tests/reference_server.py', '--port', String(PORTS.reference)]);
     }
@@ -658,7 +658,7 @@ async function main() {
         check('resources and prompts: back on Tools, the tool panes return', toolsBack);
 
         // The server template's replies, served by the mock: each field shows where
-        // server-template/README.md says it does.
+        // public/server-template/README.md says it does.
         const templateUrl = `${HOST}:${PORTS.template}/`;
         const helpdesk = await addAndConnect(page, templateUrl, '');
         const helpdeskTools = await toolNames(page, templateUrl);
@@ -804,6 +804,32 @@ async function main() {
                 && JSON.stringify(Object.keys(dualInfo).sort()) === '["name","version"]',
             `legacy ${JSON.stringify(legacyInfo)}; dual ${JSON.stringify(dualInfo)}`);
         await page.run(`${serverRow(modernUrl)}.click()`);
+
+        // The server guide on the site: the Guide links to it, and it renders README.md, the
+        // same Markdown GitHub shows, with contents and a viewer for the files it links to.
+        const guideSections = readFileSync(join(ROOT, 'public/server-template/README.md'), 'utf8').split('\n').filter(line => line.startsWith('## ')).length;
+        await page.send('Runtime.evaluate', { expression: `window.open(document.getElementById('serverGuideLink').href)`, userGesture: true });
+        const serverGuide = await openPage(t => t.url.endsWith('/server-template/'));
+        const rendered = await serverGuide.waitFor(`document.getElementById('guide')?.dataset.rendered === 'true' && {
+            title: document.title,
+            sections: document.querySelectorAll('#guide h2').length,
+            tables: document.querySelectorAll('#guide table').length,
+            contents: document.querySelectorAll('#contents a').length,
+        }`, 10000);
+        await serverGuide.run(`document.querySelector('[data-show-file="example.json"]').click()`);
+        const viewed = await serverGuide.waitFor(`(() => {
+            const text = document.querySelector('#viewer:not([hidden]) pre code')?.textContent || '';
+            try { return JSON.parse(text)['server/discover'] ? text.length : null; } catch { return null; }
+        })()`, 5000);
+        check('server guide: the Guide links to its page, which renders README.md with contents and shows example.json',
+            rendered?.title === 'Describing your MCP server · MCP Browser Client' && rendered.sections === guideSections && rendered.tables >= 6
+                && rendered.contents >= guideSections && !!viewed,
+            `${JSON.stringify(rendered)}; example.json ${viewed} chars`);
+        serverGuide.close();
+        // Closing the guide's tab doesn't hand the foreground back, and the checks after this
+        // need the app's tab visible.
+        await page.send('Page.bringToFront');
+        await page.waitFor(`document.visibilityState === 'visible'`, 5000);
 
         // Splitters, at a width where request and response sit side by side.
         await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
