@@ -2054,8 +2054,9 @@ async function main() {
                 const preview = document.querySelector('app-preview');
                 if (!document.body.classList.contains('embedded') || !preview?.querySelector('iframe') || !Object.keys(appShell.servers).length) return null;
                 const own = preview.querySelector('[data-launch-actions] a');
-                if (!own) return null;
-                return [document.title, own.textContent.trim(), own.getAttribute('href').replace(/#run=[\\w-]+/, '#run=…'), own.target, Object.keys(appShell.servers).join(' ')].join(' | ');
+                const status = preview.querySelector('[data-preview-status]')?.textContent;
+                if (!own || !status) return null;
+                return [document.title, own.textContent.trim(), own.getAttribute('href').replace(/#run=[\\w-]+/, '#run=…'), own.target, Object.keys(appShell.servers).join(' '), status].join(' | ');
             })()`, 20000);
             await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('visitor')`, 10000, { inPage: embedded });
             await frameRun(`(() => {
@@ -2067,9 +2068,9 @@ async function main() {
             embedded.close();
             await closeTab(await openPage(target => target.url.startsWith('file://')));
             await page.send('Page.bringToFront');
-            check("Apps: embed.html, opened as a file, runs the app in the client in its embed mode, with storage of its own and a link to open it on its own",
+            check("Apps: embed.html, opened as a file, runs the app in the client in its embed mode, with storage of its own (whose History it doesn't point to) and a link to open it on its own",
                 embedFile === 'front-desk-embed.html'
-                    && embedShown === `Front desk | Open on its own | ${HOST}:${PORTS.app}/#run=… | _blank | https://frontdesk.demo.invalid/mcp`
+                    && embedShown === `Front desk | Open on its own | ${HOST}:${PORTS.app}/#run=… | _blank | https://frontdesk.demo.invalid/mcp | Its calls are real.`
                     && embedFound === 'Ada Lovelace, Analytical Engines',
                 `${embedFile}; ${embedShown}; ${embedFound}`);
 

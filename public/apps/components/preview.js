@@ -113,8 +113,10 @@ export class AppPreview extends AppElement {
             this.apps.ranStart();
             this.renderNotes();
         }
+        // An embed's History is in the storage the browser keeps for it, which no page of the client shows.
+        const real = this.apps.launched?.embedded ? 'Its calls are real.' : 'Its calls are real, and each is in History.';
         this.status(this.apps.launched
-            ? (start || !openRules(this.apps.app).length ? 'Its calls are real, and each is in History.' : "It hasn't run what it calls as it opens.")
+            ? (start || !openRules(this.apps.app).length ? real : "It hasn't run what it calls as it opens.")
             : "As it is when it's launched: its calls are real, and each is in History.");
         this.runner.load(this.frame, { start });
     }
