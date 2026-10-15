@@ -74,13 +74,6 @@ export class AppInspector extends AppElement {
         this.shell.on('servers', () => this.servers?.refresh(), signal);
         this.apps.on('model', () => this.source?.modelChanged(), signal);
         this.addEventListener('click', event => this.clicked(event), { signal });
-        // A section someone opens or closes stays that way; one a wire opened for its part doesn't.
-        this.addEventListener('toggle', event => {
-            const fold = event.target;
-            if (fold !== this.toggling || !fold.matches?.('[data-fold]')) return;
-            this.toggling = null;
-            if (!this.forcedFolds) keepFold(fold.dataset.fold, fold.open);
-        }, { capture: true, signal });
         this.addEventListener('input', event => {
             const field = event.target.closest('[data-inspect-prop]');
             if (!field) return;
@@ -427,8 +420,11 @@ export class AppInspector extends AppElement {
     }
 
     clicked(event) {
-        const summary = event.target.closest('summary.app-fold-head');
-        if (summary) this.toggling = summary.parentElement;
+        // A section someone opens or closes stays that way; one a wire opened for its part doesn't.
+        // It's kept from the click, which opens or closes it once the click is done: its toggle
+        // event can't say, since a section drawn open has one of its own, and the two can merge.
+        const fold = event.target.closest('summary.app-fold-head')?.parentElement;
+        if (fold && !event.defaultPrevented && !this.forcedFolds) keepFold(fold.dataset.fold, !fold.open);
         const button = event.target.closest('button');
         if (!button || button.disabled || button.closest('[data-rule-editor], [data-part-source], [data-screen-source], [data-server-switch]')) return;
         const { dataset } = button;
