@@ -100,6 +100,17 @@ export function isLocalAddress(address) {
     }
 }
 
+// Whether the index.html at a client address runs apps from links and embeds, as its
+// <meta name="mcp-browser-client"> says: { ok: true }, else { ok: false, why }. A client from
+// before says nothing of them; a downloaded folder's page, with its app's title, is a client too.
+export function clientPageCheck(html) {
+    const runs = new Set(String(html).match(/<meta name="mcp-browser-client" content="([^"]*)"/)?.[1].split(/\s+/));
+    if (runs.has('links') && runs.has('embeds')) return { ok: true };
+    return String(html).includes('MCP Browser Client')
+        ? { ok: false, why: 'the client there is from before it ran apps from links and embeds, so its site needs this version first' }
+        : { ok: false, why: "the page there isn't MCP Browser Client" };
+}
+
 // The HTML that runs an app inside a page: an iframe of the client in its embed mode, with the app
 // in its address (`link`, Apps.linkTo with embed).
 export function embedCode(link, { name = 'App', height = 640 } = {}) {
@@ -614,14 +625,14 @@ export class Apps {
         return this.clientAddress();
     }
 
-    // Whether MCP Browser Client answers at an address: { ok: true }, { ok: false, why }, or
-    // { ok: null, why } when this page can't tell (it can't reach it, or may not read it).
+    // Whether MCP Browser Client answers at an address and runs apps from links and embeds there:
+    // { ok: true }, { ok: false, why }, or { ok: null, why } when this page can't tell (it can't
+    // reach it, or may not read it).
     async checkClientAddress(address = this.clientAddress()) {
         try {
             const response = await fetch(new URL('index.html', address), { cache: 'no-store' });
             if (!response.ok) return { ok: false, why: `it answers HTTP ${response.status} for index.html` };
-            // A downloaded folder's page has its app's title, and is a client too.
-            return (await response.text()).includes('MCP Browser Client') ? { ok: true } : { ok: false, why: "the page there isn't MCP Browser Client" };
+            return clientPageCheck(await response.text());
         } catch {
             return { ok: null, why: "this page can't reach it, or isn't let read it" };
         }

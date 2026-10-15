@@ -18,6 +18,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { APP_URL } from '../public/apps/apps.js';
 import { fromDml } from '../public/apps/dml.js';
 import { RUN_HASH, unpackApp } from '../public/apps/link.js';
 import { unzip } from '../public/apps/zip.js';
@@ -2087,14 +2088,32 @@ async function main() {
             })()`, 10000);
             await page.run(`document.querySelector('apps-share-dialog [data-copy-link]').click()`);
             const linkThere = await page.waitFor(`window.copiedLink?.startsWith('http://localhost:${PORTS.app}/${RUN_HASH}') ? 'http://localhost:${PORTS.app}/${RUN_HASH}…' : null`, 5000);
+            // The public client from before it ran apps from links and embeds (its page, answered
+            // here, without the marker that says it does) is one they won't run at, as the note says.
+            const pageBefore = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8').replace(/\s*<meta name="mcp-browser-client"[^>]*>/, '');
+            await page.send('Fetch.enable', { patterns: [{ urlPattern: `${APP_URL}index.html*` }] });
+            page.on('Fetch.requestPaused', ({ requestId }) => page.send('Fetch.fulfillRequest', {
+                requestId, responseCode: 200, body: Buffer.from(pageBefore).toString('base64'),
+                responseHeaders: [{ name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Content-Type', value: 'text/html' }],
+            }));
+            await page.run(`document.querySelector('apps-share-dialog [data-use-address="${APP_URL}"]').click()`);
+            const publicBefore = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog.querySelector('[data-address-note]').textContent;
+                return dialog.querySelector('[data-client-address]').value !== '${APP_URL}' || note.startsWith('Checking') ? null
+                    : [dialog.querySelector('[data-embed-code]').value.match(/src="([^#]+)#/)?.[1], note].join(' | ');
+            })()`, 10000);
+            await page.send('Fetch.disable');
             await page.run(`document.querySelector('apps-share-dialog [data-use-address="${HOST}:${PORTS.app}/"]').click()`);
             const setBack = await page.waitFor(`document.querySelector('apps-share-dialog [data-client-address]').value === '${HOST}:${PORTS.app}/' ? 'kept ' + localStorage.getItem('appsClientAddress') : null`, 5000);
             await page.run(`document.querySelector('apps-share-dialog [data-close]').click()`);
             rmSync(embedDownloads, { recursive: true, force: true });
-            check("Apps: the client's address, set to another, is the one embeds and links use; this page's sets it back",
+            check("Apps: the client's address, set to another, is the one embeds and links use; a client from before they ran there says so; this page's sets it back",
                 otherAddress === `http://localhost:${PORTS.app}/ | http://localhost:${PORTS.app}/?embed | Couldn't check it: this page can't reach it, or isn't let read it`
-                    && linkThere === `http://localhost:${PORTS.app}/${RUN_HASH}…` && setBack === 'kept null',
-                `${otherAddress}; ${linkThere}; ${setBack}`);
+                    && linkThere === `http://localhost:${PORTS.app}/${RUN_HASH}…`
+                    && publicBefore === `${APP_URL}?embed | Embeds and links won't run there: the client there is from before it ran apps from links and embeds, so its site needs this version first.`
+                    && setBack === 'kept null',
+                `${otherAddress}; ${linkThere}; ${publicBefore}; ${setBack}`);
 
             // Front desk came with its demo server, built in. The mock server has the same tools,
             // so the Inspector's Servers it calls offers it in its place, and not the servers without

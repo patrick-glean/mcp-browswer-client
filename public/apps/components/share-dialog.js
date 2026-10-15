@@ -107,7 +107,7 @@ export class AppsShareDialog extends AppElement {
         note.textContent = answer.ok
             ? `MCP Browser Client answers there.${local}`
             : answer.ok === false
-                ? `There's no MCP Browser Client there: ${answer.why}.${local}`
+                ? `Embeds and links won't run there: ${answer.why}.${local}`
                 : `Couldn't check it: ${answer.why}. Embeds and links will still use it.${local}`;
     }
 

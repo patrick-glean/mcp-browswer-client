@@ -11,8 +11,8 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
 import {
-    APP_URL, appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, embedCode, embedPage, foundModel, frontDeskApp, isLocalAddress, modelName, normalizeClientAddress,
-    openRules, readmeFor, startCallsOnlyDemos,
+    APP_URL, appIndexHtml, appInFolder, chatApp, clientPageCheck, dashboardApp, demoModel, embedCode, embedPage, foundModel, frontDeskApp, isLocalAddress,
+    modelName, normalizeClientAddress, openRules, readmeFor, startCallsOnlyDemos,
 } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
@@ -1076,6 +1076,16 @@ test("the client's address is the folder of its page, at http or https, and one 
     assert.throws(() => normalizeClientAddress('https://exa mple.com'), /isn't a web address/);
     for (const local of ['http://localhost:8080/', 'http://127.0.0.1/', 'http://app.localhost/', 'http://[::1]:3000/', 'file:///tmp/front-desk/index.html']) assert.equal(isLocalAddress(local), true, local);
     for (const reached of [APP_URL, 'https://example.com/', 'http://10.0.0.5/', 'not an address']) assert.equal(isLocalAddress(reached), false, reached);
+});
+
+test("a client's page says it runs apps from links and embeds; one from before, or another page, doesn't", () => {
+    const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+    assert.deepEqual(clientPageCheck(page), { ok: true }, "the client's own page");
+    assert.deepEqual(clientPageCheck(appIndexHtml(page, sampleApp(), { link: 'https://example.com/#run=abc', root: 'https://example.com/' })), { ok: true }, "a downloaded folder's page, titled with its app's name");
+    const before = clientPageCheck(page.replace(/\s*<meta name="mcp-browser-client"[^>]*>/, ''));
+    assert.equal(before.ok, false);
+    assert.match(before.why, /from before it ran apps from links and embeds/);
+    assert.deepEqual(clientPageCheck('<!DOCTYPE html><title>Something else</title>'), { ok: false, why: "the page there isn't MCP Browser Client" });
 });
 
 test('an embed is an iframe of the client in its embed mode, and embed.html a page that is the app', () => {
