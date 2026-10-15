@@ -115,7 +115,7 @@ Everything stays in this browser, in IndexedDB (`mcp_sandbox`, its name from whe
 
 The Workbench doubles as an inspector, in the spirit of the MCP Inspector but without installing anything:
 
-- **Connection**: the server bar shows the status, the protocol and era, and the server's name and version. Info opens a side sheet with the capabilities it declared, how you're authenticated, the server's instructions and its address.
+- **Connection**: the server bar shows the status, the protocol and era, and the server's own name and version. Info opens a side sheet with everything the server said about itself: its title, name, version, description, website, icons, capabilities and instructions, and all of it as JSON. Then the connection, how you're authenticated and the server's address. A server is listed under the name you give it in Info, else the title it gives itself, else its name.
 - **Tools**: the count, a filter on name, title and description (`/` jumps to it), and filters for what the annotations say: Read-only, Writes (anything that doesn't say it only reads) and Reaches out (open world). Each row marks the tool `ro`, `writes`, `del` or `?` (no read-only hint, so assume it may write), plus `web` and `app` (MCP Apps UI). Servers with many tools are grouped by what their tools work on (`issue`, `pull request`, `search`). Annotations are hints from the server, not guarantees.
 - **Tool details**: the request pane shows the tool's title and badges and the argument form; Schema has the input schema, output schema and raw definition.
 - **Hidden tools**: tools the client won't call, listed after the others with the reason.
