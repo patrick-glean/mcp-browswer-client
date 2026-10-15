@@ -1,0 +1,17 @@
+[package]
+name = "example-helpdesk"
+version = "1.4.0"
+edition = "2024"
+description = "Example Helpdesk, a well-described MCP server, on the official Rust SDK"
+publish = false
+
+[dependencies]
+axum = "0.8"
+rmcp = { version = "3.5.1", features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1.0"
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps a schema's properties in the order they're declared, which is the order a
+# client's form lists them in; without it serde_json sorts them alphabetically.
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tower-http = { version = "0.6", features = ["cors"] }
