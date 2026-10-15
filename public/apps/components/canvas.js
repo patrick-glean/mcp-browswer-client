@@ -638,9 +638,9 @@ export class AppCanvas extends AppElement {
         }).join('');
     }
 
-    // A tool is a node in two bands: In, what starts it and what it's called with, each with a
-    // ring of a pin on its left; and Out, what comes out of it (as it's sent, its answer, its
-    // error), each with a solid pin and where it goes.
+    // A tool is a node in two bands: In, what starts it and what it's called with, whose pins are
+    // rings; and Out, what comes out of it (as it's sent, its answer, its error), whose pins are
+    // solid, each saying where it goes.
     renderNodes() {
         const app = this.app;
         const problems = new Map(flowProblems(app.flow, { elements: this.elements(), servers: this.shell.servers }));
@@ -1416,8 +1416,7 @@ export class AppCanvas extends AppElement {
             this.classList.remove('app-wiring');
             this.querySelectorAll('.app-port-can').forEach(port => port.classList.remove('app-port-can'));
             const moved = Math.hypot(ended.clientX - event.clientX, ended.clientY - event.clientY) > 8;
-            // Some browsers end a drag with a click where it ends, which would pick something else.
-            if (moved) this.draggedAt = performance.now();
+            if (moved) this.endedDrag(ended);
             const target = this.portNear(ended.clientX, ended.clientY, from);
             if (target) this.wire(from, target);
             else if (moved) this.hint('Drop the wire on a ● it can connect to: they light up while you drag.');
@@ -1470,7 +1469,7 @@ export class AppCanvas extends AppElement {
             document.removeEventListener('pointerup', end);
             cancelAnimationFrame(frame);
             if (!moved) return;
-            this.draggedAt = performance.now();
+            this.endedDrag(ended);
             done(offset(ended));
         };
         document.addEventListener('pointermove', move);
@@ -1545,14 +1544,28 @@ export class AppCanvas extends AppElement {
             scroller.scrollLeft = left - (moving.clientX - startX);
             scroller.scrollTop = top - (moving.clientY - startY);
         };
-        const end = () => {
+        const end = ended => {
             document.removeEventListener('pointermove', move);
             document.removeEventListener('pointerup', end);
             this.classList.remove('app-panning');
-            if (moved) this.draggedAt = performance.now();
+            if (moved) this.endedDrag(ended);
         };
         document.addEventListener('pointermove', move);
         document.addEventListener('pointerup', end);
+    }
+
+    // Some browsers end a drag with a click where it ends, which would pick what's there. That
+    // click is let go: one from the pointer, where the drag ended, right after. Any other click,
+    // a script's or one somewhere else, still picks.
+    endedDrag(ended) {
+        this.lastDrag = { at: performance.now(), x: ended.clientX, y: ended.clientY };
+    }
+
+    endsDrag(event) {
+        const drag = this.lastDrag;
+        if (!drag || !event.isTrusted || performance.now() - drag.at > 100 || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 12) return false;
+        this.lastDrag = null;
+        return true;
     }
 
     keyDown(event) {
@@ -1603,10 +1616,7 @@ export class AppCanvas extends AppElement {
 
     clicked(event) {
         const target = event.target;
-        if (this.draggedAt && performance.now() - this.draggedAt < 100 && target.closest('[data-surface]')) {
-            this.draggedAt = 0;
-            return;
-        }
+        if (target.closest('[data-surface]') && this.endsDrag(event)) return;
         const button = target.closest('button');
         if (button?.dataset.toggleLibrary !== undefined) return this.toggleLibrary();
         if (button?.dataset.libraryItem) {
