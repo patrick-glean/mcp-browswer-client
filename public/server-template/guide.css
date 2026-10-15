@@ -136,7 +136,8 @@
     font-weight: 500;
 }
 
-@media (max-width: 960px) {
+/* The guide's tables need the width, so the contents move above the text before they'd squeeze it. */
+@media (max-width: 1100px) {
     .guide-layout {
         grid-template-columns: minmax(0, 1fr);
         gap: 24px;
@@ -316,7 +317,12 @@
     min-width: 140px;
 }
 
-/* A field's or file's name is one word: it wraps between names, never inside one. */
+/* Code in a table breaks inside a word only when the word can't fit at all, and a field's or
+   file's name never does. */
+.guide-content td code {
+    overflow-wrap: break-word;
+}
+
 .guide-content td:first-child code,
 .guide-content td a code {
     white-space: nowrap;
