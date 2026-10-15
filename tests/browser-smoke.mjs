@@ -12,12 +12,16 @@
 // setup.sh creates. Exits non-zero if any check fails.
 
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize as normalizePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { APP_URL } from '../public/apps/apps.js';
+import { fromDml } from '../public/apps/dml.js';
+import { RUN_HASH, unpackApp } from '../public/apps/link.js';
+import { unzip } from '../public/apps/zip.js';
 import { DEFAULT_CLIENT, MCP_CLIENTS } from '../public/mcp-clients.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -84,11 +88,11 @@ const MIME_TYPES = {
     '.woff2': 'font/woff2',
 };
 
-// Serves public/ the way `npm start` does, without the dependency. Python's http.server resets
-// connections when many requests arrive at once, as the page's and worker's modules do.
-function serveApp(port) {
-    const root = join(ROOT, 'public');
-    const app = { label: 'app', output: '' };
+// Serves public/ the way `npm start` does, without the dependency, or another folder (`root`),
+// such as a downloaded app's. Python's http.server resets connections when many requests arrive
+// at once, as the page's and worker's modules do.
+function serveApp(port, { root = join(ROOT, 'public'), label = 'app' } = {}) {
+    const app = { label, output: '' };
     const server = createHttpServer((request, response) => {
         let file = normalizePath(join(root, decodeURIComponent(new URL(request.url, HOST).pathname)));
         let status = 200;
@@ -172,13 +176,14 @@ function notice(name, detail) {
     console.log(`NOTE  ${name}  (${detail})`);
 }
 
-// A small Chrome DevTools Protocol client for one page target.
-async function openPage(match = () => true) {
+// A small Chrome DevTools Protocol client for one page target, or (`type: 'iframe'`) one frame
+// that runs in a process of its own, such as the client embedded in another site's page.
+async function openPage(match = () => true, { type = 'page' } = {}) {
     let target;
     for (let i = 0; i < 100 && !target; i++) {
         try {
             const targets = await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json();
-            target = targets.find(t => t.type === 'page' && match(t));
+            target = targets.find(t => t.type === type && match(t));
         } catch {
             // Chrome is still starting.
         }
@@ -363,6 +368,53 @@ async function signIn(page, until, ms = 20000) {
     return page.waitFor(until, ms);
 }
 
+// An app's screen runs in a sandboxed frame, which Chrome keeps in a process of its own, so it's a
+// DevTools target of its own. This evaluates in each such frame (with `inPage`, only those of that
+// tab) and returns the first answer that isn't empty (null when there's none). The canvas's stills
+// of the screens the app isn't on (data-still) never answer: only the running app does.
+async function frameRun(expression, { inPage = null } = {}) {
+    const frames = (await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json())
+        .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl && (!inPage || target.parentId === inPage.id));
+    expression = `(document.documentElement.hasAttribute('data-still') ? null : (${expression}))`;
+    for (const frame of frames) {
+        const ws = new WebSocket(frame.webSocketDebuggerUrl);
+        try {
+            await new Promise((resolve, reject) => {
+                setTimeout(() => reject(new Error('The frame never answered.')), 3000);
+                ws.addEventListener('open', resolve, { once: true });
+                ws.addEventListener('error', reject, { once: true });
+            });
+            // A frame that goes away while it's asked (the app reloaded it) never answers.
+            const reply = await new Promise(resolve => {
+                setTimeout(() => resolve(null), 5000);
+                ws.addEventListener('close', () => resolve(null), { once: true });
+                ws.addEventListener('message', event => {
+                    const message = JSON.parse(event.data);
+                    if (message.id === 1) resolve(message);
+                });
+                ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
+            });
+            const value = reply?.result?.result?.value;
+            if (value !== undefined && value !== null && value !== false && value !== '') return value;
+        } catch {
+            // The frame went away while it was asked.
+        } finally {
+            ws.close();
+        }
+    }
+    return null;
+}
+
+async function frameWaitFor(expression, ms = 15000, { inPage = null } = {}) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        const value = await frameRun(expression, { inPage });
+        if (value) return value;
+        await sleep(150);
+    }
+    return null;
+}
+
 // What the worker keeps in IndexedDB for a server's sign-in.
 function storedTokens(url) {
     return `new Promise((resolve, reject) => {
@@ -372,6 +424,32 @@ function storedTokens(url) {
             const request = open.result.transaction('tokens').objectStore('tokens').get(${JSON.stringify(url)});
             request.onsuccess = () => resolve(request.result || null);
             request.onerror = () => reject(request.error);
+        };
+    })`;
+}
+
+// How many runs of a tool from a source the worker has recorded.
+function runCount(toolName, source) {
+    return `new Promise((resolve, reject) => {
+        const open = indexedDB.open('mcp_sandbox');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            if (!open.result.objectStoreNames.contains('runs')) return resolve(0);
+            const all = open.result.transaction('runs').objectStore('runs').getAll();
+            all.onsuccess = () => resolve(all.result.filter(run => run.toolName === ${JSON.stringify(toolName)} && run.source === ${JSON.stringify(source)}).length);
+        };
+    })`;
+}
+
+// The newest run of a tool from a source (app, reply, workbench…), as the worker recorded it.
+function latestRun(toolName, source) {
+    return `new Promise((resolve, reject) => {
+        const open = indexedDB.open('mcp_sandbox');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const all = open.result.transaction('runs').objectStore('runs').getAll();
+            all.onsuccess = () => resolve(all.result.filter(run => run.toolName === ${JSON.stringify(toolName)} && run.source === ${JSON.stringify(source)})
+                .sort((a, b) => b.startedAt - a.startedAt)[0] || null);
         };
     })`;
 }
@@ -420,26 +498,26 @@ async function main() {
     try {
         page = await openPage();
         console.log(`Testing the app on the ${CLIENT.label}`);
-        // Chat data as the app saved it before its agent loop's names changed (engramId, the
-        // CBus tap, imprints), on the app's origin before the app first loads.
+        // What the Chat app kept, before the Chat example replaced it, under its names old and
+        // new, on the app's origin before the app first loads.
         await page.send('Page.navigate', { url: `${HOST}:${PORTS.app}/seed-old-chat-data` });
         await page.waitFor(`location.pathname === '/seed-old-chat-data' && document.readyState === 'complete'`);
         await page.run(`new Promise((resolve, reject) => {
-            localStorage.setItem('lastEngramId', 'smoke-old-conversation');
-            localStorage.setItem('cbusTapConfig', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', args: { text: '{{cbus_message}}' }, connectedStringArg: 'text', connectedArrayArg: null }));
-            localStorage.setItem('mcp_module_metadata', JSON.stringify({ version: '1.0.0', memory_events: [{ id: 'imprint-1', name: 'Old context', text: 'Answer briefly.', timestamp: 1 }], last_health_check: 1 }));
-            const open = indexedDB.open('chat_contexts', 1);
+            localStorage.setItem('chatModel', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', args: { text: '{{message}}' }, messageField: 'text', conversationField: null }));
+            localStorage.setItem('chatContext', JSON.stringify([{ id: 'context-1', name: 'Old context', text: 'Answer briefly.', timestamp: 1 }]));
+            localStorage.setItem('lastChatConversation', 'smoke-old-conversation');
+            localStorage.setItem('cbusTapConfig', JSON.stringify({ serverUrl: 'http://127.0.0.1:9/', toolName: 'echo', connectedStringArg: 'text' }));
+            sessionStorage.setItem('chatConversation', 'smoke-old-conversation');
+            const open = indexedDB.open('chat_contexts', 2);
             open.onupgradeneeded = () => {
-                open.result.createObjectStore('conversations', { keyPath: 'engramId' });
-                open.result.createObjectStore('messages', { keyPath: 'id' }).createIndex('engramId', 'engramId');
+                open.result.createObjectStore('conversations', { keyPath: 'conversationId' });
+                open.result.createObjectStore('messages', { keyPath: 'id' }).createIndex('conversationId', 'conversationId');
             };
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
                 const db = open.result;
-                const tx = db.transaction(['conversations', 'messages'], 'readwrite');
-                tx.objectStore('conversations').put({ engramId: 'smoke-old-conversation', meta: { created: 1, engramId: 'smoke-old-conversation' } });
-                tx.objectStore('messages').put({ id: '00000000-0001', text: 'A question from before the rename', role: 'user', timestamp: 1, engramId: 'smoke-old-conversation' });
-                tx.objectStore('messages').put({ id: '00000000-0002', text: 'An answer from before the rename', role: 'tool', timestamp: 2, engramId: 'smoke-old-conversation' });
+                const tx = db.transaction('messages', 'readwrite');
+                tx.objectStore('messages').put({ id: '00000000-0001', text: 'A question from the Chat app', role: 'user', timestamp: 1, conversationId: 'smoke-old-conversation' });
                 tx.oncomplete = () => { db.close(); resolve(true); };
                 tx.onerror = () => reject(tx.error);
             };
@@ -452,17 +530,13 @@ async function main() {
             !!document.getElementById('client-status')?.classList.contains('healthy') &&
             typeof appShell !== 'undefined' && !!appShell.serviceWorker && !!appShell.workbench`);
         check('app loads with the service worker, the MCP client and the Workbench running', !!healthy);
-        const carriedOver = await page.waitFor(`(() => {
-            const shown = [...document.querySelectorAll('#chatMessages .chat-msg')].map(m => m.textContent);
-            const model = JSON.parse(localStorage.getItem('chatModel') || 'null');
-            const context = JSON.parse(localStorage.getItem('chatContext') || 'null');
-            const leftOver = ['lastEngramId', 'cbusTapConfig', 'mcp_module_metadata'].filter(key => localStorage.getItem(key) !== null);
-            return shown.includes('A question from before the rename') && shown.includes('An answer from before the rename')
-                && localStorage.getItem('lastChatConversation') === 'smoke-old-conversation'
-                && model?.messageField === 'text' && model.args?.text === '{{message}}' && !('connectedStringArg' in model)
-                && context?.[0]?.name === 'Old context' && leftOver.length === 0 ? shown.length : null;
+        const cleanedUp = await page.waitFor(`(async () => {
+            const kept = ['chatModel', 'chatContext', 'lastChatConversation', 'cbusTapConfig'].filter(key => localStorage.getItem(key) !== null);
+            if (sessionStorage.getItem('chatConversation') !== null) kept.push('chatConversation');
+            const databases = (await indexedDB.databases()).map(database => database.name);
+            return kept.length === 0 && !databases.includes('chat_contexts') && !localStorage.getItem('appsModel') ? databases.join(', ') || 'no databases' : null;
         })()`, 10000);
-        check('Chat app: conversations and settings saved before the rename carry over', !!carriedOver, carriedOver ? `${carriedOver} messages shown` : 'not carried over');
+        check("the Chat app's settings and stored conversations are gone, and its model isn't the builder's", !!cleanedUp, cleanedUp || 'still there');
         const frame = await page.run(`(() => {
             const areas = ['wb-rail', 'wb-server-bar', 'wb-tools', 'wb-request', 'wb-response', 'wb-dock']
                 .filter(name => customElements.get(name) && document.querySelector(name)?.getBoundingClientRect().width > 0);
@@ -484,15 +558,42 @@ async function main() {
         check('the guide closes, reopens from the header and offers servers to add',
             guide.closed && guide.reopened && guide.servers.length >= 5 && guide.command === 'python3 test_mcp_server.py',
             `${guide.servers.length} servers; ${guide.command}`);
+        // What to type for Glean reads in full: a label, a placeholder that fits its field, the
+        // endpoint's shape, and a link to the settings page where Glean shows it.
+        const placeholderFits = `field => {
+            const context = document.createElement('canvas').getContext('2d');
+            const style = getComputedStyle(field);
+            context.font = style.font;
+            return context.measureText(field.placeholder).width <= field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        }`;
+        const gleanField = await page.run(`(() => {
+            const fits = ${placeholderFits};
+            document.getElementById('guideBtn').click();
+            const input = document.getElementById('gleanUrl');
+            const hint = document.getElementById(input.getAttribute('aria-describedby'));
+            const link = hint.querySelector('a');
+            const guideSays = [input.labels[0]?.textContent, fits(input) ? 'its placeholder fits' : 'its placeholder is cut', hint.querySelector('.guide-example')?.textContent, link.href, link.target, link.rel];
+            document.getElementById('closeGuide').click();
+            ${showWorkbench};
+            document.getElementById('addServerToggle').click();
+            const add = document.getElementById('serverUrl');
+            const addLink = document.getElementById(add.getAttribute('aria-describedby'))?.querySelector('a');
+            const railSays = [fits(add) ? 'its placeholder fits' : 'its placeholder is cut', addLink?.href, addLink?.target];
+            document.querySelector('#addServerForm [data-cancel-add]').click();
+            return guideSays.join(' | ') + ' / ' + railSays.join(' | ');
+        })()`);
+        check("Glean's field in the Guide and + beside Servers say what to type in full, and link to where Glean shows the endpoint",
+            gleanField === 'Work email or MCP endpoint | its placeholder fits | https://your-company-be.glean.com/mcp/default | https://app.glean.com/settings/connected-apps | _blank | noopener'
+                + ' / its placeholder fits | https://app.glean.com/settings/connected-apps | _blank', gleanField);
         const loaded = await page.waitFor(`${entries}.some(e => e.source === 'worker' && e.message.startsWith(${JSON.stringify(`Loaded the ${CLIENT.label} (`)}))`, 5000);
         check('logs: the worker reports the client build it loaded', !!loaded);
 
         const targets = [
-            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
-            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
+            { label: 'modern server', url: `${HOST}:${PORTS.modern}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
+            { label: 'modern server with SSE replies', url: `${HOST}:${PORTS.sse}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
             { label: 'legacy server', url: `${HOST}:${PORTS.legacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
             { label: 'legacy server with SSE replies', url: `${HOST}:${PORTS.legacySse}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
-            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes'] },
+            { label: 'dual-era server', url: `${HOST}:${PORTS.dual}/`, era: 'modern', version: '2026-07-28', tools: ['echo', 'echo_region', 'count', 'ticket', 'search_notes', 'make_screen', 'chat', 'find_visit', 'check_in', 'call_front_desk'] },
             { label: 'legacy server whose CORS policy predates 2026-07-28', url: `${HOST}:${PORTS.strictLegacy}/`, era: 'legacy', version: '2025-11-25', tools: ['echo', 'count'] },
         ];
         if (WITH_REFERENCE) {
@@ -517,6 +618,17 @@ async function main() {
             !!region?.includes('Echo from Zürich: hi'), region);
         const counted = await callTool(page, `${HOST}:${PORTS.sse}/`, 'count', { n: 3 });
         check('modern server with SSE replies: reads a streamed reply', !!counted?.includes('Counted to 3'), counted);
+
+        // A demo server built in answers in the worker, through the library's own requests, at an
+        // address no network answers.
+        const deskUrl = 'https://frontdesk.demo.invalid/mcp';
+        const builtIn = await addAndConnect(page, deskUrl, 'Front desk (demo)');
+        const builtInTools = await toolNames(page, deskUrl);
+        const builtInCall = await callTool(page, deskUrl, 'find_visit', { visitor: 'ada' });
+        check('built-in demo server: connects in the worker as MCP 2026-07-28, lists its tools and answers a call',
+            builtIn?.status === 'connected' && builtIn.era === 'modern' && builtIn.name === 'Front desk demo server'
+                && builtInTools?.join(', ') === 'find_visit, check_in, call_front_desk' && !!builtInCall?.includes('Ada Lovelace of Analytical Engines is here to see Grace Hopper at 10:00'),
+            `${JSON.stringify(builtIn)}; ${builtInTools}; ${builtInCall?.slice(0, 120)}`);
 
         // The inspector views of the modern mock: echo has a title and annotations, count an output
         // schema, and broken_header is hidden.
@@ -557,8 +669,8 @@ async function main() {
         check('inspector: a tool shows its title and annotation badges',
             inspector.echo === 'Echo, read-only' && inspector.count === 'read-only, idempotent, structured output', `echo: ${inspector.echo}; count: ${inspector.count}`);
         check('inspector: tool rows mark read-only, writing and undeclared tools', inspector.hints === 'echo ro; echo_region ?; ticket writes', inspector.hints);
-        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 5)', inspector.filtered);
-        check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket', inspector.writes);
+        check('inspector: the filter narrows the list and the count follows', inspector.filtered === 'echo_region (1 of 10)', inspector.filtered);
+        check('inspector: Writes lists the tools that don\'t say they only read', inspector.writes === 'echo_region, ticket, check_in, call_front_desk', inspector.writes);
         check('inspector: a tool shows its input and output schemas and raw definition',
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
@@ -582,7 +694,7 @@ async function main() {
         const report = downloaded ? JSON.parse(readFileSync(join(downloads, downloaded), 'utf8')) : null;
         rmSync(downloads, { recursive: true, force: true });
         check('inspector: Download saves the server details and tool list as JSON',
-            report?.server === modernUrl && report.tools.length === 5 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
+            report?.server === modernUrl && report.tools.length === 10 && report.hiddenTools[0]?.name === 'broken_header' && report.serverInfo?.name === 'Mock MCP Server',
             downloaded || 'no file');
 
         // Resources and prompts, in the tabs beside Tools. The mock lists two items a page.
@@ -675,32 +787,1400 @@ async function main() {
         check('splitters: dragging an edge resizes the pane beside it and keeps the size, and a double-click resets it',
             dragged === before + 60 && kept === dragged && reset === before, `${before} → ${dragged} (kept ${kept}) → ${reset}`);
 
-        const picker = await page.waitFor(`[...document.getElementById('chatToolSelect').options].map(o => o.value).join(',') || null`);
-        check('the Chat app\'s tool picker is populated', !!picker, picker);
-
-        // The README's chat walkthrough: open Apps, pick a server and tool, tick the field your
-        // message goes to, send a message.
+        // Apps, with no app yet: the examples to start from, and the model they call, a chat tool
+        // found among your servers (the mock's stand-in here) until you choose another.
         await page.run(`(() => {
+            ${showWorkbench};
+            ${serverRow(modernUrl)}.click();
             document.querySelector('[data-mode="apps"]').click();
-            const server = document.getElementById('chatServerSelect');
-            server.value = ${JSON.stringify(modernUrl)};
-            server.dispatchEvent(new Event('change'));
-            const tool = document.getElementById('chatToolSelect');
-            tool.value = 'echo';
-            tool.dispatchEvent(new Event('change'));
         })()`);
-        await page.waitFor(`!!document.querySelector('#chatToolConfigForm .chat-message-field[data-field="text"]')`, 5000);
+        const start = await page.waitFor(`(() => {
+            const start = document.getElementById('appsStart');
+            const examples = [...start.querySelectorAll('[data-example] .apps-start-name')].map(name => name.textContent).join(', ');
+            const rail = [...document.querySelectorAll('apps-rail [data-example]')].map(row => row.textContent.trim().replace(/\\s+/g, ' ')).join(' | ');
+            const model = start.querySelector('.app-model-name')?.textContent;
+            const shown = !start.hidden && document.getElementById('appBuilder').hidden && !document.getElementById('appsPage').hidden;
+            return shown && model ? [examples, rail, model].join(' / ') : null;
+        })()`, 10000);
+        check('Apps: with no app yet, the page offers the examples and a blank app, the rail lists the examples, and the model is a chat tool it found',
+            start === 'Chat, Project pulse, Front desk, New app / Chat agent loop | Project pulse dashboard | Front desk screens / chat on modern server, asked in message', start);
         await page.run(`(() => {
-            const box = document.querySelector('#chatToolConfigForm .chat-message-field[data-field="text"]');
-            box.checked = true;
-            box.dispatchEvent(new Event('change'));
-            document.getElementById('chatUserInput').value = 'hello from the console';
-            document.getElementById('chatSendBtn').disabled = false;
-            document.getElementById('chatSendBtn').click();
+            const tool = document.querySelector('#appsStart [data-model-tool]');
+            tool.value = 'echo';
+            tool.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        const chatted = await page.waitFor(`[...document.querySelectorAll('#chatMessages .chat-msg.tool')].some(m => m.textContent.includes('Echo: hello from the console'))`);
-        const appsShown = await page.run(`!document.getElementById('appsPage').hidden && document.getElementById('workbench').hidden`);
-        check('the Chat app sends a message through the chosen tool', !!chatted && appsShown);
+        const chosenModel = await page.waitFor(`(() => {
+            const name = document.querySelector('#appsStart .app-model-name')?.textContent;
+            const saved = JSON.parse(localStorage.getItem('appsModel') || 'null');
+            return name?.startsWith('echo') ? [name, saved?.messageField, document.querySelector('#appsStart [data-model-details] .app-note').textContent.trim()].join(' | ') : null;
+        })()`, 5000);
+        await page.run(`document.querySelector('#appsStart [data-model-found]').click()`);
+        const foundAgain = await page.waitFor(`localStorage.getItem('appsModel') === null ? document.querySelector('#appsStart .app-model-name')?.textContent : null`, 5000);
+        check('Apps: the Model menus choose another model, and Use the one found goes back to it',
+            chosenModel === 'echo on modern server, asked in text | text | You chose it. Use the one found instead' && foundAgain === 'chat on modern server, asked in message',
+            `${chosenModel}; ${foundAgain}`);
+
+        {
+            // Building an app: New app starts a screen and a flow that work. The screen runs in a
+            // sandboxed frame, and the flow calls tools through the worker, as recorded runs.
+            await page.run(`(() => {
+                ${showWorkbench};
+                ${serverRow(modernUrl)}.click();
+                document.querySelector('[data-mode="apps"]').click();
+                document.getElementById('newAppBtn').click();
+            })()`);
+            const onCanvas = await page.waitFor(`(() => {
+                const wires = [...document.querySelectorAll('app-canvas [data-wire]')].map(wire => wire.dataset.wire.split(':')[0]);
+                const picked = document.querySelector('app-inspector .app-inspector-kind')?.textContent;
+                return !document.getElementById('appBuilder').hidden && wires.length === 4 && picked ? wires.join(',') + ' | ' + picked : null;
+            })()`, 10000);
+            check('Apps: a new app opens on the canvas, its screen wired to its tool, and the Inspector shows the screen',
+                onCanvas === 't,a,r,r | Screen', onCanvas);
+            // These checks use the Outline, which shows the screen and the rules as cards.
+            await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
+            const starter = await page.waitFor(`(() => {
+                const sentence = document.querySelector('app-flow .app-rule-sentence')?.textContent;
+                return !document.getElementById('appBuilder').hidden && document.getElementById('appsStart').hidden && sentence ? sentence : null;
+            })()`, 5000);
+            check('Apps: New app starts with a rule that sends its text box to a tool and the answer to its output',
+                starter === 'When run is clicked, call echo on modern server with text = {{input}}; if it works, put {{text}} into output; if it fails, put {{error}} into output.', starter);
+            const screen = await frameWaitFor(`document.getElementById('run') && document.getElementById('output') ? document.body.innerText.replace(/\\s+/g, ' ').trim() : null`);
+            check('Apps: the screen runs in a frame of its own', /^New app Input Run Output/.test(screen || ''), screen);
+            const sandbox = await page.run(`document.querySelector('app-try iframe').getAttribute('sandbox')`);
+            const confined = await frameRun(`Promise.all([
+                fetch(${JSON.stringify(modernUrl)}).then(() => 'fetched', () => 'no network'),
+                new Promise(resolve => { try { resolve(String(localStorage.length)); } catch { resolve('no storage'); } }),
+            ]).then(results => results.join(', '))`);
+            check('Apps: the screen\'s frame can\'t reach the network or the app\'s storage', sandbox === 'allow-scripts' && confined === 'no network, no storage', `${sandbox}: ${confined}`);
+            // Types into the screen and clicks, once the frame has loaded with both (and its runtime).
+            const typeAndClick = async (field, text, button) => {
+                const ids = [field, button].map(id => `!!document.getElementById(${JSON.stringify(id)})`).join(' && ');
+                await frameWaitFor(`document.readyState === 'complete' && ${ids}`);
+                return frameRun(`(() => {
+                    document.getElementById(${JSON.stringify(field)}).value = ${JSON.stringify(text)};
+                    document.getElementById(${JSON.stringify(button)}).click();
+                    return true;
+                })()`);
+            };
+            await typeAndClick('input', 'hello from an app', 'run');
+            const answered = await frameWaitFor(`document.getElementById('output').textContent === 'Echo: hello from an app' && !document.getElementById('output').dataset.state`);
+            const whatHappened = await page.waitFor(`(() => {
+                const lines = [...document.querySelectorAll('app-try .app-trace-text')].map(line => line.textContent.trim());
+                return lines.some(line => line === 'Put “Echo: hello from an app” into output') ? lines.join(' | ') : null;
+            })()`, 5000);
+            check('Apps: clicking the button calls the tool, puts its answer in the output and says what happened',
+                !!answered && /^run was clicked \| Calling echo on modern server with \{"text":"hello from an app"\} \| echo answered in \d+ ms: Echo: hello from an app Open in the Workbench \| Put/.test(whatHappened || ''), whatHappened);
+            const appRun = await page.waitFor(`new Promise((resolve, reject) => {
+                const open = indexedDB.open('mcp_sandbox');
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const all = open.result.transaction('runs').objectStore('runs').getAll();
+                    all.onsuccess = () => {
+                        const [run] = all.result.filter(run => run.source === 'app').sort((a, b) => b.startedAt - a.startedAt);
+                        resolve(run ? JSON.stringify({ args: run.args, sentArgs: run.sentArgs, outcome: run.outcome }) : null);
+                    };
+                };
+            })`, 5000);
+            check('Apps: the call is a run from the app, with its arguments as written and as sent',
+                appRun === JSON.stringify({ args: { text: '{{input}}' }, sentArgs: { text: 'hello from an app' }, outcome: 'ok' }), appRun);
+            // Open in the Workbench, beside the answer, opens the call there: filled in with what the
+            // app sent, since {{input}} is the app's and no variable, and what came back, with Sent.
+            await page.run(`document.querySelector('app-try [data-trace] [data-open-run]').click()`);
+            const openedCall = await page.waitFor(`(() => {
+                const note = document.querySelector('#requestPane .wb-request-note')?.textContent || '';
+                if (document.body.dataset.mode !== 'workbench' || !note.startsWith('Opened')) return null;
+                return [document.querySelector('#requestPane .wb-crumb-tool')?.textContent, document.querySelector('#requestForm [name="text"]')?.value,
+                    document.querySelectorAll('#requestForm .wb-resolved.text-error').length + ' errors', note,
+                    document.querySelector('#responsePane .run-summary')?.textContent.includes('From history · App') ? 'from history' : 'not from history'].join(' | ');
+            })()`, 5000);
+            await page.run(`document.querySelector('#responsePane [data-response-tab="sent"]').click()`);
+            const sentShown = await page.waitFor(`(() => {
+                const sent = [...document.querySelectorAll('#responsePane .wb-sent dt')].map(name => name.textContent.trim() + ' = ' + name.nextElementSibling.textContent);
+                return sent.length ? document.querySelector('#responsePane .wb-sent-head').textContent + ' ' + sent.join(', ') : null;
+            })()`, 5000);
+            check("Apps: Open in the Workbench, beside an answer in What happened, opens the call with what the app sent, ready to run again, and what came back",
+                openedCall === "echo | hello from an app | 0 errors | Opened the app's call, with what it sent: the app filled in {{input}}. Run sends it again. | from history"
+                    && sentShown === 'What the app sent to echo: text = hello from an app',
+                `${openedCall}; ${sentShown}`);
+            await page.run(`document.querySelector('[data-mode="apps"]').click()`);
+            await page.run(`(() => {
+                const show = document.querySelector('app-flow [data-route="0"] [data-route-show]');
+                show.value = 'You said {{input}}, and it said {{text}}';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await typeAndClick('input', 'hi', 'run');
+            const templated = await frameWaitFor(`(() => { const text = document.getElementById('output').textContent; return text.startsWith('You said') ? text : null; })()`);
+            check('Apps: what a rule shows can mix the answer with values from the screen', templated === 'You said hi, and it said Echo: hi', templated);
+            await page.run(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                field.value = '{{nowhere}}';
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await frameRun(`(document.getElementById('run').click(), true)`);
+            const failed = await frameWaitFor(`(() => { const output = document.getElementById('output'); return output.dataset.state === 'error' ? output.textContent : null; })()`);
+            check('Apps: a rule that can\'t make its call says why, through its "if it fails" route',
+                failed === "Didn't call echo: {{nowhere}} isn't an element on the screen or a variable in Default.", failed);
+            await page.run(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                field.value = '{{input}}';
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                const id = document.querySelector('app-screen [data-component="input"] [data-component-id]');
+                id.value = 'question';
+                id.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const renamed = await page.waitFor(`(() => {
+                const field = document.querySelector('app-flow [data-rule-call] [name="text"]');
+                const show = document.querySelector('app-flow [data-route="0"] [data-route-show]');
+                return document.querySelector('app-screen [data-component="question"]') && field?.value === '{{question}}' ? show.value : null;
+            })()`, 5000);
+            check('Apps: renaming a component takes the flow with it', renamed === 'You said {{question}}, and it said {{text}}', renamed);
+
+            // A screen a tool made: the mock's make_screen returns a page (with a script that mustn't run).
+            await page.run(`document.querySelector('app-screen [data-screen-kind="html"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-screen [data-source="tool"]')`, 5000);
+            await page.run(`document.querySelector('app-screen [data-source="tool"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-screen [data-call-server]')`, 5000);
+            await page.run(`(() => {
+                const server = document.querySelector('app-screen [data-call-server]');
+                server.value = ${JSON.stringify(modernUrl)};
+                server.dispatchEvent(new Event('change', { bubbles: true }));
+                const tool = document.querySelector('app-screen [data-call-tool]');
+                tool.value = 'make_screen';
+                tool.dispatchEvent(new Event('change', { bubbles: true }));
+                document.querySelector('app-screen [data-get-html]').click();
+            })()`);
+            const found = await page.waitFor(`(() => {
+                const text = document.querySelector('app-screen [data-found]')?.textContent || '';
+                return /question/.test(text) && /answer/.test(text) ? text.replace(/\\s+/g, ' ') : null;
+            })()`, 10000);
+            check('Apps: a screen can be the HTML a tool returns, and the builder lists its elements', found === '3 elements with ids the flow can use: question field, ask button, answer output', found);
+            const problems = await page.waitFor(`document.querySelector('app-flow [data-problems]:not([hidden])')?.textContent || null`, 5000);
+            check('Apps: a rule says when the screen no longer has what it uses', problems === "run isn't on the screen.output isn't on the screen.", problems);
+            await page.run(`(() => {
+                const when = document.querySelector('app-flow [data-when-element]');
+                when.value = 'ask';
+                when.dispatchEvent(new Event('change', { bubbles: true }));
+                for (const into of document.querySelectorAll('app-flow [data-route-into]')) {
+                    into.value = 'answer';
+                    into.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            const quiet = await frameWaitFor(`document.getElementById('ask') && document.getElementById('answer') ? document.getElementById('answer').textContent || 'empty' : null`);
+            check('Apps: the HTML a tool returns runs without its own scripts', quiet === 'empty', quiet);
+            await typeAndClick('question', 'a tool made this', 'ask');
+            const toolScreen = await frameWaitFor(`(() => { const text = document.getElementById('answer')?.textContent; return text?.startsWith('You said') ? text : null; })()`);
+            check('Apps: the flow works the same on a screen a tool made', toolScreen === 'You said a tool made this, and it said Echo: a tool made this', toolScreen);
+
+            // Download is a zip of a folder that runs the app once it's served: the flow as DML, the
+            // screen as HTML and a README, beside the client's own files, whose index.html names the
+            // app. Importing it brings the app back.
+            const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-app-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
+            await page.run(`document.getElementById('downloadAppBtn').click()`);
+            let zipName;
+            for (let i = 0; i < 100 && !zipName; i++) {
+                zipName = readdirSync(appDownloads).find(name => name.endsWith('.zip'));
+                if (!zipName) await sleep(100);
+            }
+            const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
+            const zippedText = name => (zipped.has(`new-app-v1/${name}`) ? new TextDecoder().decode(zipped.get(`new-app-v1/${name}`)) : '');
+            let fromZip;
+            try {
+                fromZip = fromDml(zippedText('app.dml'), { files: { 'screen.html': zippedText('screen.html') } }).app;
+            } catch (error) {
+                fromZip = { error: error.message };
+            }
+            const zippedNames = [...zipped.keys()];
+            const clientList = JSON.parse(readFileSync(join(ROOT, 'public', 'client-files.json'), 'utf8')).files;
+            const leftOut = clientList.filter(file => !zipped.has(`new-app-v1/${file}`));
+            const named = zippedText('index.html').match(/<meta name="mcp-app" content="app\.dml" data-name="New app" data-run="([^"]+)" data-root="([^"]+)">/);
+            check('Apps: Download saves a zip of a folder: the flow as DML, the screen as HTML and a README, with the client that runs it, whose page names the app',
+                zipName === 'new-app-v1.zip' && zippedNames.every(name => name.startsWith('new-app-v1/')) && zippedNames.slice(0, 3).join(', ') === 'new-app-v1/app.dml, new-app-v1/screen.html, new-app-v1/README.md'
+                    && !leftOut.length && zippedNames.length === clientList.length + 3 && !zipped.has('new-app-v1/sdk_client.js.map')
+                    && named?.[2] === `${HOST}:${PORTS.app}/` && named[1].startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`)
+                    && fromZip.version === 1 && fromZip.screen?.kind === 'html' && fromZip.screen.from?.toolName === 'make_screen'
+                    && /<input id="question"/.test(zippedText('screen.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
+                    && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`')
+                    && zippedText('README.md').includes('## Run it\n\nServe this folder and open its address.')
+                    && zippedText('README.md').includes(`a link that runs version 1 in MCP Browser Client at ${HOST}:${PORTS.app}/. For a page that runs it from a double-click, Share in the builder has embed.html.`),
+                `${zipName}: ${zippedNames.length} files, ${zippedNames.slice(0, 3).join(', ')}…${leftOut.length ? `; without ${leftOut.join(', ')}` : ''}; ${named ? named[2] : 'no <meta> naming the app'}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+
+            // Served, the folder runs its app.dml. At its own address the client has none of this
+            // one's servers, so the app's bar offers to add the one it calls; once added, it answers.
+            const unzipped = join(appDownloads, 'unzipped');
+            for (const [name, data] of zipped) {
+                mkdirSync(dirname(join(unzipped, name)), { recursive: true });
+                writeFileSync(join(unzipped, name), data);
+            }
+            const folderPort = await freePort();
+            serveApp(folderPort, { root: unzipped, label: 'download' });
+            await page.send('Target.createTarget', { url: `${HOST}:${folderPort}/new-app-v1/?client=${CLIENT_NAME}` });
+            const served = await openPage(target => target.url.startsWith(`${HOST}:${folderPort}/`));
+            const servedShown = await served.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const notes = preview?.querySelector('[data-launch-notes]');
+                if (!preview || preview.hidden || !preview.querySelector('iframe') || !notes || notes.hidden) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]')?.textContent.trim(), notes.innerText.replace(/\\s+/g, ' ').trim()].join(' | ');
+            })()`, 20000);
+            await served.run(`document.querySelector('app-preview [data-add-server-for-app]')?.click()`);
+            await served.waitFor(`Object.values(appShell.servers).some(server => server.status === 'connected' && server.tools?.some(tool => tool.name === 'echo'))`, 15000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('ask')`, 10000, { inPage: served });
+            await frameRun(`(() => {
+                document.getElementById('question').value = 'from the folder';
+                document.getElementById('ask').click();
+                return true;
+            })()`, { inPage: served });
+            const servedAnswered = await frameWaitFor(`document.getElementById('answer')?.textContent || null`, 10000, { inPage: served });
+            await closeTab(served);
+            check("Apps: the download's folder, served, runs its app.dml; at its own address it offers to add the server the app calls, and once added the app answers",
+                servedShown === `New app | Open in the builder | It calls modern server (${HOST}:${PORTS.modern}/), which isn't one of your servers. Add it`
+                    && servedAnswered === 'You said from the folder, and it said Echo: from the folder',
+                `${servedShown}; ${servedAnswered}`);
+
+            // Opened as a file, the page can't run, and says to serve the folder; its link runs the
+            // app, as it is in the zip, in the client it came from.
+            let linked;
+            try {
+                linked = fromDml(await unpackApp(named?.[1].split(RUN_HASH)[1] || '')).app;
+            } catch (error) {
+                linked = { error: error.message };
+            }
+            await page.send('Target.createTarget', { url: `file://${join(unzipped, 'new-app-v1', 'index.html')}` });
+            const asFile = await openPage(target => target.url.startsWith('file://'));
+            const fileNotice = await asFile.waitFor(`(() => {
+                const notice = document.getElementById('fromFile');
+                // The notice shows as it's parsed, before the rest of the page is.
+                if (document.readyState === 'loading' || !notice || notice.hidden) return null;
+                const link = notice.querySelector('[data-from-file-link]');
+                return [notice.querySelector('[data-from-file-title]').textContent, getComputedStyle(document.querySelector('.wb-app')).display, link.textContent.trim(), link.getAttribute('href') === ${JSON.stringify(named?.[1] || '')} ? 'the link in the page' : link.getAttribute('href')].join(' | ');
+            })()`, 10000);
+            await asFile.run(`document.querySelector('[data-from-file-link]').click()`);
+            asFile.close();
+            const fromDisk = await openPage(target => target.url.startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`));
+            const diskShown = await fromDisk.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!preview || preview.hidden || !preview.querySelector('iframe')) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]')?.textContent.trim()].join(' | ');
+            })()`, 15000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('ask')`, 10000, { inPage: fromDisk });
+            await frameRun(`(() => {
+                document.getElementById('question').value = 'from the download';
+                document.getElementById('ask').click();
+                return true;
+            })()`, { inPage: fromDisk });
+            const diskAnswered = await frameWaitFor(`document.getElementById('answer')?.textContent || null`, 10000, { inPage: fromDisk });
+            await closeTab(fromDisk);
+            await page.send('Page.bringToFront');
+            check("Apps: the folder's page, opened as a file, says to serve the folder, and its link runs the app as it is in the zip in the client it came from",
+                fileNotice === 'New app runs from a web address | none | Run New app there | the link in the page'
+                    && linked.screen?.html === fromZip.screen?.html && linked.flow?.[0]?.call?.toolName === 'echo'
+                    && diskShown === 'New app | Open in the builder' && diskAnswered === 'You said from the download, and it said Echo: from the download',
+                `${fileNotice}; ${linked.error || ''}; ${diskShown}; ${diskAnswered}`);
+            const firstVersion = await page.waitFor(`(() => {
+                const version = document.getElementById('appVersion')?.textContent || '';
+                return version.startsWith('Version 1, downloaded') ? version + ' | ' + document.getElementById('downloadAppBtn').textContent.trim() : null;
+            })()`, 5000);
+            check('Apps: a download is version 1', firstVersion === 'Version 1, downloaded just now | Download v1', firstVersion);
+            await page.run(`(() => {
+                document.querySelector('app-header .app-more-menu').open = true;
+                const remove = document.getElementById('deleteAppBtn');
+                remove.click();
+                remove.click();
+            })()`);
+            const deleted = await page.waitFor(`!document.getElementById('appsStart').hidden && !document.querySelector('apps-rail #appList [data-show-app]')`, 5000);
+            const { root } = (await page.send('DOM.getDocument', { depth: -1 })).result;
+            const { nodeId } = (await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#importAppInput' })).result;
+            await page.send('DOM.setFileInputFiles', { nodeId, files: [join(appDownloads, zipName || 'missing.zip')] });
+            const imported = await page.waitFor(`(() => {
+                const shown = !document.getElementById('appBuilder').hidden && document.getElementById('appName')?.value === 'New app';
+                return shown ? document.querySelector('app-flow .app-rule-sentence')?.textContent : null;
+            })()`, 10000);
+            await sleep(500);
+            const importedVersion = await page.run(`document.getElementById('appVersion').textContent + ' | ' + document.getElementById('downloadAppBtn').textContent.trim()`);
+            check('Apps: Delete removes the app, and importing its zip brings it back as version 1, unchanged',
+                !!deleted && /^When ask is clicked, call echo on modern server with text = \{\{question\}\}/.test(imported || '')
+                    && importedVersion === 'Version 1, downloaded just now | Download v1', `${imported}; ${importedVersion}`);
+            await typeAndClick('question', 'after the import', 'ask');
+            const reimported = await frameWaitFor(`document.getElementById('answer')?.textContent === 'You said after the import, and it said Echo: after the import'`);
+            await page.run(`(() => {
+                const description = document.getElementById('appDescription');
+                description.value = 'Asks the mock';
+                description.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const next = await page.run(`document.getElementById('downloadAppBtn').textContent.trim() + ' | ' + document.querySelector('apps-rail [aria-current="true"]').textContent.trim().replace(/\\s+/g, ' ')`);
+            const lastSteps = await page.run(`[...document.querySelectorAll('app-try .app-trace-text')].slice(-4).map(line => line.textContent.trim()).join(' | ')`);
+            check('Apps: the imported app runs as before, and a change makes the next download version 2',
+                !!reimported && next === 'Download v2 | New app v1', `${next}; ${reimported ? '' : `the screen shows "${await frameRun(`document.getElementById('answer')?.textContent || 'nothing'`)}" after ${lastSteps}`}`);
+            rmSync(appDownloads, { recursive: true, force: true });
+        }
+        {
+            // An example asks before it adds a copy: Cancel adds nothing, and Add a copy adds it.
+            const appRows = `document.querySelectorAll('#appList [data-show-app]').length`;
+            const rowsBefore = await page.run(appRows);
+            const askedToAdd = async () => {
+                await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
+                return page.waitFor(`(() => {
+                    const dialog = document.querySelector('apps-add-dialog dialog');
+                    return dialog?.open ? [dialog.querySelector('h2').textContent, [...dialog.querySelectorAll('button')].map(button => button.textContent.trim()).join(', '),
+                        'focus on ' + document.activeElement?.textContent.trim()].join(' | ') : null;
+                })()`, 5000);
+            };
+            const offered = await askedToAdd();
+            await page.run(`document.querySelector('apps-add-dialog [data-cancel]').click()`);
+            const cancelled = await page.run(`(document.querySelector('apps-add-dialog dialog').open ? 'still open' : 'closed') + ', ' + ${appRows} + ' apps'`);
+            await askedToAdd();
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
+            check('Apps: an example asks before it adds a copy under Your apps: Cancel adds nothing, and Add a copy adds it',
+                offered === 'Add a copy of Chat? | Cancel, Add a copy | focus on Add a copy' && cancelled === `closed, ${rowsBefore} apps`, `${offered}; ${cancelled}`);
+
+            // The Chat example: an app like any other, whose one rule sends the message and the
+            // conversation so far to the model. The mock's chat says what it was sent and how many
+            // earlier messages came with it, and writes a tool call when asked to call a tool.
+            const chatShown = await page.waitFor(`(() => {
+                const current = document.querySelector('apps-rail [aria-current="true"] .wb-row-label')?.textContent;
+                return document.getElementById('appName')?.value === 'Chat' && !document.getElementById('appBuilder').hidden ? current : null;
+            })()`, 10000);
+            const chatScreen = await frameWaitFor(`document.getElementById('send') && document.getElementById('conversation')?.classList.contains('box-conversation') ? document.body.innerText.replace(/\\s+/g, ' ').trim() : null`);
+            check('Apps: Chat, under Examples, makes an app under Your apps: a conversation, a message field and Send',
+                chatShown === 'Chat' && chatScreen === "Chat A conversation with chat on modern server, which can call your servers' tools. Each message goes with the conversation so far. Conversation Message Send",
+                `${chatShown}; ${chatScreen}`);
+            const conversation = `[...document.querySelectorAll('#conversation .entry')].map(entry => entry.dataset.role + ': ' + entry.textContent)`;
+            const say = async text => {
+                await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('message') && !document.getElementById('send').disabled`);
+                await frameRun(`(() => {
+                    document.getElementById('message').value = ${JSON.stringify(text)};
+                    document.getElementById('send').click();
+                    return true;
+                })()`);
+            };
+            const entriesAfter = count => frameWaitFor(`(() => {
+                const shown = ${conversation};
+                return shown.length >= ${count} && !document.getElementById('send').disabled ? shown : null;
+            })()`);
+            await say('hello from the chat example');
+            const first = await entriesAfter(2);
+            const cleared = await frameRun(`document.getElementById('message').value === '' ? 'cleared' : 'not cleared'`);
+            await say('and again');
+            const second = await entriesAfter(4);
+            check("Apps: Chat puts the message in the conversation as it's sent and clears the field, then the answer; the next one goes with the conversation so far",
+                first?.join(' | ') === 'you: hello from the chat example | reply: You said: hello from the chat example' && cleared === 'cleared'
+                    && second?.slice(2).join(' | ') === 'you: and again | reply: You said: and again (2 earlier messages came with it.)',
+                `${first?.join(' | ')}; ${cleared}; ${second?.slice(2).join(' | ')}`);
+            const sent = await page.run(`${latestRun('chat', 'app')}.then(run => run && JSON.stringify({ args: run.args, sentArgs: run.sentArgs }))`);
+            const { args: chatArgs, sentArgs: chatSent } = JSON.parse(sent || '{}');
+            check("Apps: the model gets the conversation so far as a list, and the message after its instructions and your servers' tools",
+                JSON.stringify(chatArgs) === JSON.stringify({ message: '{{message}}', history: '{{conversation}}' })
+                    && JSON.stringify(chatSent?.history) === JSON.stringify(['User: hello from the chat example', 'Assistant: You said: hello from the chat example'])
+                    && /^You're the assistant in a chat app built with MCP Browser Client: answer briefly and plainly\./.test(chatSent?.message || '')
+                    && (chatSent?.message || '').includes('\n\nYou can call the tools listed below.')
+                    && (chatSent?.message || '').includes(`"url":${JSON.stringify(modernUrl)}`)
+                    && (chatSent?.message || '').endsWith('```\n\nand again'),
+                `${JSON.stringify(chatArgs)}; ${JSON.stringify(chatSent?.history)}; ${(chatSent?.message || '').slice(0, 80)}…${(chatSent?.message || '').slice(-30)}`);
+
+            // A tool call in the model's answer runs, from the page, as a run from a reply, and its
+            // result joins the conversation. Three run in 10 seconds; the fourth is skipped.
+            await say('call echo with hello from the model');
+            const called = await entriesAfter(7);
+            const replyRun = await page.waitFor(`${latestRun('echo', 'reply')}.then(run => run && JSON.stringify({ sentArgs: run.sentArgs, outcome: run.outcome }))`, 5000);
+            check("Apps: a tool call in the model's answer runs as a run from a reply, and its result joins the conversation",
+                called?.[4] === 'you: call echo with hello from the model' && /^reply: I'll ask echo\.\n\n```json\n\{"jsonrpc": "2\.0", "method": "echo"/.test(called?.[5] || '')
+                    && called?.[6] === 'tool: echo: Echo: hello from the model' && replyRun === JSON.stringify({ sentArgs: { text: 'hello from the model' }, outcome: 'ok' }),
+                `${called?.slice(4).join(' | ')}; ${replyRun}`);
+            for (const n of [2, 3, 4]) {
+                await say(`call echo with call ${n}`);
+                await entriesAfter(7 + n * 3 - 3);
+            }
+            const limited = await frameRun(`${conversation}.slice(-1)[0]`);
+            const toolResults = await frameRun(`${conversation}.filter(entry => entry.startsWith('tool: echo')).length`);
+            check("Apps: an answer's tool calls run at most three in 10 seconds, and the conversation says when one was skipped",
+                limited === "error: Skipped echo: an answer's tool calls run at most 3 in 10 seconds." && toolResults === 3, `${limited}; ${toolResults} results`);
+
+            // Preview: the app as it is when it's launched, over the whole window and from the start,
+            // with nothing of the builder running; at a phone's width; and Escape ends it, pressed on
+            // the app's screen or off it, back in the view it came from (the Outline, here).
+            const editView = await page.run(`localStorage.getItem('appsView')`);
+            const builderFrame = `document.querySelector(${JSON.stringify(editView === 'outline' ? 'app-try iframe' : 'app-canvas iframe')})`;
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            const previewShown = await page.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const frame = preview?.querySelector('iframe');
+                if (!preview || preview.hidden || !frame) return null;
+                const box = frame.getBoundingClientRect();
+                const whole = Math.abs(box.width - document.documentElement.clientWidth) <= 1 && Math.abs(box.bottom - window.innerHeight) <= 1;
+                const builderFrames = document.querySelectorAll('app-canvas iframe, app-try iframe').length;
+                return [whole ? 'the whole window' : 'not the whole window', builderFrames + ' builder frames',
+                    document.activeElement?.matches('[data-exit-preview]') ? 'Exit focused' : 'focus elsewhere', 'view kept ' + localStorage.getItem('appsView')].join(', ');
+            })()`, 5000);
+            const launched = await frameWaitFor(`document.readyState === 'complete' && document.getElementById('conversation') ? String(document.querySelectorAll('#conversation .entry').length) : null`);
+            check('Apps: Preview shows the app over the whole window, started again, with nothing of the builder running',
+                previewShown === `the whole window, 0 builder frames, Exit focused, view kept ${editView}` && launched === '0', `${previewShown}; ${launched} entries`);
+            await say('hello from the preview');
+            const used = await entriesAfter(2);
+            const told = await page.waitFor(`(() => {
+                const text = document.querySelector('app-preview [data-preview-status]')?.textContent || '';
+                return /answered/.test(text) ? text : null;
+            })()`, 5000);
+            check('Apps: in Preview the app works as it does when launched, and the bar says what it did',
+                used?.join(' | ') === 'you: hello from the preview | reply: You said: hello from the preview' && /^chat answered in \d+ ms$/.test(told || ''),
+                `${used?.join(' | ')}; ${told}`);
+            await page.run(`document.querySelector('app-preview [data-device="phone"]').click()`);
+            const phone = await frameWaitFor(`(() => {
+                if (window.innerWidth !== 390) return null;
+                const stacked = document.getElementById('send').getBoundingClientRect().top >= document.getElementById('message').getBoundingClientRect().bottom;
+                return document.querySelectorAll('#conversation .entry').length + ' entries at ' + window.innerWidth + ' px, ' + (stacked ? 'Send under the message' : 'Send beside the message');
+            })()`);
+            check("Apps: Preview at a phone's width gives the app 390 pixels, where what shares a row stacks, and keeps what it shows",
+                phone === '2 entries at 390 px, Send under the message', phone);
+            await frameRun(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+            const backFromScreen = await page.waitFor(`document.querySelector('app-preview').hidden && ${builderFrame} && document.activeElement?.id === 'previewAppBtn' ? 'back, Preview focused' : null`, 5000);
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            for (const type of ['keyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+            const backFromPage = await page.waitFor(`document.querySelector('app-preview').hidden && ${builderFrame} ? 'back' : null`, 5000);
+            check("Apps: Escape ends Preview, pressed on the app's screen or off it, and the builder runs the app again where Preview came from",
+                backFromScreen === 'back, Preview focused' && backFromPage === 'back', `${backFromScreen}; ${backFromPage}`);
+        }
+        {
+            // The canvas: the app's screen running with a port beside each element, Start, a node for
+            // each rule's tool, and wires between them, each one part of a rule. These checks build
+            // onto a new app with real mouse drags, at a size where all of it shows.
+            await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+            // An example you've added before offers your copy instead of another one.
+            await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'New app').click()`);
+            await page.waitFor(`document.getElementById('appName')?.value === 'New app'`, 5000);
+            const appsBefore = await page.run(`document.querySelectorAll('#appList [data-show-app]').length`);
+            await page.run(`document.querySelector('apps-rail [data-example="chat"]').click()`);
+            const offeredCopy = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-add-dialog dialog');
+                return dialog?.open && dialog.querySelector('[data-open-copy]') ? [dialog.querySelector('.apps-dialog-have').textContent, [...dialog.querySelectorAll('button')].map(button => button.textContent.trim()).join(', '),
+                    'focus on ' + document.activeElement?.textContent.trim()].join(' | ') : null;
+            })()`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-open-copy]').click()`);
+            const openedCopy = await page.waitFor(`document.getElementById('appName')?.value === 'Chat' ? 'Chat, ' + document.querySelectorAll('#appList [data-show-app]').length + ' apps' : null`, 5000);
+            check('Apps: an example you have a copy of offers to open it instead of adding another',
+                /^You have a copy already: Chat, added (just now|\d+ s ago|\d+ min ago)\. \| Cancel, Add another copy, Open Chat \| focus on Open Chat$/.test(offeredCopy || '') && openedCopy === `Chat, ${appsBefore} apps`,
+                `${offeredCopy}; ${openedCopy}`);
+
+            // Ask a model asks the model found among your servers: here the mock's stand-in, chat.
+            await page.run(`document.getElementById('newAppBtn').click()`);
+            await page.waitFor(`document.getElementById('appName')?.value === 'New app 2' && !!document.querySelector('app-header [data-app-view-choice="canvas"]')`, 5000);
+            await page.run(`document.querySelector('app-header [data-app-view-choice="canvas"]').click()`);
+            await page.waitFor(`document.querySelectorAll('app-canvas [data-wire]').length === 4`, 10000);
+
+            const port = name => `document.querySelector('app-canvas [data-port="${name}"]')`;
+            const fromLibrary = async item => {
+                await page.run(`document.querySelector('app-canvas [data-toggle-library]').click()`);
+                await page.waitFor(`!!document.querySelector('app-canvas [data-library]:not([hidden]) ${item}')`, 5000);
+                await page.run(`document.querySelector('app-canvas [data-library] ${item}').click()`);
+            };
+            // Drags from one port to another as a person would, with both in view. Each end is a port's
+            // name, or a selector for something else to press or release on.
+            const drag = async (from, to) => {
+                const selector = end => (end.includes(' ') ? end : `app-canvas [data-port="${end}"]`);
+                const points = await page.run(`(() => {
+                    const ends = () => [${JSON.stringify(selector(from))}, ${JSON.stringify(selector(to))}].map(found => document.querySelector(found)?.getBoundingClientRect());
+                    const scroller = document.querySelector('app-canvas [data-canvas-scroll]');
+                    scroller.scrollIntoView({ block: 'nearest' });
+                    let [a, b] = ends();
+                    if (!a || !b) return null;
+                    const box = scroller.getBoundingClientRect();
+                    scroller.scrollTop += (a.top + b.top) / 2 - (box.top + box.height / 2);
+                    scroller.scrollLeft += (a.left + b.left) / 2 - (box.left + box.width / 2);
+                    [a, b] = ends();
+                    return [a.left + a.width / 2, a.top + a.height / 2, b.left + b.width / 2, b.top + b.height / 2];
+                })()`);
+                if (!points) return;
+                const [x1, y1, x2, y2] = points;
+                await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1, y: y1 });
+                await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x1, y: y1, button: 'left', buttons: 1, clickCount: 1 });
+                for (let step = 1; step <= 6; step++) {
+                    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1 + ((x2 - x1) * step) / 6, y: y1 + ((y2 - y1) * step) / 6, button: 'left', buttons: 1 });
+                }
+                await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x2, y: y2, button: 'left', buttons: 0, clickCount: 1 });
+            };
+
+            // The Library adds an output and a tool; dragging wires the tool between them.
+            await fromLibrary('[data-library-item="component"][data-type="output"]');
+            await page.waitFor(`!!${port('el:output2')}`, 10000);
+            await fromLibrary(`[data-library-item="tool"][data-server="${modernUrl}"][data-tool="count"]`);
+            const countRule = await page.waitFor(`(() => {
+                const nodes = document.querySelectorAll('app-canvas [data-node]');
+                return nodes.length === 2 ? nodes[1].dataset.node : null;
+            })()`, 5000);
+            await drag('el:run', `run:${countRule}`);
+            const triggered = await page.waitFor(`!!document.querySelector('app-canvas [data-wire="t:${countRule}:0"]')`, 5000);
+            await drag(`ok:${countRule}`, 'el:output2');
+            const wired = await page.waitFor(`document.querySelector('app-canvas [data-wire="r:${countRule}:0"]') ? document.querySelector('app-inspector .app-rule-sentence')?.textContent || null : null`, 5000);
+            check('Apps: on the canvas, dragging from a button to a tool\'s Run, and from its Answer to an output, wires them into its rule',
+                !!triggered && wired === 'When run is clicked, call count on modern server with n = 3; if it works, put {{text}} into output2.', wired);
+            await drag('el:input', 'el:output2');
+            const refused = await page.waitFor(`(() => {
+                const hint = document.querySelector('app-canvas [data-canvas-hint]');
+                return hint.classList.contains('text-error') ? hint.textContent : null;
+            })()`, 3000);
+            check('Apps: two parts of the screen don\'t wire to each other, and the canvas says why',
+                refused === "Two parts of the screen don't connect to each other: connect them through a tool.", refused);
+
+            // Screens and tools look different: a screen's bar is blue with a monitor, a tool's head
+            // violet with a tool icon. Pins that start or fill a tool are rings, and those things
+            // come out of and land on are solid; a tool shows them under In and Out, and says where
+            // each of its outputs goes. A key says so.
+            const looks = await page.run(`(() => {
+                // A color mixed in CSS comes back as color(srgb r g b), each from 0 to 1.
+                const hue = element => {
+                    const color = getComputedStyle(element).backgroundColor;
+                    const [r, g, b] = color.match(/[\\d.]+/g).map(Number).map(value => (color.startsWith('color(') ? value * 255 : value));
+                    return b > r && b > g ? (r > g ? 'violet' : 'blue') : 'neither';
+                };
+                const node = document.querySelector('app-canvas [data-node="${countRule}"]');
+                const bar = document.querySelector('app-canvas [data-card-bar]');
+                const blank = getComputedStyle(node).backgroundColor;
+                const pin = port => (getComputedStyle(document.querySelector('app-canvas [data-port^="' + port + '"]')).backgroundColor === blank ? 'ring' : 'solid');
+                return [
+                    'screen ' + hue(bar) + (bar.querySelector('.icon-monitor') ? ' with a monitor' : ''),
+                    'tool ' + hue(node.querySelector('.app-node-head')) + (node.querySelector('.app-node-head .icon-tool') ? ' with a tool' : ''),
+                    [...node.querySelectorAll('.app-node-caption span')].map(caption => caption.textContent).join(' and '),
+                    ['run:', 'arg:', 'sent:', 'ok:', 'err:', 'el:run', 'el:input', 'el:output2'].map(port => port.replace(':', '') + ' ' + pin(port)).join(', '),
+                    // Which edge each of count's ports has a pin on: Answer's wire goes back to the screen on its left.
+                    ['run', 'sent', 'ok', 'err'].map(port => port + ' ' + [...node.querySelectorAll('[data-port^="' + port + ':"]')].filter(found => found.offsetParent).map(found => found.dataset.side + (found.getBoundingClientRect().left > node.getBoundingClientRect().left + node.offsetWidth / 2 ? ' edge' : '')).join(' and ')).join(', '),
+                    [...node.querySelectorAll('[data-out]')].map(row => row.dataset.out + ' ' + row.querySelector('.app-node-where').textContent).join(', '),
+                    document.querySelector('app-canvas .app-canvas-key').innerText.replace(/\\s+/g, ' ').trim(),
+                ].join(' | ');
+            })()`);
+            check("Apps: a screen is blue and a tool violet; pins into a tool are rings on its left and those out of it solid on its right, a wire back to the screen leaving from one on the left, under In and Out, each output says where it goes, and a key says so",
+                looks === 'screen blue with a monitor | tool violet with a tool | In and Out | run ring, arg ring, sent solid, ok solid, err solid, elrun ring, elinput ring, eloutput2 solid | run left, sent right edge, ok right edge and left, err right edge | sent —, ok → output2, error — | Screen Tool In: starts a tool, fills a field Out: what comes out of a tool Point at a pin to see its wires.',
+                looks);
+
+            // Pointing at a pin lights up its wires and the pins at their other ends, and the rest dim.
+            const answerPin = JSON.parse(await page.run(`(() => {
+                const pin = document.querySelector('app-canvas [data-port="ok:${countRule}"]');
+                pin.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = pin.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+            })()`));
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: answerPin.x, y: answerPin.y });
+            const lit = await page.waitFor(`(() => {
+                const canvas = document.querySelector('app-canvas');
+                if (!canvas.classList.contains('app-pointing')) return null;
+                return [...new Set([...canvas.querySelectorAll('.app-hot')].map(element => element.dataset.port || (element.dataset.pill ? 'pill ' + element.dataset.pill : 'wire ' + element.dataset.wire)))].sort().join(', ');
+            })()`, 3000);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+            const unlit = await page.waitFor(`!document.querySelector('app-canvas').classList.contains('app-pointing') && !document.querySelector('app-canvas .app-hot') ? 'nothing lit' : null`, 3000);
+            check('Apps: pointing at a pin lights its wire, its transform and the pin at the other end, and the other wires dim until it leaves',
+                lit === `el:output2, ok:${countRule}, pill r:${countRule}:0, wire r:${countRule}:0` && unlit === 'nothing lit', `${lit}; ${unlit}`);
+
+            // A drag ends with the browser's own click where it's let go, which mustn't pick what's
+            // there; a click right after it, on something else, still picks.
+            await drag('el:input', 'el:output2');
+            const afterDrag = await page.run(`(() => {
+                const canvas = document.querySelector('app-canvas');
+                const before = JSON.stringify(canvas.apps.selection);
+                document.querySelector('app-canvas [data-node="${countRule}"] [data-node-status]').click();
+                return before + ' then ' + JSON.stringify(canvas.apps.selection);
+            })()`);
+            check("Apps: the click a drag on the canvas ends with picks nothing, and a click right after it still picks what it's on",
+                afterDrag === `{"kind":"wire","id":"r:${countRule}:0","ruleId":"${countRule}"} then {"kind":"rule","id":"${countRule}"}`, afterDrag);
+
+            // The Inspector: what's picked heads it, in its color, and stays as the rest scrolls; the
+            // rest is in sections that open and close, say what's in them while closed and stay as
+            // they're left. A wire opens only its part, and picking it doesn't scroll the page.
+            const folds = `[...document.querySelectorAll('app-inspector [data-fold]')].filter(fold => !fold.hidden).map(fold => fold.dataset.fold.split('.')[1] + (fold.open ? '+' : '-')).join(' ')`;
+            const pageScroll = `(() => { let total = 0; for (let box = document.querySelector('app-inspector').parentElement; box; box = box.parentElement) total += box.scrollTop; return total; })()`;
+            await page.run(`document.querySelector('app-canvas [data-node="${countRule}"] [data-node-status]').click()`);
+            const toolPicked = await page.waitFor(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return head?.dataset.tone === 'tool' && getComputedStyle(head).position === 'sticky'
+                    ? ['.app-inspector-kind', '.app-inspector-title', '.app-inspector-sub'].map(part => head.querySelector(part)?.textContent).join(' ') + ' | ' + ${folds} : null;
+            })()`, 5000) ?? await page.run(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return 'picked ' + JSON.stringify(document.querySelector('app-canvas').apps.selection) + ', head ' + head?.dataset.tone + ' ' + (head && getComputedStyle(head).position) + ' ' + head?.textContent.replace(/\\s+/g, ' ').trim();
+            })()`);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.call"] > summary').click()`);
+            const callClosed = await page.waitFor(`(() => {
+                const call = document.querySelector('app-inspector [data-fold="rule.call"]');
+                return call && !call.open ? call.querySelector('.app-fold-digest').textContent + ' | ' + localStorage.getItem('appsInspectorFolds') : null;
+            })()`, 3000);
+            await page.run(`document.querySelector('app-canvas [data-node]:not([data-node="${countRule}"]) [data-node-status]').click()`);
+            const otherTool = await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'echo' ? ${folds} : null`, 3000);
+            const scrollBefore = await page.run(pageScroll);
+            await page.run(`document.querySelector('app-canvas [data-pill="r:${countRule}:0"]').click()`);
+            const wirePart = await page.waitFor(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return head?.dataset.tone === 'answer' ? [head.querySelector('.app-inspector-kind').textContent, ${folds}, document.querySelector('app-inspector .app-ends').innerText.replace(/\\s+/g, ' ').trim()].join(' | ') : null;
+            })()`, 3000);
+            const scrollAfter = await page.run(pageScroll);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.when"] > summary').click()`);
+            await page.run(`document.querySelector('app-inspector .app-end[data-select-rule]').click()`);
+            const backToTool = await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'count' ? ${folds} + ' | ' + localStorage.getItem('appsInspectorFolds') : null`, 3000);
+            await page.run(`document.querySelector('app-inspector [data-fold="rule.call"] > summary').click()`);
+            check("Apps: the Inspector heads with what's picked, in its color; its sections open and close, say what's in them closed, and stay as they're left; a wire opens only its part, its ends a click away, without scrolling the page",
+                toolPicked === 'Tool count on modern server | when+ call+ then+' && callClosed === 'count on modern server | {"rule.call":false}' && otherTool === 'when+ call- then+'
+                    && wirePart === 'Where the answer goes | when- call- then+ | count → output2' && scrollAfter === scrollBefore && backToTool === 'when+ call- then+ | {"rule.call":false}',
+                `${toolPicked}; ${callClosed}; ${otherTool}; ${wirePart}; scrolled ${scrollBefore} → ${scrollAfter}; ${backToTool}`);
+
+            // Run: the screen takes clicks, and both tools wired to the button answer.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('output2')`);
+            await frameRun(`(() => {
+                document.getElementById('input').value = 'from the canvas';
+                document.getElementById('run').click();
+                return true;
+            })()`);
+            const ran = await frameWaitFor(`(() => {
+                const shown = ['output', 'output2'].map(id => document.getElementById(id)?.textContent).join(' | ');
+                return shown === 'Echo: from the canvas | Counted to 3' ? shown : null;
+            })()`);
+            const answered = await page.waitFor(`(() => {
+                const statuses = [...document.querySelectorAll('app-canvas [data-node-status]')].map(status => status.textContent);
+                return statuses.length === 2 && statuses.every(text => /^✓ Answered in \\d+ ms$/.test(text)) ? statuses.join(' | ') : null;
+            })()`, 5000);
+            check('Apps: in Run, one click starts both tools, each answer goes where its wire goes, and each tool says it answered',
+                !!ran && !!answered, `${ran}; ${answered}`);
+
+            // A transform on the answer's wire says what of it shows: one value, picked from the last
+            // answer, with words around it.
+            const pill = `document.querySelector('app-canvas [data-pill="r:${countRule}:0"]')`;
+            await page.run(`${pill}.click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-route="0"].app-focus')`, 5000);
+            await fromLibrary('[data-library-item="transform"][data-transform="value"]');
+            const valuePill = await page.waitFor(`${pill}?.textContent === 'structured' ? 'structured' : null`, 5000);
+            // Picked again, the wire's value has no cursor in it, so the value picked takes its place.
+            await page.run(`${pill}.click()`);
+            const pick = `document.querySelector('app-inspector [data-picks] [data-insert-show="{{structured.counted}}"]')`;
+            await page.waitFor(`!!${pick} && !document.querySelector('app-inspector [data-route-show]:focus')`, 5000);
+            await page.run(`${pick}.click()`);
+            const pickedShow = await page.run(`document.querySelector('app-inspector [data-route="0"] [data-route-show]').value`);
+            await page.run(`(() => {
+                const show = document.querySelector('app-inspector [data-route="0"] [data-route-show]');
+                show.value = 'Counted ' + show.value + ' steps';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            await frameRun(`(document.getElementById('run').click(), true)`);
+            const transformed = await frameWaitFor(`document.getElementById('output2')?.textContent === 'Counted 3 steps'`);
+            check('Apps: a transform shows one value of the answer, picked from its last answer, with words around it',
+                valuePill === 'structured' && pickedShow === '{{structured.counted}}' && !!transformed, `${valuePill}; ${pickedShow}; ${transformed ? 'shown' : 'not shown'}`);
+
+            // Start begins the app: wired to a tool's Run, it calls the tool when the app opens.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            await drag('start', `run:${countRule}`);
+            const started = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${countRule}:1"]') ? document.querySelector('app-inspector .app-inspector-title')?.textContent : null`, 5000);
+            await frameRun(`(document.body.dataset.before = 'restart', true)`);
+            await page.run(`document.querySelector('app-canvas [data-restart]').click()`);
+            const opened = await frameWaitFor(`(() => {
+                if (document.body.dataset.before) return null;
+                const shown = ['output', 'output2'].map(id => document.getElementById(id)?.textContent || 'empty').join(' | ');
+                return shown === 'empty | Counted 3 steps' ? shown : null;
+            })()`);
+            check('Apps: Start wired to a tool\'s Run calls it when the app opens, and Restart opens it again',
+                started === 'Start → count' && opened === 'empty | Counted 3 steps', `${started}; ${opened}`);
+
+            // A part of the screen a model makes: the model writes a ticket dashboard, which runs
+            // without its script, handlers or form, its ids named after the part.
+            await fromLibrary('[data-library-item="component"][data-type="part"]');
+            await page.waitFor(`!!document.querySelector('app-inspector [data-part-source] [data-ask]')`, 5000);
+            await page.run(`(() => {
+                const ask = document.querySelector('app-inspector [data-ask]');
+                ask.value = 'a ticket dashboard';
+                ask.dispatchEvent(new Event('input', { bubbles: true }));
+                document.querySelector('app-inspector [data-make]').click();
+            })()`);
+            const made = await page.waitFor(`(() => {
+                const found = document.querySelector('app-inspector [data-found]')?.textContent || '';
+                return /part\\.refresh/.test(found) ? found.replace(/\\s+/g, ' ') : null;
+            })()`, 15000);
+            const dashboard = await frameWaitFor(`(() => {
+                const refresh = document.getElementById('part.refresh');
+                if (!refresh) return null;
+                const details = document.getElementById('part.details');
+                return [details.textContent || 'empty', refresh.getAttribute('onclick') ?? 'no handler', document.querySelector('form') ? 'a form' : 'no form', getComputedStyle(details).backgroundColor].join(', ');
+            })()`);
+            check('Apps: a part of the screen can be HTML a model makes, styled by its own CSS, and its elements are the flow\'s to wire',
+                /^7 elements with ids the flow can use: part\.open .*part\.search field, part\.refresh button, .*part\.details output$/.test(made || '') && dashboard === 'empty, no handler, no form, rgb(244, 244, 245)',
+                `${made}; ${dashboard}`);
+            await fromLibrary(`[data-library-item="tool"][data-server="${modernUrl}"][data-tool="ticket"]`);
+            const ticketRule = await page.waitFor(`(() => {
+                const nodes = document.querySelectorAll('app-canvas [data-node]');
+                return nodes.length === 3 && ${port('el:part.refresh')} ? nodes[2].dataset.node : null;
+            })()`, 5000);
+            // From the label beside a port to the words on a tool's row, which wire like the ports do.
+            await drag('app-canvas [data-gutter-row="part.refresh"] .app-gutter-label', `app-canvas [data-node="${ticketRule}"] .app-node-run .app-node-name`);
+            const byLabel = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${ticketRule}:0"]') ? 'wired, ' + (getSelection().toString() ? 'with text selected' : 'nothing selected') : null`, 5000);
+            await drag(`ok:${ticketRule}`, 'el:part.details');
+            const ticketWired = await page.waitFor(`document.querySelector('app-canvas [data-wire="t:${ticketRule}:0"]') && document.querySelector('app-canvas [data-wire="r:${ticketRule}:0"]') ? document.querySelector('app-inspector .app-rule-sentence')?.textContent || null : null`, 5000);
+            check('Apps: a wire also starts from the label beside a port and ends on the words of a tool\'s row, without selecting text',
+                byLabel === 'wired, nothing selected', byLabel);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameRun(`(document.getElementById('part.refresh').click(), true)`);
+            const ticketShown = await frameWaitFor(`(() => {
+                const text = document.getElementById('part.details')?.textContent || '';
+                return /^T-\\d+$/.test(text) ? text : null;
+            })()`);
+            check('Apps: a part\'s button and output wire to a tool like any other, and the answer shows inside the part',
+                ticketWired === 'When part.refresh is clicked, call ticket on modern server; if it works, put {{text}} into part.details.' && !!ticketShown,
+                `${ticketWired}; ${ticketShown}`);
+
+            // Tidy up puts every tool beside what it's wired to. The download keeps where each one sits,
+            // Start, the part's HTML (in parts/) and what the model was asked.
+            await page.run(`document.querySelector('app-canvas [data-tidy]').click()`);
+            const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-canvas-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
+            await page.run(`document.getElementById('downloadAppBtn').click()`);
+            let zipName;
+            for (let i = 0; i < 50 && !zipName; i++) {
+                zipName = readdirSync(appDownloads).find(name => name.endsWith('.zip'));
+                if (!zipName) await sleep(100);
+            }
+            const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
+            const zippedText = name => (zipped.has(`new-app-2-v1/${name}`) ? new TextDecoder().decode(zipped.get(`new-app-2-v1/${name}`)) : '');
+            let fromZip;
+            try {
+                fromZip = fromDml(zippedText('app.dml'), { files: { 'screen.html': zippedText('screen.html'), 'parts/part.html': zippedText('parts/part.html') } }).app;
+            } catch (error) {
+                fromZip = { error: error.message };
+            }
+            const part = fromZip.screen?.components?.find(component => component.type === 'part');
+            const counting = fromZip.flow?.find(rule => rule.call?.toolName === 'count');
+            check('Apps: the download keeps the part\'s HTML in parts/, what the model was asked, Start, and where each tool sits',
+                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].slice(0, 4).join(', ') === 'new-app-2-v1/app.dml, new-app-2-v1/screen.html, new-app-2-v1/parts/part.html, new-app-2-v1/README.md'
+                    && part?.ask === 'a ticket dashboard' && part.from?.toolName === 'chat' && /id="refresh"/.test(part.html)
+                    && /id="part\.refresh"/.test(zippedText('screen.html'))
+                    && counting?.when?.map(candidate => candidate.event).join(', ') === 'click, open'
+                    && fromZip.flow.length === 3 && fromZip.flow.every(rule => Number.isFinite(rule.position?.x) && Number.isFinite(rule.position?.y))
+                    && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
+                `${zipName}: ${[...zipped.keys()].slice(0, 4).join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+            rmSync(appDownloads, { recursive: true, force: true });
+
+            // A part with a grid of keys and long ids, as a model writes a calculator: the keys fill
+            // their grid as its CSS says, the screen's own buttons' place in its layout staying out of
+            // it, and beside the screen each name fits, or past the room there is, shows in full
+            // when pointed at.
+            await fromLibrary('[data-library-item="component"][data-type="part"]');
+            await page.waitFor(`!!document.querySelector('app-inspector [data-part-source] [data-html]')`, 5000);
+            await page.run(`(() => {
+                const html = document.querySelector('app-inspector [data-html]');
+                html.value = ${JSON.stringify('<style>.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .keys button { padding: 10px 0; border-radius: 6px; }</style>\n<div class="keys"><button id="seven">7</button><button id="eight">8</button><button id="nine">9</button><button id="multiply-by">×</button></div>\n<output id="running-total-of-the-calculations">0</output>')};
+                html.dispatchEvent(new Event('input', { bubbles: true }));
+                html.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const keys = await frameWaitFor(`(() => {
+                const grid = document.querySelector('[data-part="part2"] .keys');
+                const widths = [...(grid?.children || [])].map(key => key.getBoundingClientRect().width);
+                if (widths.length !== 4) return null;
+                return Math.abs(widths.reduce((sum, width) => sum + width, 0) + 18 - grid.getBoundingClientRect().width) < 2 ? 'fill their grid' : widths.map(Math.round).join(', ') + ' px wide';
+            })()`);
+            const longName = `document.querySelector('app-canvas [data-gutter-row="part2.running-total-of-the-calculations"] .app-gutter-label')`;
+            const names = await page.waitFor(`(() => {
+                const labels = [...document.querySelectorAll('app-canvas .app-gutter-label')];
+                if (!labels.some(label => label.textContent === '.multiply-by') || !${longName}) return null;
+                const cut = labels.filter(label => label.scrollWidth > label.clientWidth + 1).map(label => label.textContent);
+                return cut.join(', ') + ' cut, in a gutter ' + document.querySelector('app-canvas [data-gutter]').offsetWidth + ' px wide';
+            })()`, 10000);
+            const pointAt = await page.run(`(() => {
+                ${longName}.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = ${longName}.getBoundingClientRect();
+                return [box.right - 4, box.top + box.height / 2];
+            })()`);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pointAt[0], y: pointAt[1] });
+            const pointedAt = await page.waitFor(`${longName}.scrollWidth <= ${longName}.clientWidth + 1 ? 'in full' : null`, 3000);
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+            check("Apps: a part's keys fill their grid, each name beside the screen fits, and one too long for the room there shows in full when pointed at",
+                keys === 'fill their grid' && names === '.running-total-of-the-calculations cut, in a gutter 220 px wide' && pointedAt === 'in full',
+                `${keys}; ${names}; ${pointedAt}`);
+
+            // A dashboard: boxes that say what they show and what goes in them ask one tool for
+            // their pieces of its answer, in its prompt. Project pulse, under Examples, calls the
+            // model, the mock's chat, which answers the boxes with made-up JSON in their shapes.
+            const latestPrompt = `${latestRun('chat', 'app')}.then(run => run?.sentArgs?.message || '')`;
+            // It calls the model as it opens, so adding it asks whether to, each time it opens: yes.
+            await page.run(`document.querySelector('apps-rail [data-example="dashboard"]').click()`);
+            const runOnOpenOffered = await page.waitFor(`(() => {
+                const check = document.querySelector('apps-add-dialog dialog[open] [data-run-on-open]');
+                return check ? check.closest('label').textContent.trim() + ' | ' + (check.checked ? 'checked' : 'not checked') : null;
+            })()`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
+            const pulse = await frameWaitFor(`(() => {
+                const box = id => document.getElementById(id);
+                if (!box('docs')?.querySelector('a.item-title')) return null;
+                return [box('summary').textContent.trim().slice(0, 9), box('health').querySelector('.kpi-value')?.textContent,
+                    box('activity').querySelectorAll('.chart-fill').length, box('risks').querySelectorAll('li').length,
+                    [...box('docs').querySelectorAll('a.item-title')].map(link => link.getAttribute('href')).join(' ')].join(' | ');
+            })()`);
+            check('Apps: a dashboard opens and fills each box from one answer, drawn as the box says: text, a number, a bar chart and lists',
+                pulse === 'On track: | On track | 6 | 3 | https://example.com/docs/design https://example.com/docs/launch https://example.com/docs/weekly'
+                    && runOnOpenOffered === 'Run what it calls as it opens (chat on modern server) each time you open it | checked', `${runOnOpenOffered}; ${pulse}`);
+            const asked = await page.waitFor(`${latestPrompt}.then(prompt => prompt.includes('"docs" (list)') ? prompt : null)`, 5000);
+            check('Apps: the boxes add to the prompt what each needs, from what it says goes in it, as one JSON object',
+                /^What's the latest on MCP Browser Client\? Use what you find in our documents, messages and tickets\.\n\nThis answer fills the boxes on an app's screen\. Answer with one JSON object in a ```json block/.test(asked || '')
+                    && (asked || '').includes('\n- "activity" (bar chart): Updates about the project per week, the last 6 weeks, oldest first, each labeled by the day its week starts. As {"labels": [string], "values": [number]}.\n')
+                    && /\nUse null for a key you have nothing for\.$/.test(asked || ''),
+                (asked || 'nothing sent').slice(0, 160));
+
+            // Saying a box shows something else changes what the prompt asks for, and how it's drawn.
+            const restart = async () => {
+                await frameRun(`(document.body.dataset.before = 'restart', true)`);
+                await page.run(`document.querySelector('app-canvas [data-restart]').click()`);
+            };
+            await page.waitFor(`!!document.querySelector('app-canvas [data-element-box="activity"]')`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-element-box="activity"]').click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-inspect-prop="show"]')`, 5000);
+            await page.run(`(() => {
+                const show = document.querySelector('app-inspector [data-inspect-prop="show"]');
+                show.value = 'line';
+                show.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const lineNote = await page.run(`document.querySelector('app-inspector [data-box-note]')?.textContent || ''`);
+            await frameWaitFor(`!!document.querySelector('#activity.box-line')`);
+            await restart();
+            const line = await frameWaitFor(`!document.body.dataset.before && document.querySelector('#activity polyline') ? document.querySelector('#activity polyline').getAttribute('points').split(' ').length : null`);
+            const lineAsked = await page.waitFor(`${latestPrompt}.then(prompt => prompt.includes('"activity" (line chart)') ? 'line chart' : null)`, 5000);
+            check('Apps: a box that shows a line chart instead asks for one, and draws its six points as a line',
+                line === 6 && lineAsked === 'line chart' && lineNote.includes('as a line chart'), `${line} points; ${lineAsked}; ${lineNote}`);
+
+            // An HTML box from the Library, wired to the tool's Answer, asks for HTML to fit it.
+            await fromLibrary('[data-library-item="box"][data-show="html"]');
+            await page.waitFor(`!!${port('el:panel')}`, 10000);
+            const pulseRule = await page.run(`document.querySelector('app-canvas [data-node]').dataset.node`);
+            await drag(`ok:${pulseRule}`, 'el:panel');
+            const panelWire = await page.waitFor(`document.querySelector('app-canvas [data-pill="r:${pulseRule}:6"]')?.textContent === 'panel' ? document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            await frameWaitFor(`!!document.querySelector('#panel.box-html')`);
+            await restart();
+            const banner = await frameWaitFor(`!document.body.dataset.before && document.querySelector('#panel .banner') ? document.querySelector('#panel .banner').textContent : null`);
+            const htmlAsked = await page.waitFor(`${latestPrompt}.then(prompt => (prompt.match(/^- "panel" \\(HTML\\): .*$/m) || [])[0] || null)`, 5000);
+            check('Apps: an HTML box wired to the Answer asks for HTML to fit its width, and shows it',
+                panelWire === 'Connected: panel asks chat for HTML, in message.' && banner === 'On track. The beta starts once the API review is done.'
+                    && htmlAsked === '- "panel" (HTML): HTML. As a string of HTML for a box about 1030 px wide: no scripts, nothing from the network, inline styles only.',
+                `${panelWire}; ${banner}; ${htmlAsked}`);
+
+            // A link in a box opens in a tab of its own, through the page: the screen can't open one.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await frameRun(`(document.querySelector('#docs a.item-title').click(), true)`);
+            const linked = await page.waitFor(`[...document.querySelectorAll('app-canvas .app-trace-text')].map(line => line.textContent.trim()).find(line => line.startsWith('Opened')) || null`, 5000);
+            check('Apps: a link in a box opens in a new tab', linked === 'Opened https://example.com/docs/design', linked);
+
+            // Asking nowhere sends the question alone, and boxes say the answer had nothing for them.
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            await page.run(`document.querySelector('app-canvas [data-node="${pulseRule}"] [data-node-status]').click()`);
+            await page.waitFor(`!!document.querySelector('app-inspector [data-prompt-row]:not([hidden]) [data-prompt-field]')`, 5000);
+            await page.run(`(() => {
+                const field = document.querySelector('app-inspector [data-prompt-field]');
+                field.value = '';
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await restart();
+            const notJson = await frameWaitFor(`!document.body.dataset.before && document.getElementById('summary')?.dataset.state === 'error' ? document.getElementById('summary').textContent : null`);
+            check('Apps: without the boxes\' request, the answer isn\'t JSON, and the boxes say so',
+                notJson === "The answer wasn't JSON, so it has nothing for this.", notJson);
+
+            // Opening an app that calls a tool as it opens asks, when nobody has said, whether to run
+            // it each time; nothing runs until then, and the answer is kept. Start's Inspector shows
+            // it and changes it. The link opened above is a tab in front of this one.
+            await page.send('Page.bringToFront');
+            const pulseId = await page.run(`localStorage.getItem('appsShown')`);
+            const choiceOf = `(JSON.parse(localStorage.getItem('appsRunOnOpen') || '{}')[${JSON.stringify(pulseId)}] || 'none')`;
+            const startChoices = `[...document.querySelectorAll('app-inspector [data-run-on-open-choice]')].map(chip => chip.textContent + (chip.getAttribute('aria-pressed') === 'true' ? '*' : '')).join(', ')`;
+            const chooseOnStart = async choice => {
+                await page.run(`document.querySelector('app-canvas [data-start]').click()`);
+                const shown = await page.waitFor(`document.querySelector('app-inspector [data-run-on-open-choice]') ? ${startChoices} : null`, 5000);
+                await page.run(`document.querySelector('app-inspector [data-run-on-open-choice="${choice}"]').click()`);
+                return shown;
+            };
+            const reopen = async () => {
+                await page.run(`[...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'Chat').click()`);
+                await page.waitFor(`document.getElementById('appName')?.value === 'Chat'`, 5000);
+                await page.run(`document.querySelector('apps-rail [data-show-app="${pulseId}"]').click()`);
+                await page.waitFor(`document.getElementById('appName')?.value === 'Project pulse'`, 5000);
+            };
+            const canvasTrace = `[...document.querySelectorAll('app-canvas .app-trace-text')].map(line => line.textContent.trim()).join(' | ')`;
+            const pulseRuns = runCount('chat', 'app');
+            const choiceAdded = await page.run(choiceOf);
+            const startShown = await chooseOnStart('');
+            const startAsks = await page.waitFor(`${startChoices}.includes('Ask*') ? ${startChoices} + ' | ' + ${choiceOf} : null`, 5000);
+            const runsBefore = await page.run(pulseRuns);
+            await reopen();
+            const asking = await page.waitFor(`(() => { const ask = document.querySelector('app-open-ask'); return ask && !ask.hidden ? ask.innerText.replace(/\\s+/g, ' ').trim() : null; })()`, 5000);
+            await sleep(1500);
+            const runsWhileAsking = await page.run(pulseRuns);
+            const heldNote = await page.run(canvasTrace);
+            await page.run(`document.querySelector('app-open-ask [data-answer-run-on-open="no"]').click()`);
+            const saidNo = await page.waitFor(`document.querySelector('app-open-ask').hidden ? ${choiceOf} : null`, 5000);
+            await reopen();
+            await sleep(1500);
+            const quietly = await page.run(`(document.querySelector('app-open-ask').hidden ? 'no question' : 'asked') + ' | ' + ${canvasTrace}`);
+            const runsAfterNo = await page.run(pulseRuns);
+            check("Apps: an app that calls a tool as it opens asks whether to run it each time, and runs nothing until you answer; Don't run it is kept, and it opens without calling it",
+                choiceAdded === 'yes' && startShown === "Ask, Run it*, Don't run it" && startAsks === "Ask*, Run it, Don't run it | none"
+                    && asking === "Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app; Start, on the canvas, changes it. Run it each time Don't run it"
+                    && runsWhileAsking === runsBefore && heldNote === "What Start calls (chat on modern server) hasn't run: say above whether to run it when you open this app."
+                    && saidNo === 'no' && quietly === "no question | What Start calls (chat on modern server) didn't run as the app opened, as you chose for this app. Restart runs it."
+                    && runsAfterNo === runsBefore,
+                `${choiceAdded}; ${startShown}; ${startAsks}; ${asking}; ${runsBefore} → ${runsWhileAsking} → ${runsAfterNo} runs; ${heldNote}; ${saidNo}; ${quietly}`);
+            const startSaysNo = await chooseOnStart('');
+            await reopen();
+            await page.waitFor(`!document.querySelector('app-open-ask').hidden`, 5000);
+            await page.run(`document.querySelector('app-open-ask [data-answer-run-on-open="yes"]').click()`);
+            const ranNow = await page.waitFor(`${pulseRuns}.then(count => count > ${runsBefore} ? count - ${runsBefore} + ' run' : null)`, 10000);
+            const ranNote = await page.waitFor(`(() => { const trace = ${canvasTrace}; return trace.includes('chat answered') ? trace.split(' | ').slice(1, 3).join(' | ') : null; })()`, 10000);
+            const saidYes = await page.run(`(document.querySelector('app-open-ask').hidden ? 'no question' : 'asked') + ', ' + ${choiceOf}`);
+            check('Apps: Run it each time runs what Start calls now, and keeps the answer; Start\'s Inspector showed the one before',
+                startSaysNo === "Ask, Run it, Don't run it*" && ranNow === '1 run' && ranNote === 'Ran what Start calls, as it will each time you open Project pulse. | The app opened' && saidYes === 'no question, yes',
+                `${startSaysNo}; ${ranNow}; ${ranNote}; ${saidYes}`);
+
+            // Launch: the app on its own in a new tab, which runs what Start calls as it starts, as
+            // Preview does, though opening it in the builder wouldn't now.
+            await chooseOnStart('no');
+            const runsBeforeLaunch = await page.run(pulseRuns);
+            await page.send('Runtime.evaluate', { expression: `document.getElementById('launchAppBtn').click()`, userGesture: true });
+            const launchedTab = await openPage(target => target.url === `${HOST}:${PORTS.app}/?app=${pulseId}`);
+            const launchedApp = await launchedTab.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const frame = preview?.querySelector('iframe');
+                if (!preview || preview.hidden || !frame || !/answered/.test(preview.querySelector('[data-preview-status]').textContent)) return null;
+                const box = frame.getBoundingClientRect();
+                const whole = Math.abs(box.width - document.documentElement.clientWidth) <= 1 && Math.abs(box.bottom - window.innerHeight) <= 1;
+                const builder = ['.wb-topbar', 'apps-rail', 'app-header', 'wb-dock'].filter(selector => getComputedStyle(document.querySelector(selector)).display !== 'none');
+                return [document.title, whole ? 'the whole window' : 'not the whole window', builder.length ? builder.join(' ') + ' showing' : 'nothing of the builder',
+                    preview.querySelector('[data-launch-actions]').textContent.trim(), preview.querySelector('[data-launch-notes]').hidden ? 'no notes' : 'notes'].join(' | ');
+            })()`, 15000);
+            await launchedTab.run(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+            await sleep(300);
+            const stillLaunched = await launchedTab.run(`document.querySelector('app-preview').hidden ? 'gone' : 'still there'`);
+            const runsLaunched = await page.run(pulseRuns);
+            await closeTab(launchedTab);
+            await page.send('Page.bringToFront');
+            check("Apps: Launch opens the app on its own in a new tab, the whole window with nothing of the builder, running what Start calls as it starts; Escape keeps it",
+                launchedApp === 'Project pulse | the whole window | nothing of the builder | Open in the builder | no notes' && stillLaunched === 'still there' && runsLaunched === runsBeforeLaunch + 1,
+                `${launchedApp}; ${stillLaunched}; ${runsBeforeLaunch} → ${runsLaunched} runs`);
+
+            // A link that runs it carries the app itself: in a browser with nothing of it, the app
+            // runs from the link, offers to add the server it calls, asks before calling what Start
+            // calls, and joins that browser's apps once added.
+            await page.run(`navigator.clipboard.writeText = text => { window.copiedLink = text; return Promise.resolve(); }`);
+            await page.run(`(() => { document.querySelector('app-header .app-more-menu').open = true; document.getElementById('copyAppLinkBtn').click(); })()`);
+            const copiedLink = await page.waitFor(`window.copiedLink || null`, 5000);
+            const copiedSaid = await page.waitFor(`document.getElementById('wbStatus')?.textContent.startsWith('Copied a link') ? document.getElementById('wbStatus').textContent : null`, 5000);
+            const elsewhere = await otherBrowser();
+            const linkedApp = await elsewhere.open(copiedLink || 'about:blank');
+            const linkNotes = `document.querySelector('app-preview [data-launch-notes]')?.innerText.replace(/\\s+/g, ' ').trim()`;
+            const linkFirst = await linkedApp.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!preview || preview.hidden || !preview.querySelector('[data-answer-run-on-open]')) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]').textContent.trim(), ${linkNotes}].join(' | ');
+            })()`, 20000);
+            const linkRuns = runCount('chat', 'app');
+            await sleep(500);
+            const linkRunsFirst = await linkedApp.run(linkRuns);
+            await linkedApp.run(`document.querySelector('app-preview [data-add-server-for-app]').click()`);
+            const serverAdded = await linkedApp.waitFor(`appShell.servers[${JSON.stringify(modernUrl)}]?.status === 'connected' && appShell.servers[${JSON.stringify(modernUrl)}].tools?.length ? appShell.servers[${JSON.stringify(modernUrl)}].alias + ' | ' + ${linkNotes} : null`, 15000);
+            await linkedApp.run(`document.querySelector('app-preview [data-answer-run-on-open="yes"]').click()`);
+            const linkRan = await linkedApp.waitFor(`(() => { const status = document.querySelector('app-preview [data-preview-status]').textContent; return /answered/.test(status) ? status.replace(/\\d+ ms/, 'N ms') : null; })()`, 15000);
+            const linkRunsAfter = await linkedApp.run(linkRuns);
+            await linkedApp.run(`document.querySelector('app-preview [data-keep-app]').click()`);
+            const linkKept = await linkedApp.waitFor(`(() => {
+                const actions = document.querySelector('app-preview [data-launch-actions]').textContent.trim();
+                if (actions !== 'Open in the builder') return null;
+                return new Promise(resolve => {
+                    const open = indexedDB.open('mcp_apps');
+                    open.onsuccess = () => {
+                        const all = open.result.transaction('apps').objectStore('apps').getAll();
+                        all.onsuccess = () => resolve(actions + ' | ' + all.result.map(app => app.id === ${JSON.stringify(pulseId)} ? app.name : 'another').join(', '));
+                    };
+                });
+            })()`, 5000);
+            await elsewhere.close();
+            check('Apps: a link that runs the app carries it: in a browser with nothing of it, it offers to add the server it calls, asks before calling what Start calls, runs, and joins that browser\'s apps once added',
+                (copiedLink || '').startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`) && copiedSaid === 'Copied a link that runs Project pulse as it is now. Whoever opens it runs it in their browser, on their own servers, and can add it to their apps.'
+                    && linkFirst === `Project pulse | Add to Your apps | This app came in a link. It calls your servers, signed in as you, and each call is in History. It calls modern server (${modernUrl}), which isn't one of your servers. Add it Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app, in this browser. Run it each time Don't run it`
+                    && linkRunsFirst === 0 && serverAdded === "modern server | This app came in a link. It calls your servers, signed in as you, and each call is in History. Project pulse calls chat on modern server as it opens. Run that each time you open it? The answer is kept for this app, in this browser. Run it each time Don't run it"
+                    && linkRan === 'chat answered in N ms' && linkRunsAfter === 1 && linkKept === 'Open in the builder | Project pulse',
+                `${(copiedLink || 'nothing copied').slice(0, 40)}…; ${copiedSaid}; ${linkFirst}; ${linkRunsFirst} runs; ${serverAdded}; ${linkRan}; ${linkRunsAfter} runs; ${linkKept}`);
+
+            // Front desk, under Examples: a visitor kiosk over four screens, which the canvas lays out
+            // as a storyboard, a card for each screen in the order people go through them and an
+            // arrow for each way from one to the next. The app runs on the card of the screen it's
+            // on; the other cards show theirs as they are before anyone uses them. The link opened
+            // above is a tab in front of this one, where the canvas couldn't draw its wires.
+            await page.send('Page.bringToFront');
+            await page.run(`document.querySelector('apps-rail [data-example="frontdesk"]').click()`);
+            await page.waitFor(`!!document.querySelector('apps-add-dialog dialog[open] [data-add-copy]')`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
+            const cardsAt = `Object.fromEntries([...document.querySelectorAll('app-canvas [data-card]')].map(card => [card.dataset.card, { x: parseFloat(card.style.getPropertyValue('--x')), y: parseFloat(card.style.getPropertyValue('--y')) }]))`;
+            const player = `document.querySelector('app-canvas [data-player]')`;
+            const deskCanvas = `(() => {
+                const at = ${cardsAt};
+                if (Object.keys(at).join(' ') !== 'welcome confirm done notfound') return Object.keys(at).join(' ');
+                const order = at.welcome.x < at.confirm.x && at.confirm.x === at.notfound.x && at.confirm.y < at.notfound.y && at.notfound.x < at.done.x ? 'in the order people go through them' : JSON.stringify(at);
+                const gutters = [...document.querySelectorAll('app-canvas [data-gutter]')].map(gutter => gutter.dataset.gutter + ': ' + [...gutter.querySelectorAll('[data-gutter-row]')].map(row => row.dataset.gutterRow).join(' ')).join(' | ');
+                const ways = document.querySelectorAll('app-canvas .app-wire-transition').length + ' ways between screens';
+                return [order, gutters, ways, 'the app on ' + ${player}.dataset.on, document.querySelectorAll('app-canvas [data-still]').length + ' stills'].join(' / ');
+            })()`;
+            const deskOpened = 'in the order people go through them / welcome: title intro visitor host find | confirm: visit yes notme | done: badge next | notfound: missing retry desk / 4 ways between screens / the app on welcome / 4 stills';
+            const deskShown = await page.waitFor(`document.getElementById('appName')?.value === 'Front desk' && ${deskCanvas} === ${JSON.stringify(deskOpened)} ? 'shown' : null`, 10000)
+                && await page.run(deskCanvas);
+            const firstScreen = await frameWaitFor(`(() => {
+                const screens = [...document.querySelectorAll('[data-screen]')];
+                return screens.length === 4 ? screens.map(screen => screen.id + (screen.hidden ? '' : '*')).join(' ') : null;
+            })()`);
+            check("Apps: Front desk, under Examples, has four screens, each a card on the canvas in the order people go through them, with an arrow for each way between them, and runs on the first",
+                deskShown === deskOpened && firstScreen === 'welcome* confirm done notfound', `${deskShown || await page.run(deskCanvas)}; ${firstScreen}`);
+            const deskLooks = await page.run(`[
+                [...document.querySelectorAll('app-canvas [data-card-bar]')].map(bar => bar.querySelector('.app-screen-name').textContent + (bar.querySelector('.icon-monitor') ? '' : ' (no monitor)') + ' ' + (bar.querySelector('.app-screen-opens, .app-screen-kind')?.textContent || '')).join(', '),
+                ...[...document.querySelectorAll('app-canvas [data-node]')].map(node => node.querySelector('.app-node-title').textContent + ': ' + [...node.querySelectorAll('[data-out]')].map(row => [...row.querySelector('.app-node-where').childNodes]
+                    .map(part => (part.nodeType === Node.ELEMENT_NODE && part.matches('.app-node-screen') && part.querySelector('.icon-monitor') ? '▭' : '') + part.textContent).join('')).join(' / ')),
+            ].join(' | ')`);
+            check("Apps: each of Front desk's cards says it's a screen (the first that it opens there), and each tool's outputs say where they go, a screen by its name with a screen's icon",
+                deskLooks === 'Welcome Opens here, Confirm Screen, Checked in Screen, Not found Screen | find_visit: — / → visit, ▭Confirm / → missing, ▭Not found | check_in: — / → badge, ▭Checked in / → visit | call_front_desk: — / → missing / → missing',
+                deskLooks);
+
+            // Picking a card picks its screen and shows the app there; a button that goes to a
+            // screen has an arrow into its card.
+            await page.run(`document.querySelector('app-canvas [data-card-bar="confirm"]').click()`);
+            const confirmShown = await frameWaitFor(`!document.getElementById('confirm').hidden && document.getElementById('welcome').hidden ? 'confirm' : null`);
+            const confirmPicked = await page.waitFor(`(() => {
+                const title = document.querySelector('app-inspector .app-inspector-title')?.textContent;
+                const ways = [...document.querySelectorAll('app-inspector .app-connections')].at(-1)?.textContent.replace(/\\s+/g, ' ').trim();
+                return ${player}.dataset.on === 'confirm' && document.querySelector('app-canvas [data-go-wire="notme"]') && title === 'confirm' ? ['the app on confirm', ways].join(' / ') : null;
+            })()`, 5000);
+            check("Apps: picking a screen's card picks it and shows the app there, the Inspector says how people get there, and a button that goes to a screen has an arrow into its card",
+                confirmShown === 'confirm' && confirmPicked === 'the app on confirm / ← When find_visit works', `${confirmShown}; ${confirmPicked}`);
+
+            // Dragging a button to a screen's ● makes it go there; its menu in the Inspector changes it.
+            await page.waitFor(`!!${port('el:next')}`, 5000);
+            await drag('el:next', 'el:confirm');
+            const goneTo = await page.waitFor(`document.querySelector('app-canvas [data-go-wire="next"]') ? document.querySelector('app-canvas [data-canvas-hint]').textContent : null`, 5000);
+            await page.run(`(() => {
+                const go = document.querySelector('app-inspector [data-inspect-prop="go"]');
+                go.value = 'start';
+                go.dispatchEvent(new Event('input', { bubbles: true }));
+            })()`);
+            const startsOver = await page.waitFor(`!document.querySelector('app-canvas [data-go-wire="next"]') && document.querySelector('app-canvas [data-gutter-row="next"] .app-gutter-label')?.textContent === 'next ⟲' ? 'next ⟲' : null`, 5000);
+            check("Apps: dragging a button to a screen's ● makes it go there, and its When clicked, goes to menu puts it back",
+                goneTo === "Connected: next goes to Confirm (confirm) when it's clicked." && startsOver === 'next ⟲', `${goneTo}; ${startsOver}`);
+
+            // The Library adds a screen as a card right of the others, and shows the app there;
+            // what's added then goes on it.
+            await fromLibrary('[data-library-item="component"][data-type="screen"]');
+            const screenAdded = await page.waitFor(`(() => {
+                const at = ${cardsAt};
+                const others = Object.entries(at).filter(([id]) => id !== 'screen5');
+                return at.screen5 && others.length === 4 && others.every(([, card]) => card.x < at.screen5.x) && ${player}.dataset.on === 'screen5'
+                    ? 'screen5, right of the others: ' + document.querySelector('app-canvas [data-canvas-hint]').textContent : null;
+            })()`, 5000);
+            const emptyScreen = await frameWaitFor(`document.getElementById('screen5') && !document.getElementById('screen5').hidden ? document.getElementById('screen5').children.length + ' on it' : null`);
+            await fromLibrary('[data-library-item="component"][data-type="button"]');
+            const onIt = await frameWaitFor(`document.querySelector('#screen5 > button')?.id || null`);
+            await page.run(`document.querySelector('app-canvas [data-card-bar="screen5"]').click()`);
+            await page.waitFor(`document.querySelector('app-inspector .app-inspector-title')?.textContent === 'screen5'`, 5000);
+            const screenContents = await page.run(`document.querySelector('app-inspector .app-connections')?.textContent.replace(/\\s+/g, ' ').trim()`);
+            const remove = `document.querySelector('app-inspector [data-remove-component]')`;
+            await page.run(`${remove}.click()`);
+            const confirming = await page.run(`${remove}.textContent`);
+            await page.run(`${remove}.click()`);
+            const screensLeft = await page.waitFor(`!document.querySelector('app-canvas [data-gutter-row="button"]') && Object.keys(${cardsAt}).length === 4 ? Object.keys(${cardsAt}).join(' ') : null`, 5000);
+            check('Apps: the Library adds a screen as a card right of the others and shows the app there, a component added then goes on it, and deleting the screen, on a second click, takes that along',
+                screenAdded === "screen5, right of the others: Added screen5. Add components to it from the Library, and wire a button or a tool's Answer to its ● to go there."
+                    && emptyScreen === '0 on it' && onIt === 'button' && screenContents === 'Button button: Button' && confirming === 'Click again to confirm' && screensLeft === 'welcome confirm done notfound',
+                `${screenAdded}; ${emptyScreen}; ${onIt}; ${screenContents}; ${confirming}; ${screensLeft}`);
+
+            // A card moves by its title and stays where it's put, with the others where they were;
+            // Tidy up puts the screens back in order. The zoom and the scroll stay for the app too.
+            const storedCards = `new Promise((resolve, reject) => {
+                const open = indexedDB.open('mcp_apps');
+                open.onerror = () => reject(open.error);
+                open.onsuccess = () => {
+                    const all = open.result.transaction('apps').objectStore('apps').getAll();
+                    all.onsuccess = () => {
+                        const desk = all.result.find(app => app.id === localStorage.getItem('appsShown'));
+                        resolve(desk ? JSON.stringify(Object.fromEntries(desk.screen.components.filter(component => component.type === 'screen').map(screen => [screen.id, screen.position || null]))) : null);
+                    };
+                };
+            })`;
+            const shownBefore = JSON.parse(await page.run(`JSON.stringify(${cardsAt})`));
+            const zoom = await page.run(`parseFloat(document.querySelector('app-canvas [data-zoom-reset]').textContent) / 100`);
+            const bar = JSON.parse(await page.run(`(() => {
+                const bar = document.querySelector('app-canvas [data-card-bar="confirm"]');
+                bar.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = bar.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+            })()`));
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y });
+            await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bar.x, y: bar.y, button: 'left', buttons: 1, clickCount: 1 });
+            for (let step = 1; step <= 6; step++) await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x + 10 * step, y: bar.y + 15 * step, button: 'left', buttons: 1 });
+            await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bar.x + 60, y: bar.y + 90, button: 'left', buttons: 0, clickCount: 1 });
+            const kept = await page.waitFor(`${storedCards}.then(text => {
+                const kept = JSON.parse(text || '{}');
+                return kept.confirm && kept.welcome ? text : null;
+            })`, 5000);
+            const keptCards = JSON.parse(kept || '{}');
+            const movedRight = keptCards.confirm && Math.abs(keptCards.confirm.x - shownBefore.confirm.x - 60 / zoom) <= 2 && Math.abs(keptCards.confirm.y - shownBefore.confirm.y - 90 / zoom) <= 2;
+            const othersStayed = ['welcome', 'done', 'notfound'].every(id => keptCards[id]?.x === shownBefore[id].x && keptCards[id]?.y === shownBefore[id].y);
+            await page.run(`document.querySelector('app-canvas [data-tidy]').click()`);
+            const tidied = await page.waitFor(`${storedCards}.then(text => {
+                const kept = JSON.parse(text || '{}');
+                return kept.confirm && kept.confirm.x === kept.notfound.x && kept.confirm.y < kept.notfound.y && kept.welcome.x < kept.confirm.x ? 'back in order' : null;
+            })`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-zoom-step="-1"]').click()`);
+            const zoomKept = await page.waitFor(`(() => {
+                const shown = document.querySelector('app-canvas [data-zoom-reset]').textContent;
+                const view = JSON.parse(localStorage.getItem('appsCanvasViews') || '{}')[localStorage.getItem('appsShown')];
+                return view && Math.round(view.zoom * 100) + '%' === shown && parseFloat(shown) / 100 < ${zoom} ? 'zoomed out to ' + shown + ', and kept' : null;
+            })()`, 5000);
+            check('Apps: a card moves by its title and stays where it\'s put with the others where they were, Tidy up puts the screens back in order, and the zoom stays for the app',
+                movedRight && othersStayed && tidied === 'back in order' && !!zoomKept, `${kept}; ${tidied}; ${zoomKept}`);
+
+            // In Run, a click on a card the app isn't on takes it there, and the app moves to the card
+            // of the screen it goes to.
+            await page.run(`document.querySelector('app-canvas [data-card-bar="done"]').click()`);
+            await page.waitFor(`${player}.dataset.on === 'done'`, 5000);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            // Picking a card may scroll the canvas to it, smoothly: the click waits for that to end.
+            const scrolled = `(() => { const scroller = document.querySelector('app-canvas [data-canvas-scroll]'); return scroller.scrollLeft + ',' + scroller.scrollTop; })()`;
+            for (let last = null, tries = 0; tries < 20; tries++) {
+                await sleep(150);
+                const now = await page.run(scrolled);
+                if (now === last) break;
+                last = now;
+            }
+            const welcomeBody = JSON.parse(await page.run(`(() => {
+                const body = document.querySelector('app-canvas [data-card="welcome"] .app-screen-body');
+                body.scrollIntoView({ block: 'center', inline: 'center' });
+                const box = body.getBoundingClientRect();
+                return JSON.stringify({ x: box.left + box.width / 2, y: box.top + Math.min(40, box.height / 2) });
+            })()`));
+            for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+                await page.send('Input.dispatchMouseEvent', { type, x: welcomeBody.x, y: welcomeBody.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+            }
+            const broughtBack = await page.waitFor(`${player}.dataset.on === 'welcome' ? 'the app on welcome' : null`, 5000);
+            await frameWaitFor(`!document.getElementById('welcome').hidden && !document.getElementById('find').disabled`);
+            await frameRun(`(() => {
+                document.getElementById('visitor').value = 'ada';
+                document.getElementById('find').click();
+                return true;
+            })()`);
+            const followed = await page.waitFor(`${player}.dataset.on === 'confirm' && document.querySelector('app-canvas [data-card="confirm"]').hasAttribute('data-live') ? 'the app on confirm' : null`, 10000);
+            const visitShown = await frameWaitFor(`!document.getElementById('confirm').hidden ? document.getElementById('visit').textContent.split('\\n')[0] : null`);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            check('Apps: in Run, a click on another screen\'s card takes the app there, and when the app goes to another screen, it moves to that screen\'s card',
+                broughtBack === 'the app on welcome' && followed === 'the app on confirm' && visitShown === 'Ada Lovelace, Analytical Engines', `${broughtBack}; ${followed}; ${visitShown}`);
+
+            // The Outline lists each screen with what's on it set in under it.
+            await page.run(`document.querySelector('app-header [data-app-view-choice="outline"]').click()`);
+            const outlined = await page.waitFor(`(() => {
+                const rows = [...document.querySelectorAll('app-screen .app-component')];
+                const goes = document.querySelector('app-screen [data-component="notme"] [data-prop="go"]');
+                if (!rows.length || !goes) return null;
+                return [rows.filter(row => row.classList.contains('app-component-screen')).map(row => row.dataset.component).join(' '),
+                    rows.filter(row => row.classList.contains('app-component-on-screen')).length + ' set in', goes.selectedOptions[0]?.textContent].join(' / ');
+            })()`, 5000);
+            await page.run(`document.querySelector('app-header [data-app-view-choice="canvas"]').click()`);
+            check("Apps: the Outline lists each screen with what's on it set in under it, and a button's menu of where it goes",
+                outlined === 'welcome confirm done notfound / 12 set in / The “Welcome” screen', outlined);
+
+            // In Preview, at a tablet's width, as a visitor uses it.
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            await page.run(`document.querySelector('app-preview [data-device="tablet"]').click()`);
+            const showing = `[...document.querySelectorAll('[data-screen]')].find(screen => !screen.hidden)?.id`;
+            const barScreen = `document.querySelector('app-preview [data-preview-screen]')?.textContent`;
+            const tap = id => frameRun(`(document.getElementById(${JSON.stringify(id)}).click(), true)`);
+            const findVisit = async name => {
+                await frameWaitFor(`document.readyState === 'complete' && ${showing} === 'welcome' && !document.getElementById('find').disabled`);
+                await frameRun(`(() => {
+                    document.getElementById('visitor').value = ${JSON.stringify(name)};
+                    document.getElementById('find').click();
+                    return true;
+                })()`);
+            };
+            await findVisit('ada');
+            const visit = await frameWaitFor(`${showing} === 'confirm' ? document.getElementById('visit').textContent : null`);
+            const onConfirm = await page.waitFor(`${barScreen} === 'Confirm' ? 'Confirm' : null`, 5000);
+            await tap('yes');
+            const badge = await frameWaitFor(`${showing} === 'done' ? document.getElementById('badge').textContent : null`);
+            const onDone = await page.waitFor(`${barScreen} === 'Checked in' ? 'Checked in' : null`, 5000);
+            const checkedIn = await page.waitFor(`${latestRun('check_in', 'app')}.then(run => run?.sentArgs?.visitor || null)`, 5000);
+            await frameRun(`(document.body.dataset.before = 'start over', true)`);
+            await tap('next');
+            const over = await frameWaitFor(`!document.body.dataset.before && ${showing} === 'welcome' ? 'Welcome, name ' + (document.getElementById('visitor').value || 'empty') : null`);
+            check('Apps: in Preview, Front desk finds the visit and goes to Confirm with it, Yes checks you in and goes to Checked in, and Done starts over',
+                visit === 'Ada Lovelace, Analytical Engines\nHere to see Grace Hopper at 10:00, in Babbage, 3rd floor' && onConfirm === 'Confirm'
+                    && /^Welcome, Ada\. Your badge is V-\d+\. Grace Hopper knows you're here and will meet you in the lobby, then take you to Babbage, 3rd floor\.$/.test(badge || '')
+                    && onDone === 'Checked in' && checkedIn === 'ada' && over === 'Welcome, name empty',
+                `${JSON.stringify(visit)}; ${onConfirm}; ${badge}; ${onDone}; ${checkedIn}; ${over}`);
+            await findVisit('Bob');
+            const notFound = await frameWaitFor(`${showing} === 'notfound' ? document.getElementById('missing').textContent : null`);
+            await tap('desk');
+            const helped = await frameWaitFor(`/on the way/.test(document.getElementById('missing').textContent) ? document.getElementById('missing').textContent : null`);
+            await tap('retry');
+            const retried = await frameWaitFor(`${showing} === 'welcome' ? 'Welcome, name ' + document.getElementById('visitor').value : null`);
+            await findVisit('Ada');
+            await frameWaitFor(`${showing} === 'confirm'`);
+            await tap('notme');
+            const notMe = await frameWaitFor(`${showing} === 'welcome' ? 'Welcome' : null`);
+            check("Apps: a visit it can't find goes to Not found with why, where the front desk can be called; Try again goes back with the name still typed, and Not me goes to Welcome",
+                notFound === "There's no visit today for “Bob”. Check the spelling, or call the front desk and someone will come and help."
+                    && helped === 'Someone from the front desk is on the way, Bob. Please take a seat.' && retried === 'Welcome, name Bob' && notMe === 'Welcome',
+                `${notFound}; ${helped}; ${retried}; ${notMe}`);
+            await page.run(`document.querySelector('app-preview [data-device="desktop"]').click()`);
+            await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
+            await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
+
+            // Share: an embed of the app is an iframe of the client at its address, in its embed
+            // mode. The address is this page's unless set, which the dialog checks answers.
+            await page.run(`document.getElementById('shareAppBtn').click()`);
+            const shareShown = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog?.querySelector('[data-address-note]')?.textContent || '';
+                const code = dialog?.querySelector('[data-embed-code]')?.value || '';
+                return dialog?.open && code && !note.startsWith('Checking')
+                    ? [dialog.querySelector('h2').textContent, code.replace(/#run=[\\w-]+/, '#run=…'), dialog.querySelector('[data-client-address]').value, note].join(' | ') : null;
+            })()`, 10000);
+            check("Apps: Share offers the app's embed code, an iframe of the client at its address in its embed mode; the address is this page's, which answers, and is on this computer",
+                shareShown === `Share Front desk | <iframe src="${HOST}:${PORTS.app}/?embed#run=…" title="Front desk" width="100%" height="640" style="border: 0"></iframe> | ${HOST}:${PORTS.app}/ | MCP Browser Client answers there. That address is on this computer, so what you share runs only here; to share it, use one others reach, such as the public client.`,
+                shareShown);
+
+            // embed.html, opened as a file, runs the app in the client in an iframe: in its embed
+            // mode, with storage of its own (none of the builder's servers), and a way to open it
+            // on its own.
+            const embedDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-embed-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: embedDownloads });
+            await page.run(`document.querySelector('apps-share-dialog [data-download-embed]').click()`);
+            let embedFile;
+            for (let i = 0; i < 50 && !embedFile; i++) {
+                embedFile = readdirSync(embedDownloads).find(name => name.endsWith('.html'));
+                if (!embedFile) await sleep(100);
+            }
+            await page.send('Target.createTarget', { url: `file://${join(embedDownloads, embedFile || 'missing.html')}` });
+            const embedded = await openPage(target => target.url.startsWith(`${HOST}:${PORTS.app}/?embed${RUN_HASH}`), { type: 'iframe' });
+            const embedShown = await embedded.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!document.body.classList.contains('embedded') || !preview?.querySelector('iframe') || !Object.keys(appShell.servers).length) return null;
+                const own = preview.querySelector('[data-launch-actions] a');
+                const status = preview.querySelector('[data-preview-status]')?.textContent;
+                if (!own || !status) return null;
+                return [document.title, own.textContent.trim(), own.getAttribute('href').replace(/#run=[\\w-]+/, '#run=…'), own.target, Object.keys(appShell.servers).join(' '), status].join(' | ');
+            })()`, 20000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('visitor')`, 10000, { inPage: embedded });
+            await frameRun(`(() => {
+                document.getElementById('visitor').value = 'ada';
+                document.getElementById('find').click();
+                return true;
+            })()`, { inPage: embedded });
+            const embedFound = await frameWaitFor(`(() => { const visit = document.getElementById('visit'); return visit?.offsetParent ? visit.textContent.split('\\n')[0] : null; })()`, 10000, { inPage: embedded });
+            embedded.close();
+            await closeTab(await openPage(target => target.url.startsWith('file://')));
+            await page.send('Page.bringToFront');
+            check("Apps: embed.html, opened as a file, runs the app in the client in its embed mode, with storage of its own (whose History it doesn't point to) and a link to open it on its own",
+                embedFile === 'front-desk-embed.html'
+                    && embedShown === `Front desk | Open on its own | ${HOST}:${PORTS.app}/#run=… | _blank | https://frontdesk.demo.invalid/mcp | Its calls are real.`
+                    && embedFound === 'Ada Lovelace, Analytical Engines',
+                `${embedFile}; ${embedShown}; ${embedFound}`);
+
+            // Another client address is the one embeds and links use (normalized: http for one on
+            // this computer, the folder of its page); this page's sets it back.
+            await page.run(`navigator.clipboard.writeText = text => { window.copiedLink = text; return Promise.resolve(); }`);
+            await page.run(`(() => {
+                const field = document.querySelector('apps-share-dialog [data-client-address]');
+                field.value = 'localhost:${PORTS.app}/index.html';
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const otherAddress = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog.querySelector('[data-address-note]').textContent;
+                return note.startsWith('Checking') ? null : [dialog.querySelector('[data-client-address]').value, dialog.querySelector('[data-embed-code]').value.match(/src="([^#]+)#/)?.[1], note.split('.')[0]].join(' | ');
+            })()`, 10000);
+            await page.run(`document.querySelector('apps-share-dialog [data-copy-link]').click()`);
+            const linkThere = await page.waitFor(`window.copiedLink?.startsWith('http://localhost:${PORTS.app}/${RUN_HASH}') ? 'http://localhost:${PORTS.app}/${RUN_HASH}…' : null`, 5000);
+            // The public client from before it ran apps from links and embeds (its page, answered
+            // here, without the marker that says it does) is one they won't run at, as the note says.
+            const pageBefore = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8').replace(/\s*<meta name="mcp-browser-client"[^>]*>/, '');
+            await page.send('Fetch.enable', { patterns: [{ urlPattern: `${APP_URL}index.html*` }] });
+            page.on('Fetch.requestPaused', ({ requestId }) => page.send('Fetch.fulfillRequest', {
+                requestId, responseCode: 200, body: Buffer.from(pageBefore).toString('base64'),
+                responseHeaders: [{ name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Content-Type', value: 'text/html' }],
+            }));
+            await page.run(`document.querySelector('apps-share-dialog [data-use-address="${APP_URL}"]').click()`);
+            const publicBefore = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog.querySelector('[data-address-note]').textContent;
+                return dialog.querySelector('[data-client-address]').value !== '${APP_URL}' || note.startsWith('Checking') ? null
+                    : [dialog.querySelector('[data-embed-code]').value.match(/src="([^#]+)#/)?.[1], note].join(' | ');
+            })()`, 10000);
+            await page.send('Fetch.disable');
+            await page.run(`document.querySelector('apps-share-dialog [data-use-address="${HOST}:${PORTS.app}/"]').click()`);
+            const setBack = await page.waitFor(`document.querySelector('apps-share-dialog [data-client-address]').value === '${HOST}:${PORTS.app}/' ? 'kept ' + localStorage.getItem('appsClientAddress') : null`, 5000);
+            await page.run(`document.querySelector('apps-share-dialog [data-close]').click()`);
+            rmSync(embedDownloads, { recursive: true, force: true });
+            check("Apps: the client's address, set to another, is the one embeds and links use; a client from before they ran there says so; this page's sets it back",
+                otherAddress === `http://localhost:${PORTS.app}/ | http://localhost:${PORTS.app}/?embed | Couldn't check it: this page can't reach it, or isn't let read it`
+                    && linkThere === `http://localhost:${PORTS.app}/${RUN_HASH}…`
+                    && publicBefore === `${APP_URL}?embed | Embeds and links won't run there: the client there is from before it ran apps from links and embeds, so its site needs this version first.`
+                    && setBack === 'kept null',
+                `${otherAddress}; ${linkThere}; ${publicBefore}; ${setBack}`);
+
+            // Front desk came with its demo server, built in. The mock server has the same tools,
+            // so the Inspector's Servers it calls offers it in its place, and not the servers without
+            // them; choosing it moves every rule, and the next check-in goes there.
+            const deskRun = await page.run(`${latestRun('check_in', 'app')}.then(run => run?.serverUrl || null)`);
+            await page.run(`document.querySelector('app-canvas').apps.select(null)`);
+            const offered = await page.waitFor(`(() => {
+                const use = document.querySelector('app-inspector [data-server-use]');
+                const select = use?.querySelector('[data-call-instead]');
+                if (!select) return null;
+                const options = [...select.options].slice(1);
+                return JSON.stringify({ calls: use.dataset.serverUse, tools: use.querySelector('.app-server-use-tools').textContent, badge: use.querySelector('.badge')?.textContent,
+                    can: options.filter(option => !option.disabled).map(option => option.value), cannot: options.filter(option => option.disabled).map(option => option.textContent) });
+            })()`, 5000);
+            const { calls, tools: called, badge: builtInBadge, can = [], cannot = [] } = JSON.parse(offered || '{}');
+            await page.run(`(() => {
+                const select = document.querySelector('app-inspector [data-call-instead]');
+                select.value = ${JSON.stringify(modernUrl)};
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const moved = await page.waitFor(`(() => {
+                const urls = [...new Set(document.querySelector('app-canvas').apps.app.flow.map(rule => rule.call.serverUrl))];
+                return urls.join(' ') === ${JSON.stringify(modernUrl)} ? document.querySelector('app-inspector [data-server-use]')?.dataset.serverUse : null;
+            })()`, 5000);
+            await page.run(`document.getElementById('previewAppBtn').click()`);
+            await page.waitFor(`!document.querySelector('app-preview').hidden && !!document.querySelector('app-preview iframe')`, 5000);
+            await findVisit('ada');
+            await frameWaitFor(`${showing} === 'confirm'`);
+            await tap('yes');
+            await frameWaitFor(`${showing} === 'done'`);
+            const mockRun = await page.waitFor(`${latestRun('check_in', 'app')}.then(run => run?.serverUrl === ${JSON.stringify(modernUrl)} ? run.serverUrl : null)`, 5000);
+            await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
+            await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
+            check("Apps: Front desk runs on its demo server, built in, and can call the mock server instead, which has the same tools; servers without them say what's missing",
+                deskRun === deskUrl && calls === deskUrl && called === 'find_visit, check_in, call_front_desk' && builtInBadge === 'Demo, built in'
+                    && can.includes(modernUrl) && !can.includes(`${HOST}:${PORTS.legacy}/`) && cannot.some(text => text.endsWith(': it has no find_visit'))
+                    && moved === modernUrl && mockRun === modernUrl,
+                `${deskRun}; ${offered}; ${moved}; ${mockRun}`);
+
+            // Each of Your apps has a ⋯ menu, always there on the app shown: its Delete takes an app
+            // that isn't shown, on a second click, and what this browser kept for it, and the
+            // shown one stays.
+            const rowOf = name => `[...document.querySelectorAll('#appList .apps-row')].find(row => row.querySelector('.wb-row-label').textContent === ${JSON.stringify(name)})`;
+            const goneId = await page.run(`${rowOf('New app')}.querySelector('[data-show-app]').dataset.showApp`);
+            const rowsBeforeDelete = await page.run(`document.querySelectorAll('#appList .apps-row').length`);
+            await page.run(`(() => {
+                const views = JSON.parse(localStorage.getItem('appsCanvasViews') || '{}');
+                localStorage.setItem('appsCanvasViews', JSON.stringify({ ...views, [${JSON.stringify(goneId)}]: { zoom: 0.5, left: 0, top: 0 } }));
+                document.querySelector('app-canvas').apps.setRunOnOpen('no', ${JSON.stringify(goneId)});
+            })()`);
+            const shownMenu = await page.run(`getComputedStyle(document.querySelector('#appList .apps-row:has([aria-current="true"]) .apps-row-menu')).opacity`);
+            await page.run(`(() => {
+                const row = ${rowOf('New app')};
+                row.querySelector('details').open = true;
+                row.querySelector('[data-delete-app]').click();
+            })()`);
+            const confirmingRow = await page.run(`${rowOf('New app')}.querySelector('[data-delete-app]').textContent + ', menu ' + (${rowOf('New app')}.querySelector('details').open ? 'open' : 'closed')`);
+            await page.run(`${rowOf('New app')}.querySelector('[data-delete-app]').click()`);
+            const afterRowDelete = await page.waitFor(`!${rowOf('New app')} ? [document.getElementById('appName').value + ' shown', document.querySelectorAll('#appList .apps-row').length + ' apps',
+                JSON.parse(localStorage.getItem('appsCanvasViews') || '{}')[${JSON.stringify(goneId)}] ? 'its view kept' : 'its view forgotten',
+                JSON.parse(localStorage.getItem('appsRunOnOpen') || '{}')[${JSON.stringify(goneId)}] ? 'its answer kept' : 'its answer forgotten'].join(', ') : null`, 5000);
+            check("Apps: each of Your apps has a ⋯ menu, always there on the one shown, whose Delete takes another app on a second click, with what was kept for it",
+                shownMenu === '1' && confirmingRow === 'Click again to confirm, menu open' && afterRowDelete === `Front desk shown, ${rowsBeforeDelete - 1} apps, its view forgotten, its answer forgotten`,
+                `${shownMenu}; ${confirmingRow}; ${afterRowDelete}`);
+            await page.send('Emulation.clearDeviceMetricsOverride');
+        }
         await page.run(showWorkbench);
 
         const trace = await page.run(`${entries}.some(e => e.source === ${JSON.stringify(CLIENT.logSource)} && e.level === 'debug' && e.message.startsWith('→ server/discover'))`);
@@ -966,7 +2446,9 @@ async function main() {
         await runSaved('Greeting');
         const greetingAgain = await runSaved('Greeting');
         check('Run again: a saved request whose result is the same says so', /Same as the last run/.test(greetingAgain || '') && !!greetingAgain?.includes('Echo: hi world'), greetingAgain);
-        const verdictChip = await page.waitFor(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent`, 5000);
+        // The rail redraws after the run, so the first run's badge can still be there for a moment.
+        const verdictChip = await page.waitFor(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent === 'same' && 'same'`, 5000)
+            ?? await page.run(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent ?? null`);
         check('saved requests: the rail shows how the last run of each went', verdictChip === 'same', verdictChip);
 
         // Runtime's Library menu swaps the library in place, and results compare the same
@@ -1014,8 +2496,8 @@ async function main() {
             const rows = ${runRows};
             return rows.length ? [...new Set(rows.map(row => row.dataset.source))].sort().join(', ') : null;
         })()`, 5000);
-        check('history: every call is in the dock\'s Runs, the chat\'s and Run all\'s included',
-            ['chat', 'collection', 'workbench'].every(source => (historySources || '').includes(source)), historySources);
+        check("history: every call is in the dock's Runs, the apps', their models' tool calls and Run all's included",
+            ['app', 'collection', 'reply', 'workbench'].every(source => (historySources || '').includes(source)), historySources);
         const recent = await page.run(`document.querySelectorAll('#recentRuns [data-open-run]').length`);
         check('history: the rail lists the most recent runs', recent === 6, `${recent} runs`);
         await page.run(`${runRows}[0].click()`);
@@ -1116,32 +2598,24 @@ async function main() {
         const leaked = await page.run(`JSON.stringify(${entries}).includes(${JSON.stringify(TOKEN)})`);
         check('logs: the bearer token never appears', !leaked);
 
-        // A conversation field gets the instructions, the server list and the conversation so far:
-        // the model is told about every server and its tools, but never their tokens.
-        const modelRunId = await page.run(`new Promise(resolve => {
-            const conversation = 'smoke-tool-choice';
-            const listen = event => {
-                if (event.data?.type !== 'tool_result' || event.data.conversationId !== conversation) return;
-                navigator.serviceWorker.removeEventListener('message', listen);
-                resolve(event.data.run?.id ?? null);
-            };
-            navigator.serviceWorker.addEventListener('message', listen);
-            const worker = navigator.serviceWorker.controller;
-            worker.postMessage({ type: 'set_chat_model', model: { serverUrl: ${JSON.stringify(tokenUrl)}, toolName: 'echo', messageField: 'text', conversationField: 'history', args: {} } });
-            worker.postMessage({ type: 'chat_send', text: 'Which tools can you use?', conversationId: conversation });
-        })`);
-        const toldModel = modelRunId && await page.run(`new Promise((resolve, reject) => {
-            const open = indexedDB.open('mcp_sandbox');
-            open.onerror = () => reject(open.error);
-            open.onsuccess = () => {
-                const get = open.result.transaction('runs').objectStore('runs').get(${JSON.stringify(modelRunId)});
-                get.onsuccess = () => resolve(JSON.stringify(get.result?.sentArgs ?? null));
-            };
-        })`);
-        check('Chat app: the model is told about the servers and their tools, never their tokens',
+        // The Chat example's model is told about every server and its tools, the token server's
+        // too, but never a token.
+        await page.run(`(() => {
+            document.querySelector('[data-mode="apps"]').click();
+            [...document.querySelectorAll('apps-rail [data-show-app]')].find(row => row.querySelector('.wb-row-label').textContent === 'Chat').click();
+        })()`);
+        await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('message') && !document.getElementById('send').disabled`);
+        const askedBefore = await page.run(`${latestRun('chat', 'app')}.then(run => run?.id || 'none')`);
+        await frameRun(`(() => {
+            document.getElementById('message').value = 'Which tools can you use?';
+            document.getElementById('send').click();
+            return true;
+        })()`);
+        const toldModel = await page.waitFor(`${latestRun('chat', 'app')}.then(run => run && run.id !== ${JSON.stringify(askedBefore)} ? JSON.stringify(run.sentArgs) : null)`, 10000);
+        check("Apps: the Chat example's model is told about your servers and their tools, never their tokens",
             !!toldModel && toldModel.includes(tokenUrl) && toldModel.includes('echo_region') && !toldModel.includes(TOKEN),
-            modelRunId ? `${toldModel?.length} characters sent` : 'no answer');
-        await page.run('sendChatModelToWorker()');
+            toldModel ? `${toldModel.length} characters sent` : 'no call');
+        await page.run(showWorkbench);
 
         // Sign-in (OAuth), as with Glean: the 401's challenge is unreadable, so the client finds
         // the protected resource metadata at its well-known address.
@@ -1258,7 +2732,8 @@ async function main() {
         const unknown = await lookUp('someone@unknown.test', gleanError);
         check('Glean by email: a domain Glean doesn\'t know is reported', /doesn't know a deployment for unknown\.test/.test(unknown || ''), unknown);
         const blockedLookup = await lookUp('someone@blocked.test', gleanError);
-        check('Glean by email: a lookup the browser blocks falls back to pasting the URL', /Paste your MCP server URL/.test(blockedLookup || ''), blockedLookup);
+        check('Glean by email: a lookup the browser blocks falls back to pasting the endpoint, from Glean\'s settings',
+            /Paste your MCP endpoint instead, from Third party apps and MCP in Glean's settings\.$/.test(blockedLookup || ''), blockedLookup);
         const gleanUrl = `${HOST}:${PORTS.oauth}/mcp/default`;
         const foundAndSignedIn = await lookUp('someone@oauth-mock.test', `appShell.servers[${JSON.stringify(gleanUrl)}]?.status === 'connected'`);
         const filled = await page.run(`document.getElementById('gleanUrl').value + ' | ' + document.getElementById('gleanStatus').textContent`);

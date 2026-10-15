@@ -4,11 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP Browser Client</title>
+    <!-- What this client runs from its address, which Share looks for at a client address it's given. -->
+    <meta name="mcp-browser-client" content="links embeds">
     <script>
         (function () {
             var stored = localStorage.getItem('theme');
             var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
             document.documentElement.classList.toggle('dark-theme', dark);
+            // Opened as a file, the page can't run (see #fromFile).
+            document.documentElement.classList.toggle('from-file', location.protocol === 'file:');
         })();
     </script>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
@@ -16,8 +20,39 @@
     <link rel="stylesheet" href="./tokens.css">
     <link rel="stylesheet" href="./styles.css">
     <link rel="stylesheet" href="./workbench/workbench.css">
+    <link rel="stylesheet" href="./apps/apps.css">
 </head>
 <body>
+    <!-- Opened as a file, from a double-click, the client can't run: browsers start a service
+         worker, which is where it calls MCP servers and keeps sign-ins and runs, only at a web
+         address, and load its modules only from one. This says how to serve its folder, and for a
+         downloaded app (<meta name="mcp-app">), links to the client it came from. -->
+    <main class="from-file-notice" id="fromFile" hidden>
+        <h1 data-from-file-title>MCP Browser Client runs from a web address</h1>
+        <p>Opened as a file, it won't run: a browser starts its service worker, which calls MCP servers for it and keeps sign-ins and runs, only at a web address. Serve this folder and open its address. In the folder, run one of</p>
+        <pre><code>npx serve
+python3 -m http.server 8000</code></pre>
+        <p>and open the address it prints. Any static host serves the folder as it is, too: GitHub Pages, Netlify, an S3 bucket.</p>
+        <div data-from-file-run hidden>
+            <p>Or run this version now in MCP Browser Client at <span data-from-file-root></span>:</p>
+            <p><a class="from-file-run" data-from-file-link>Run <span data-from-file-name></span> there</a></p>
+        </div>
+    </main>
+    <script>
+        (function () {
+            if (location.protocol !== 'file:') return;
+            var notice = document.getElementById('fromFile');
+            var app = document.querySelector('meta[name="mcp-app"]');
+            notice.hidden = false;
+            if (!app) return;
+            notice.querySelector('[data-from-file-title]').textContent = app.dataset.name + ' runs from a web address';
+            if (!app.dataset.run) return;
+            notice.querySelector('[data-from-file-run]').hidden = false;
+            notice.querySelector('[data-from-file-name]').textContent = app.dataset.name;
+            notice.querySelector('[data-from-file-root]').textContent = app.dataset.root;
+            notice.querySelector('[data-from-file-link]').href = app.dataset.run;
+        })();
+    </script>
     <div class="wb-app">
         <header class="wb-topbar">
             <div class="app-title">
@@ -104,46 +139,32 @@
                 <wb-response id="responsePane" class="wb-area-response wb-pane" role="region" aria-label="Response"></wb-response>
                 <wb-contents id="contentsPane" class="wb-area-response wb-pane" role="region" aria-label="Contents" hidden></wb-contents>
             </div>
-            <section id="appsPage" class="wb-apps" aria-labelledby="appsTitle" hidden>
-                <header class="wb-apps-head">
-                    <h2 id="appsTitle">Chat</h2>
-                    <p class="text-secondary">The first app, an agent loop: the model is an MCP tool. Tick the field your message goes to, and a list field for the conversation, which also tells the model which tools your servers have. Tool calls in its reply run, and their results join the conversation.</p>
-                </header>
-                <div class="chat-card">
-                    <section class="chat-card-left panel" aria-label="Conversation">
-                        <div id="chatMessages" class="chat-messages"></div>
-                        <div class="chat-input-row">
-                            <input type="text" id="chatUserInput" placeholder="Type a message…" autocomplete="off" aria-label="Message" />
-                            <button id="chatSendBtn" type="button" class="btn-primary"><span class="icon icon-send" aria-hidden="true"></span>Send</button>
+            <section id="appsPage" class="wb-apps" aria-label="Apps" hidden>
+                <!-- public/apps/: the rail of examples and apps, and the builder for the ones you make;
+                     with no app to show, the examples to start from. -->
+                <apps-rail class="apps-rail" role="navigation" aria-label="Apps"></apps-rail>
+                <apps-splitter data-pane="rail"></apps-splitter>
+                <div class="apps-main">
+                    <apps-start id="appsStart" role="region" aria-label="Start an app" hidden></apps-start>
+                    <section id="appBuilder" class="app-builder" aria-label="App builder" hidden>
+                        <app-header></app-header>
+                        <app-open-ask hidden></app-open-ask>
+                        <!-- Canvas: the screen running, with its wires to tools; Outline: the same app as cards;
+                             Preview: the app as it is when it's launched, over the whole window. -->
+                        <div class="app-canvas-view" data-app-view="canvas">
+                            <app-canvas></app-canvas>
+                            <apps-splitter data-pane="inspector"></apps-splitter>
+                            <app-inspector role="region" aria-label="Inspector"></app-inspector>
                         </div>
-                        <div id="chatConversation" class="chat-conversation"></div>
+                        <div class="app-builder-body" data-app-view="outline" hidden>
+                            <div class="app-build">
+                                <app-screen></app-screen>
+                                <app-flow></app-flow>
+                            </div>
+                            <app-try></app-try>
+                        </div>
+                        <app-preview data-app-view="preview" role="dialog" aria-modal="true" aria-label="Preview" hidden></app-preview>
                     </section>
-                    <aside class="chat-card-right panel panel-muted" aria-label="Chat settings">
-                        <div class="chat-model-card">
-                            <div class="panel-title">Model</div>
-                            <p class="panel-subtitle">The tool that answers. Tick "Your message goes here" on the field that should get what you type.</p>
-                            <div class="chat-server-select-row">
-                                <label for="chatServerSelect">Server</label>
-                                <select id="chatServerSelect"></select>
-                            </div>
-                            <div class="chat-tool-select-row">
-                                <label for="chatToolSelect">Tool</label>
-                                <select id="chatToolSelect"></select>
-                            </div>
-                            <form id="chatToolConfigForm" class="chat-tool-config"></form>
-                        </div>
-                        <div class="chat-context">
-                            <div class="panel-header">
-                                <div class="panel-title">Instructions and context</div>
-                                <button id="addContextBtn" class="btn-icon btn-sm" title="Add context" aria-label="Add context">
-                                    <span class="icon icon-plus" aria-hidden="true"></span>
-                                </button>
-                            </div>
-                            <p class="panel-subtitle">What every conversation starts from: the built-in instructions, then any context you add.</p>
-                            <div id="contextList" class="context-list"></div>
-                            <div id="contextEditor" class="context-editor"></div>
-                        </div>
-                    </aside>
                 </div>
             </section>
         </main>
@@ -184,6 +205,8 @@
 
     <wb-sheet id="sheet" hidden></wb-sheet>
     <wb-palette id="palette" hidden></wb-palette>
+    <apps-add-dialog></apps-add-dialog>
+    <apps-share-dialog></apps-share-dialog>
     <p id="wbStatus" class="wb-status" role="status" hidden></p>
 
     <aside id="guide" class="guide-drawer" aria-labelledby="guideTitle" hidden>
@@ -199,16 +222,37 @@
             <h3>1. Pick a server</h3>
             <p class="guide-label">Glean, signed in with your work account</p>
             <div class="guide-glean">
-                <p>Enter your work email and the client asks Glean where your company's Glean is. Or paste your MCP server URL, from Glean's Your settings, then Third party apps and MCP, then the <em>Connect to your AI apps with Glean MCP</em> card.</p>
+                <p>Enter your work email, and the client asks Glean where your company's Glean is. Or paste your MCP endpoint, which Glean shows you.</p>
+                <label class="guide-field-label" for="gleanUrl">Work email or MCP endpoint</label>
                 <div class="guide-glean-row">
-                    <input type="text" id="gleanUrl" class="guide-input" placeholder="you@company.com or https://your-company-be.glean.com/mcp/default" spellcheck="false" autocomplete="email" aria-label="Work email or Glean MCP server URL">
+                    <input type="text" id="gleanUrl" class="guide-input" placeholder="you@company.com" spellcheck="false" autocomplete="email" aria-describedby="gleanUrlHint">
                     <button type="button" class="btn-sm" id="gleanAddBtn">Add and sign in</button>
                 </div>
+                <p id="gleanUrlHint" class="guide-note">An endpoint looks like <code class="guide-example">https://your-company-be.glean.com/mcp/default</code> To find yours, open <a id="gleanSettingsLink" class="guide-external" href="https://app.glean.com/settings/connected-apps" target="_blank" rel="noopener">Third party apps and MCP<span class="icon icon-external-link" aria-hidden="true"></span></a> in Glean's settings. On <em>Connect to your AI apps with Glean MCP</em>, pick the server (<em>Default Tools</em> is <code>mcp/default</code>) and copy its Endpoint.</p>
                 <p id="gleanStatus" class="guide-note" hidden></p>
                 <p id="gleanUrlError" class="guide-note text-error" hidden></p>
                 <p id="gleanOriginNote" class="guide-note" hidden>Glean answers only pages from origins on its allowlist. If this page's origin isn't on yours, connecting fails with a network (CORS) error. If your Glean allows <code>http://127.0.0.1:8888</code>, run <code>npm run start:glean</code> in a clone and open the client there; otherwise ask a Glean admin to add this origin.</p>
-                <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>.</p>
+                <p class="guide-note">Sign-in opens in a pop-up window. The tokens stay in this browser and go only to that server. Then try its search tool with query <code>onboarding</code>. The same settings page then lists this client under Connected apps, as Mcp Browser Client, with when its access expires; you can revoke it there.</p>
             </div>
+
+            <p class="guide-label">Built in: demo servers that run in this page</p>
+            <ul class="guide-servers">
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Front desk (demo)</strong> <span class="guide-meta">made-up visits</span>
+                        <p>Try <code>find_visit</code> with visitor <code>Ada</code>. The Front desk example in Apps comes with it.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://frontdesk.demo.invalid/mcp" data-alias="Front desk (demo)">Add and connect</button>
+                </li>
+                <li>
+                    <div class="guide-server-text">
+                        <strong>Demo model</strong> <span class="guide-meta">a stand-in</span>
+                        <p>Try <code>chat</code> with message <code>hello</code>. The Chat and Project pulse examples use it until you add Glean or another model.</p>
+                    </div>
+                    <button type="button" class="btn-sm" data-add-server="https://model.demo.invalid/mcp" data-alias="Demo model">Add and connect</button>
+                </li>
+            </ul>
+            <p class="guide-note">They answer from inside the client's service worker, so nothing is sent anywhere. An app can move from one to your own server that has the same tools.</p>
 
             <p class="guide-label">Public servers, nothing to install</p>
             <ul class="guide-servers">
@@ -259,7 +303,7 @@
         <section class="guide-section">
             <h3>2. Check the connection</h3>
             <p>The bar above the tools shows the server's status and the protocol it speaks: <code>2026-07-28 (modern)</code>, or a 2025 version marked <code>legacy</code> when the client fell back to the older handshake. Info has everything the server said about itself.</p>
-            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code> and <code>search_notes</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
+            <p>With the mock you should get <code>2026-07-28 (modern)</code> and the tools <code>echo</code>, <code>echo_region</code>, <code>count</code>, <code>ticket</code>, <code>search_notes</code>, <code>make_screen</code>, <code>chat</code>, <code>find_visit</code>, <code>check_in</code> and <code>call_front_desk</code>. It also offers <code>broken_header</code>, which is hidden on purpose; the tool list says why.</p>
         </section>
 
         <section class="guide-section">
@@ -269,13 +313,19 @@
         </section>
 
         <section class="guide-section">
-            <h3>4. Chat through a tool</h3>
-            <p>Open Apps in the top bar. Under Model, choose a server and tool and tick "Your message goes here" on a text field. Each message you send becomes that tool's input. With the mock's <code>echo</code>, every message comes back prefixed with "Echo:".</p>
-            <p>A model tool with a list field can run an agent loop: tick "The conversation goes here" on it, and the model also gets the instructions, your servers' tools and the conversation so far. Tool calls it writes in its reply run, and their results join the conversation.</p>
+            <h3>4. Chat with a model</h3>
+            <p>Open Apps in the top bar, choose Chat under Examples, then Add a copy. It makes an app like any other: a conversation, a message field and Send, wired to a model, which is an MCP tool: Glean's chat if you've added Glean, else the mock's <code>chat</code>. Each message goes with the conversation so far, and as it's sent, it joins the conversation.</p>
+            <p>The rule's Prompt, in the Inspector, adds its instructions and your servers' tools to each message. A tool call the model writes in its answer runs, and the result joins the conversation, which the model gets with your next message. With the mock, say <code>call echo with hello</code>.</p>
         </section>
 
         <section class="guide-section">
-            <h3>5. Read the log</h3>
+            <h3>5. Build an app</h3>
+            <p>In Apps, New app makes one to change: a screen with a text box, a button and an output, wired to a tool. It opens on the canvas, the screen running beside its tools: drag from a ● to another to wire them, from a button to a tool's Run and from the tool's Answer back to the screen. The label on a wire says what of the answer shows; pick it to change it in the Inspector. Choose Run to use the app, and What happened shows each step.</p>
+            <p>The Library adds components, tools, boxes and HTML parts. A box (a chart, a list, a number) says what goes in it, and the tool wired to it is asked for that, in the shape the box draws, so the layout writes the format of the answer: Project pulse, under Examples, starts one that asks Glean. A part is HTML a model writes or a tool returns; its buttons and fields get ●s too. In a call, <code>{{input}}</code> is what the element <code>input</code> holds; in what a rule shows, <code>{{text}}</code> is the text the tool returned. Launch runs the app on its own in a new tab, and Download saves it as a zip: <code>index.html</code> runs it, <code>app.dml</code> is the flow and <code>screen.html</code> the screen. With the mock as the model, Ask a model writes a ticket dashboard when you ask for one.</p>
+        </section>
+
+        <section class="guide-section">
+            <h3>6. Read the log</h3>
             <p>The dock at the bottom lists each connect, tool listing and call with its timing, and why the client chose the protocol it did. Trace has every HTTP request and response, and Runs every call. Copy or Download the log to share a problem.</p>
         </section>
 
@@ -295,9 +345,33 @@
     </aside>
 
     <script>
+        if (location.protocol === 'file:') throw new Error('MCP Browser Client runs from a web address, not a file: serve its folder (the page says how).');
+
         // The logs pop-out (?logs=1) only listens: registering the worker again from a second
         // window would restart it and drop every open tab's connections.
         const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
+
+        // ?app=<id> runs one of your apps on its own, #run=… one a link carries (apps/link.js),
+        // and a downloaded app's folder the one its index.html names, beside it (<meta
+        // name="mcp-app">), unless ?builder asks for the builder: the window is the app's screen,
+        // as in Preview, with nothing of the Workbench or the builder. The page still starts the
+        // worker and the Workbench's state, which the app uses.
+        // With ?embed, it's in another page's iframe (an app's embed code): its bar is slimmer.
+        const LAUNCH = (() => {
+            if (LOGS_ONLY) return null;
+            const params = new URLSearchParams(location.search);
+            const run = location.hash.startsWith('#run=') ? location.hash.slice('#run='.length) : '';
+            const id = params.get('app') || '';
+            if (run || id) return { run: run || null, id: run ? null : id, embed: params.has('embed') };
+            const file = document.querySelector('meta[name="mcp-app"]')?.content;
+            return file && !params.has('builder') ? { file } : null;
+        })();
+        if (LAUNCH) document.body.classList.add('launched');
+        if (LAUNCH?.embed) document.body.classList.add('embedded');
+        // A link to another app, pasted into this tab, only changes what follows #.
+        window.addEventListener('hashchange', () => {
+            if (location.hash.startsWith('#run=')) location.reload();
+        });
 
         // Which MCP client library the service worker runs, one of the Runtime menu's. ?client= or
         // the menu picks it. The page remembers it and tells the worker when the page starts and
@@ -330,30 +404,10 @@
             showClient();
         });
 
-        // The Chat app's settings under the names they had before its code was renamed: moved
-        // once, before anything reads them. (The worker moves stored conversations itself.)
-        (function moveOldChatSettings() {
-            const move = (storage, from, to, convert = value => value) => {
-                const value = storage.getItem(from);
-                if (value === null) return;
-                try {
-                    if (storage.getItem(to) === null) storage.setItem(to, convert(value));
-                } catch {
-                    // Unreadable, so there's nothing to keep.
-                }
-                storage.removeItem(from);
-            };
-            move(localStorage, 'lastEngramId', 'lastChatConversation');
-            move(sessionStorage, 'consoleChatEngramId', 'chatConversation');
-            move(localStorage, 'cbusTapConfig', 'chatModel', value => {
-                const { connectedStringArg = null, connectedArrayArg = null, ...model } = JSON.parse(value);
-                const preset = connectedStringArg && model.args?.[connectedStringArg];
-                if (typeof preset === 'string') model.args[connectedStringArg] = preset.replaceAll('{{cbus_message}}', '{{message}}');
-                return JSON.stringify({ ...model, messageField: connectedStringArg, conversationField: connectedArrayArg });
-            });
-            move(localStorage, 'mcp_module_metadata', 'chatContext', value => JSON.stringify(JSON.parse(value).memory_events || []));
-            sessionStorage.removeItem('mcpEngramId');
-        })();
+        // The settings of the Chat app the Chat example replaced, under each name they had (its
+        // first version's too). The worker deletes its stored conversations.
+        for (const key of ['chatModel', 'chatContext', 'lastChatConversation', 'cbusTapConfig', 'mcp_module_metadata', 'lastEngramId']) localStorage.removeItem(key);
+        for (const key of ['chatConversation', 'consoleChatEngramId', 'mcpEngramId']) sessionStorage.removeItem(key);
 
         // The dock's Log: entries from this page, the service worker and the MCP client, kept in
         // a capped buffer and filtered by level and text.
@@ -605,6 +659,7 @@
         //   run      a call the Workbench shows is under way, done, or never sent
         //            { phase: 'pending' | 'done' | 'not-sent', runId, toolName, message, error }
         //   recorded the worker saved a run in history           (the run's summary)
+        //   mode     the page switched to the Workbench or Apps  { mode }
         class AppShell {
             constructor() {
                 this.events = new EventTarget();
@@ -1147,31 +1202,21 @@
                             this.saveServers();
                         }
                         this.emit('tools', { url: message.url });
-                        renderModelServerSelect();
-                        renderModelToolSelect();
                         break;
                     }
                     case 'tool_result': {
+                        // The answer to a call this page made (runTool), by its run id.
                         const pending = message.run?.id ? this.pendingRuns.get(message.run.id) : null;
                         if (pending) {
                             clearTimeout(pending.timer);
                             this.pendingRuns.delete(message.run.id);
                             if (pending.show && this.shownRunId === message.run.id) this.emit('run', { phase: 'done', runId: message.run.id, message });
                             pending.resolve(message);
-                        } else if (!message.run && (!message.conversationId || message.conversationId !== chatConversationId)) {
-                            // Calls the worker turned away before they ran, such as tool calls from
-                            // replies over the rate limit. Chat replies show in the chat instead.
-                            this.emit('run', { phase: 'done', message });
                         }
                         return;
                     }
                     case 'run_recorded':
                         this.emit('recorded', message.run);
-                        break;
-                    case 'chat_instructions':
-                    case 'chat_history':
-                    case 'chat_message':
-                        // The Chat app's own listener handles these.
                         break;
                     default:
                         console.warn('Unknown message type:', message.type);
@@ -1206,12 +1251,10 @@
                 return entry;
             }
 
-            // A worker that just started (first visit, restart after idling, or a new version) has
-            // none of the page's state: the server list with its tokens, and the chat's tool target.
+            // A worker that just started (first visit, restart after idling, or a new version) keeps
+            // nothing of the page's: each message brings what it needs, a server's token too. It
+            // tells the page again whether each server is signed in.
             syncWorker() {
-                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
-                sendChatModelToWorker();
-                sendChatContextToWorker();
                 for (const url of Object.keys(this.servers)) {
                     this.postToWorkerQuietly({ type: 'auth-status', url });
                 }
@@ -1461,6 +1504,17 @@
                 }
             }
 
+            // A text input drops line breaks, so text that has them goes in a box of several lines
+            // instead. Returns the control that holds the text.
+            keepLines(input, text) {
+                if (input.tagName !== 'INPUT' || !text.includes('\n')) return input;
+                const box = document.createElement('textarea');
+                for (const { name, value } of [...input.attributes]) if (name !== 'type') box.setAttribute(name, value);
+                box.rows = Math.min(8, text.split('\n').length);
+                input.replaceWith(box);
+                return box;
+            }
+
             // A labelled field for one schema property; objects nest their properties' fields. The
             // card's data-field is the field's path, as its inputs' names use it.
             renderInputField(key, prop, isRequired, path = key) {
@@ -1485,7 +1539,9 @@
                         const item = document.createElement('div');
                         item.className = 'array-item';
                         item.innerHTML = `${this.renderValueInput(prop.items, `${path}[]`, false)}<button type="button" class="btn-icon btn-tertiary btn-sm remove-array-item" aria-label="Remove item"><span class="icon icon-x" aria-hidden="true"></span></button>`;
-                        item.querySelector('[name]').value = value === null || value === undefined ? '' : String(value);
+                        const text = value === null || value === undefined ? '' : String(value);
+                        const field = item.querySelector('[name]');
+                        (this.fieldKind(prop.items) === 'string' ? this.keepLines(field, text) : field).value = text;
                         item.querySelector('.remove-array-item').onclick = () => {
                             const form = item.closest('form');
                             item.remove();
@@ -1529,12 +1585,11 @@
 
             saveServers() {
                 localStorage.setItem('servers', JSON.stringify(this.servers));
-                // The worker uses this list (including tokens) for tool calls it starts itself.
-                navigator.serviceWorker.controller?.postMessage({ type: 'init_mcp_servers_index', servers: this.servers });
             }
 
             // Adds a server (or picks it if it's already listed), shows it in the Workbench and connects.
-            addServer(url, alias = '', { connect = true } = {}) {
+            // Without `show`, it's added and connected where you are, as an app's "Add it" does.
+            addServer(url, alias = '', { connect = true, show = true } = {}) {
                 if (!this.servers[url]) {
                     const now = new Date().toISOString();
                     this.servers[url] = {
@@ -1549,8 +1604,10 @@
                     this.saveServers();
                     this.emit('servers', { url });
                 }
-                this.selectServer(url);
-                showMode('workbench');
+                if (show) {
+                    this.selectServer(url);
+                    showMode('workbench');
+                }
                 if (connect) this.connectMcpServer(url);
             }
 
@@ -1583,15 +1640,18 @@
             }
 
             // Calls a tool with its arguments as written; the Workbench fills in {{variables}}
-            // first. Resolves with the worker's tool_result (or a stand-in when the call never went
-            // out); with `show`, the response pane follows the call through 'run' events.
-            runTool({ url, tool, args, requestId = null, collectionRunId = null, show = true }) {
+            // first, unless the caller sends `sentArgs` it filled in itself (apps fill in their
+            // screen's values). Resolves with the worker's tool_result (or a stand-in when the call
+            // never went out); with `show`, the response pane follows the call through 'run' events.
+            // `source` is where the run says it came from: 'workbench', 'app', or 'reply' for a tool
+            // call in a model's answer that an app ran.
+            runTool({ url, tool, args, sentArgs = null, environmentName = null, requestId = null, collectionRunId = null, show = true, source = 'workbench' }) {
                 const notSent = error => {
                     if (show) this.emit('run', { phase: 'not-sent', error });
                     return Promise.resolve({ type: 'tool_result', error, errorKind: 'not_sent', run: null });
                 };
-                let prepared = { sentArgs: args, environmentName: null };
-                if (this.workbench) {
+                let prepared = { sentArgs: sentArgs || args, environmentName };
+                if (this.workbench && !sentArgs) {
                     try {
                         prepared = this.workbench.prepare(tool, args);
                     } catch (error) {
@@ -1603,6 +1663,7 @@
                     type: 'call_tool',
                     call: { serverUrl: url, toolName: tool.name, args: prepared.sentArgs },
                     run: { id: runId, args, requestId, collectionRunId, environmentName: prepared.environmentName },
+                    source,
                     bearerToken: this.servers[url]?.bearerToken || undefined
                 });
                 if (!sent) return notSent("The service worker isn't running yet. Try again in a moment.");
@@ -1711,7 +1772,8 @@
                         if (kind === 'json') {
                             input.value = value === undefined ? '' : isWholePlaceholder(value) ? value : JSON.stringify(value, null, 2);
                         } else {
-                            input.value = value === undefined || value === null ? '' : String(value);
+                            const text = value === undefined || value === null ? '' : String(value);
+                            (kind === 'string' ? this.keepLines(input, text) : input).value = text;
                         }
                     }
                 });
@@ -1720,7 +1782,6 @@
             }
         }
 
-        // Initialize the chat shell
         const appShell = new AppShell();
         // The logs pop-out reads the opener's entries from here.
         window.logPanel = appShell.logPanel;
@@ -1729,10 +1790,14 @@
             for (const entry of window.opener?.logPanel?.entries || []) appShell.logPanel.add(entry);
         } else {
             appShell.startServiceWorker();
-            // The Workbench's components and its state (environments, saved requests, runs).
+            // The Workbench's components and its state (environments, saved requests, runs), then
+            // the Apps page's builder, which uses the Workbench's environments.
             import('./workbench/index.js')
                 .then(({ installWorkbench }) => installWorkbench(appShell))
-                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }));
+                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the Workbench: ${error.message}` }))
+                .then(() => import('./apps/index.js'))
+                .then(({ installApps }) => installApps(appShell, { showMode, launch: LAUNCH }))
+                .catch(error => appShell.log({ level: 'error', message: `Couldn't load the app builder: ${error.message}` }));
         }
 
         window.addEventListener('error', event => {
@@ -1762,21 +1827,16 @@
         const hasPlaceholder = text => typeof text === 'string' && /\{\{\s*[A-Za-z_][\w.-]*\s*\}\}/.test(text);
         const isWholePlaceholder = text => typeof text === 'string' && /^\{\{\s*[A-Za-z_][\w.-]*\s*\}\}$/.test(text.trim());
 
-        // The Workbench or the Apps page; the dock stays under both.
-        function showMode(mode) {
+        // The Workbench or the Apps page; the dock stays under both. Without `keep`, the next
+        // visit doesn't open on it, as a launched app's page doesn't.
+        function showMode(mode, { keep = true } = {}) {
             const apps = mode === 'apps';
             document.body.dataset.mode = apps ? 'apps' : 'workbench';
             document.getElementById('workbench').hidden = apps;
             document.getElementById('appsPage').hidden = !apps;
             document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === document.body.dataset.mode)));
-            localStorage.setItem('mode', document.body.dataset.mode);
-            if (apps) {
-                // The chat's server list may have changed while it was hidden.
-                renderModelServerSelect();
-                renderChatMessages();
-                renderConversationId();
-                loadChatHistory();
-            }
+            if (keep) localStorage.setItem('mode', document.body.dataset.mode);
+            appShell.emit('mode', { mode: document.body.dataset.mode });
         }
         document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => showMode(button.dataset.mode)));
         document.getElementById('popoutLogsBtn').onclick = function() {
@@ -1841,7 +1901,7 @@
             gleanNote('gleanUrlError', null);
             gleanNote('gleanStatus', null);
             if (!isEmail && !/^https:\/\/[^/\s]+\/\S*$/i.test(value)) {
-                gleanNote('gleanUrlError', 'Enter your work email, or the full https:// address of your Glean MCP server.');
+                gleanNote('gleanUrlError', 'Enter your work email, or your MCP endpoint: its full https:// address.');
                 gleanUrlInput.focus();
                 return;
             }
@@ -1862,6 +1922,7 @@
         // a documented API, so when it fails people can still paste the URL. It answers the same
         // page origins as Glean's MCP servers.
         const GLEAN_CONFIG_URL = 'https://app.glean.com/config/search';
+        const PASTE_ENDPOINT = "Paste your MCP endpoint instead, from Third party apps and MCP in Glean's settings.";
         async function findGleanServer(email) {
             const domain = email.split('@').pop().toLowerCase();
             let response;
@@ -1872,10 +1933,10 @@
                     body: JSON.stringify({ email, isGleanApp: 'true' })
                 });
             } catch {
-                throw new Error(`Couldn't ask app.glean.com where ${domain}'s Glean is; it only answers pages from the origins it allows. Paste your MCP server URL instead.`);
+                throw new Error(`Couldn't ask app.glean.com where ${domain}'s Glean is; it only answers pages from the origins it allows. ${PASTE_ENDPOINT}`);
             }
             if (!response.ok) {
-                throw new Error(`app.glean.com answered HTTP ${response.status} when asked where ${domain}'s Glean is. Paste your MCP server URL instead.`);
+                throw new Error(`app.glean.com answered HTTP ${response.status} when asked where ${domain}'s Glean is. ${PASTE_ENDPOINT}`);
             }
             const config = (await response.json().catch(() => null))?.search_config || {};
             const parse = value => { try { return new URL(value); } catch { return null; } };
@@ -1884,7 +1945,7 @@
             // For a domain it doesn't know, Glean answers with its central deployment.
             const central = parse(config.centralURL);
             if (!secure || (!config.isMultiTenant && central && central.href === base.href)) {
-                throw new Error(`Glean doesn't know a deployment for ${domain}. Check the address, or paste your MCP server URL.`);
+                throw new Error(`Glean doesn't know a deployment for ${domain}. Check the address, or paste your MCP endpoint, from Third party apps and MCP in Glean's settings.`);
             }
             return { domain, queryUrl: base.href, mcpUrl: new URL('mcp/default', base).href };
         }
@@ -1899,7 +1960,7 @@
             navigator.serviceWorker.ready.then(() => setTimeout(() => appShell.addServer(linkedServer), 0));
         }
 
-        if (!LOGS_ONLY && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(appShell.servers).length === 0) {
+        if (!LOGS_ONLY && !LAUNCH && !serverLinked && !localStorage.getItem('guideSeen') && Object.keys(appShell.servers).length === 0) {
             openGuide();
         }
 
@@ -1940,529 +2001,9 @@
             }
         });
 
-        // --- The Chat app ---
-        let chatSelectedTool = null;
-        let chatToolConfig = {};
-        // Which of the model tool's fields get the message and the conversation: field -> ticked.
-        let chatFieldChoices = {};
-        let chatMessages = [];
-        let chatSelectedServerUrl = null;
-
-        // The conversation this tab shows: the tab's own, or the last one used in this browser.
-        function currentConversationId() {
-            const id = sessionStorage.getItem('chatConversation') || localStorage.getItem('lastChatConversation') || crypto.randomUUID();
-            sessionStorage.setItem('chatConversation', id);
-            localStorage.setItem('lastChatConversation', id);
-            return id;
-        }
-        let chatConversationId = currentConversationId();
-        function renderConversationId() {
-            const conversationDiv = document.getElementById('chatConversation');
-            conversationDiv.innerHTML = `<span>Conversation</span> <span class="mono">${chatConversationId}</span> <button id="newConversationBtn" class="btn-sm btn-outline" title="Start a new conversation">New conversation</button>`;
-            document.getElementById('newConversationBtn').onclick = () => {
-                chatConversationId = crypto.randomUUID();
-                sessionStorage.setItem('chatConversation', chatConversationId);
-                localStorage.setItem('lastChatConversation', chatConversationId);
-                renderConversationId();
-                chatMessages = [];
-                renderChatMessages();
-            };
-        }
-        renderConversationId();
-        // Helper to render chat messages
-        function renderChatMessages() {
-            const chatDiv = document.getElementById('chatMessages');
-            chatDiv.innerHTML = chatMessages.map(msg =>
-                `<div class="chat-msg ${msg.role}"><span>${escapeHtml(msg.text)}</span></div>`
-            ).join('');
-            chatDiv.scrollTop = chatDiv.scrollHeight;
-        }
-        // The worker sends every conversation's messages to every tab; show this tab's.
-        navigator.serviceWorker.addEventListener('message', (event) => {
-            const update = event.data;
-            if (update.type === 'chat_message' && update.message.conversationId === chatConversationId) {
-                chatMessages.push(update.message);
-                renderChatMessages();
-            } else if (update.type === 'chat_history' && update.conversationId === chatConversationId) {
-                chatMessages = update.messages;
-                renderChatMessages();
-            }
-        });
-        // Always show send button, but disable/grey it out if input is empty/whitespace
-        function updateSendBtnState() {
-            if (chatUserInput.value.trim().length > 0) {
-                chatSendBtn.disabled = false;
-            } else {
-                chatSendBtn.disabled = true;
-            }
-        }
-        updateSendBtnState();
-        chatUserInput.addEventListener('input', updateSendBtnState);
-        chatSendBtn.addEventListener('click', async function() {
-            const userInput = document.getElementById('chatUserInput').value.trim();
-            if (!userInput) return;
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'chat_send',
-                    text: userInput,
-                    role: 'user',
-                    conversationId: chatConversationId
-                });
-            }
-            document.getElementById('chatUserInput').value = '';
-            updateSendBtnState();
-        });
-        document.getElementById('chatUserInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('chatSendBtn').click();
-            }
-        });
-        // Initial render; showMode('apps') draws these again.
-        renderModelServerSelect();
-        renderChatMessages();
-        renderConversationId();
-
-        // --- Instructions and context: what the model is told before each conversation ---
-        // The built-in instructions come from the worker, which sends them to the model itself;
-        // this page shows them read-only. The context you add is kept here and sent to the worker.
-        const INSTRUCTIONS_ID = 'instructions';
-        let chatInstructions = null;
-        let contextEntries = [];
-        let selectedContextId = null;
-        const allContext = () => (chatInstructions ? [chatInstructions, ...contextEntries] : contextEntries);
-
-        function newContextId() {
-            return 'context-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
-        }
-
-        function loadChatContext() {
-            try {
-                const saved = JSON.parse(localStorage.getItem('chatContext') || '[]');
-                contextEntries = Array.isArray(saved) ? saved : [];
-            } catch {
-                contextEntries = [];
-            }
-        }
-
-        function sendChatContextToWorker() {
-            navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_context', context: contextEntries });
-        }
-
-        function saveChatContext() {
-            localStorage.setItem('chatContext', JSON.stringify(contextEntries));
-            sendChatContextToWorker();
-        }
-
-        function renderContextList() {
-            const listDiv = document.getElementById('contextList');
-            listDiv.innerHTML = '';
-            const entries = allContext();
-            if (!entries.length) {
-                listDiv.innerHTML = '<div class="empty-state">No context yet.</div>';
-                return;
-            }
-            entries.forEach(entry => {
-                const item = document.createElement('div');
-                item.className = 'context-list-item' + (selectedContextId === entry.id ? ' selected' : '');
-                const name = entry.id === INSTRUCTIONS_ID ? 'Instructions (built in)' : entry.name || '(no name)';
-                item.innerHTML = `
-                    <span class="context-name">${escapeHtml(name)}</span>
-                    <span class="context-timestamp">${entry.id === INSTRUCTIONS_ID ? '' : new Date(entry.timestamp).toLocaleString()}</span>
-                `;
-                item.onclick = () => {
-                    selectedContextId = entry.id;
-                    renderContextList();
-                    renderContextEditor();
-                };
-                listDiv.appendChild(item);
-            });
-        }
-
-        function renderContextEditor() {
-            const editorDiv = document.getElementById('contextEditor');
-            editorDiv.innerHTML = '';
-            const entry = allContext().find(candidate => candidate.id === selectedContextId);
-            if (!entry) {
-                editorDiv.innerHTML = '<div class="text-secondary">Select an entry to see or edit it.</div>';
-                return;
-            }
-            if (entry.id === INSTRUCTIONS_ID) {
-                editorDiv.innerHTML = `
-                    <label>Text</label>
-                    <textarea rows="12" disabled>${escapeHtml(entry.text || '')}</textarea>
-                    <div class="field-help">These are the built-in instructions (public/chat-instructions.js), so they can't be edited here.</div>
-                `;
-                return;
-            }
-            const form = document.createElement('form');
-            form.innerHTML = `
-                <label>Name</label>
-                <input type="text" value="${escapeHtml(entry.name || '')}" required id="editContextName" />
-                <label>Text</label>
-                <textarea rows="8" id="editContextText">${escapeHtml(entry.text || '')}</textarea>
-                <label>Timestamp</label>
-                <input type="text" value="${new Date(entry.timestamp).toLocaleString()}" disabled />
-                <div class="editor-actions">
-                    <button type="submit" class="btn-primary">Save</button>
-                    <button type="button" id="deleteContextBtn" class="btn-outline btn-danger"><span class="icon icon-trash" aria-hidden="true"></span>Delete</button>
-                </div>
-            `;
-            form.onsubmit = (e) => {
-                e.preventDefault();
-                const newName = form.querySelector('#editContextName').value.trim();
-                if (!newName) {
-                    alert('Give it a name.');
-                    return;
-                }
-                entry.name = newName;
-                entry.text = form.querySelector('#editContextText').value;
-                saveChatContext();
-                renderContextList();
-                renderContextEditor();
-            };
-            form.querySelector('#deleteContextBtn').onclick = () => {
-                if (confirm('Delete this context?')) {
-                    contextEntries = contextEntries.filter(other => other !== entry);
-                    selectedContextId = null;
-                    saveChatContext();
-                    renderContextList();
-                    renderContextEditor();
-                }
-            };
-            editorDiv.appendChild(form);
-        }
-
-        document.getElementById('addContextBtn').onclick = () => {
-            const entry = { id: newContextId(), name: 'Untitled context', text: '', timestamp: Date.now() };
-            contextEntries.push(entry);
-            saveChatContext();
-            selectedContextId = entry.id;
-            renderContextList();
-            renderContextEditor();
-        };
-
-        function loadChatInstructions() {
-            const listen = event => {
-                if (event.data?.type !== 'chat_instructions') return;
-                navigator.serviceWorker.removeEventListener('message', listen);
-                chatInstructions = { id: INSTRUCTIONS_ID, text: event.data.instructions };
-                renderContextList();
-            };
-            navigator.serviceWorker.addEventListener('message', listen);
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'get_chat_instructions' });
-            } else {
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_instructions' });
-                }, { once: true });
-            }
-        }
-
-        loadChatContext();
-        renderContextList();
-        renderContextEditor();
-        sendChatContextToWorker();
-        loadChatInstructions();
-
-        // --- The model: the tool the chat's messages go to, and which of its fields get what ---
-        // Saved as {serverUrl, toolName, args, messageField, conversationField}.
-        function loadChatModel() {
-            try {
-                return JSON.parse(localStorage.getItem('chatModel')) || null;
-            } catch {
-                return null;
-            }
-        }
-        function saveChatModel(model) {
-            localStorage.setItem('chatModel', JSON.stringify(model));
-            // The worker runs the chat with its own copy.
-            sendChatModelToWorker();
-        }
-        function saveChatModelFromForm() {
-            let args;
-            try {
-                args = appShell.serializeToolForm(document.getElementById('chatToolConfigForm'), chatSelectedTool?.inputSchema || chatSelectedTool?.input_schema);
-            } catch {
-                return; // A JSON field that's still being typed.
-            }
-            const ticked = type => Object.keys(chatFieldChoices).find(k => chatFieldChoices[k] && chatSelectedTool?.inputSchema?.properties?.[k]?.type === type) || null;
-            saveChatModel({
-                serverUrl: chatSelectedServerUrl,
-                toolName: chatSelectedTool?.name,
-                args,
-                messageField: ticked('string'),
-                conversationField: ticked('array')
-            });
-        }
-        function renderModelServerSelect() {
-            const select = document.getElementById('chatServerSelect');
-            if (!select) return;
-            const model = loadChatModel() || {};
-            renderServerSelect(select, model.serverUrl || chatSelectedServerUrl, appShell.servers || {});
-            chatSelectedServerUrl = select.value;
-        }
-        function renderModelToolSelect() {
-            const select = document.getElementById('chatToolSelect');
-            if (!select) return;
-            const model = loadChatModel() || {};
-            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
-            select.innerHTML = '';
-            tools.forEach((tool, idx) => {
-                const opt = document.createElement('option');
-                opt.value = tool.name;
-                opt.textContent = tool.name;
-                select.appendChild(opt);
-            });
-            // Restore tool selection from config if possible
-            if (tools.length > 0) {
-                let toolToSelect = tools[0];
-                if (model.toolName) {
-                    const found = tools.find(t => t.name === model.toolName);
-                    if (found) toolToSelect = found;
-                }
-                select.value = toolToSelect.name;
-                chatSelectedTool = toolToSelect;
-                renderModelToolForm(toolToSelect);
-            } else {
-                chatSelectedTool = null;
-                renderModelToolForm(null);
-            }
-        }
-        function renderModelToolForm(tool) {
-            const form = document.getElementById('chatToolConfigForm');
-            form.innerHTML = '';
-            chatFieldChoices = {};
-            if (!tool) return;
-            const schema = tool.inputSchema || tool.input_schema;
-            const model = loadChatModel() || {};
-            if (schema && schema.properties) {
-                Object.entries(schema.properties).forEach(([key, prop]) => {
-                    const isRequired = (schema.required || []).includes(key);
-                    let inputCard;
-                    if (prop.type === 'string') {
-                        inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        const name = escapeHtml(key);
-                        let label = `<label><strong>${name}</strong> (string)`;
-                        if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
-                        label += '</label>';
-                        inputCard.innerHTML = `${label}
-                            <input type="text" name="${name}" />
-                            <label class="chat-field-label">
-                                <input type="checkbox" class="chat-message-field solid-checkbox" data-field="${name}" />
-                                <span class="chat-field-text">Your message goes here</span>
-                            </label>
-                            <div class="chat-field-warning" style="display:none;"></div>`;
-                        setTimeout(() => {
-                            const input = inputCard.querySelector(`input[type='text'][name='${CSS.escape(key)}']`);
-                            const cb = inputCard.querySelector(`.chat-message-field[data-field='${CSS.escape(key)}']`);
-                            const warn = inputCard.querySelector('.chat-field-warning');
-                            // Restore value from config if present
-                            let value = (model.args && model.args[key]) || '';
-                            input.value = value;
-                            // Restore checkbox from config
-                            if (model.messageField === key) {
-                                cb.checked = true;
-                                chatFieldChoices[key] = true;
-                            }
-                            // UX logic for enabling/disabling and warning
-                            function updateInputState() {
-                                if (cb.checked) {
-                                    if (!input.value) {
-                                        input.value = '{{message}}';
-                                    }
-                                    if (input.value.includes('{{message}}')) {
-                                        input.disabled = true;
-                                        warn.textContent = '';
-                                        warn.style.display = 'none';
-                                    } else {
-                                        input.disabled = false;
-                                        warn.textContent = 'Value must include {{message}}';
-                                        warn.style.display = '';
-                                    }
-                                } else {
-                                    input.disabled = false;
-                                    warn.textContent = '';
-                                    warn.style.display = 'none';
-                                }
-                            }
-                            cb.onchange = () => {
-                                // Only one string field can be connected
-                                Object.keys(chatFieldChoices).forEach(k => {
-                                    if (k !== key && schema.properties[k]?.type === 'string') chatFieldChoices[k] = false;
-                                });
-                                if (cb.checked) {
-                                    if (!input.value) {
-                                        input.value = '{{message}}';
-                                    }
-                                    if (!input.value.includes('{{message}}')) {
-                                        // Prevent checking, show warning, keep input enabled
-                                        cb.checked = false;
-                                        warn.textContent = 'Value must include {{message}}';
-                                        warn.style.display = '';
-                                        input.disabled = false;
-                                        chatFieldChoices[key] = false;
-                                        return;
-                                    }
-                                    // Uncheck all other checkboxes
-                                    document.querySelectorAll('.chat-message-field').forEach(otherCb => {
-                                        if (otherCb !== cb) otherCb.checked = false;
-                                    });
-                                    chatFieldChoices[key] = true;
-                                } else {
-                                    // If the value is exactly '{{message}}', clear it
-                                    if (input.value.trim() === '{{message}}') {
-                                        input.value = '';
-                                    }
-                                    chatFieldChoices[key] = false;
-                                }
-                                updateInputState();
-                                onChatFieldChanged(key, cb.checked);
-                                saveChatModelFromForm();
-                            };
-                            input.addEventListener('input', () => {
-                                updateInputState();
-                                saveChatModelFromForm();
-                            });
-                            updateInputState();
-                        }, 0);
-                    } else if (prop.type === 'array') {
-                        inputCard = document.createElement('div');
-                        inputCard.className = 'tool-input-card';
-                        const name = escapeHtml(key);
-                        let label = `<label><strong>${name}</strong> (array)`;
-                        if (isRequired) label += '<span class="required-mark">*</span>';
-                        label += prop.description ? `<span class="field-help">${escapeHtml(prop.description)}</span>` : '';
-                        label += '</label>';
-                        inputCard.innerHTML = `${label}
-                            <label class="chat-field-label">
-                                <input type="checkbox" class="chat-conversation-field solid-checkbox" data-field="${name}" />
-                                <span class="chat-field-text">The conversation goes here</span>
-                            </label>
-                            <div class="field-help">This field gets the conversation so far as a list of messages, without the newest one.</div>`;
-                        setTimeout(() => {
-                            const cb = inputCard.querySelector(`.chat-conversation-field[data-field='${CSS.escape(key)}']`);
-                            if (model.conversationField === key) {
-                                cb.checked = true;
-                                chatFieldChoices[key] = true;
-                            }
-                            if (cb) {
-                                cb.onchange = () => {
-                                    // Only one array field can be connected
-                                    Object.keys(chatFieldChoices).forEach(k => {
-                                        if (k !== key && schema.properties[k]?.type === 'array') chatFieldChoices[k] = false;
-                                    });
-                                    chatFieldChoices[key] = cb.checked;
-                                    if (cb.checked) {
-                                        document.querySelectorAll('.chat-conversation-field').forEach(otherCb => {
-                                            if (otherCb !== cb) otherCb.checked = false;
-                                        });
-                                    }
-                                    onChatFieldChanged(key, cb.checked);
-                                    saveChatModelFromForm();
-                                };
-                            }
-                        }, 0);
-                    } else {
-                        inputCard = appShell.renderInputField(key, prop, isRequired);
-                    }
-                    form.appendChild(inputCard);
-                });
-            }
-            form.oninput = () => {
-                try {
-                    chatToolConfig = appShell.serializeToolForm(form, schema);
-                    saveChatModelFromForm();
-                } catch {
-                    // A JSON field that's still being typed; the field is marked invalid.
-                }
-            };
-            try {
-                chatToolConfig = appShell.serializeToolForm(form, schema);
-            } catch {
-                chatToolConfig = {};
-            }
-        }
-        // --- The model card's server and tool pickers ---
-        const chatServerSelect = document.getElementById('chatServerSelect');
-        chatServerSelect.addEventListener('change', function() {
-            chatSelectedServerUrl = this.value;
-            renderModelToolSelect();
-            saveChatModelFromForm();
-        });
-        const chatToolSelect = document.getElementById('chatToolSelect');
-        chatToolSelect.addEventListener('change', function() {
-            const tools = (appShell.servers[chatSelectedServerUrl]?.tools) || [];
-            const tool = tools.find(t => t.name === this.value);
-            chatSelectedTool = tool;
-            renderModelToolForm(tool);
-            saveChatModelFromForm();
-        });
-        renderModelServerSelect();
-        renderModelToolSelect();
-        renderModelToolForm(chatSelectedTool);
-        function onChatFieldChanged(field, checked) {
-            console.debug(`[page] ${field} ${checked ? 'now receives' : 'no longer receives'} chat messages`);
-        }
-
-        function renderServerSelect(selectElement, selectedServerUrl, servers) {
-            selectElement.innerHTML = '';
-            const serverUrls = Object.keys(servers);
-            serverUrls.forEach(url => {
-                const opt = document.createElement('option');
-                opt.value = url;
-                opt.textContent = servers[url].alias || servers[url].name || url;
-                selectElement.appendChild(opt);
-            });
-            // Default to first server or previous selection
-            if (serverUrls.length > 0) {
-                if (!selectedServerUrl || !servers[selectedServerUrl]) {
-                    selectElement.value = serverUrls[0];
-                } else {
-                    selectElement.value = selectedServerUrl;
-                }
-            }
-        }
-
-        // Asks the worker for this tab's conversation, now or once it controls the page.
-        function loadChatHistory() {
-            const ask = () => navigator.serviceWorker.controller?.postMessage({ type: 'get_chat_history', conversationId: chatConversationId });
-            if (navigator.serviceWorker.controller) ask();
-            else navigator.serviceWorker.addEventListener('controllerchange', ask, { once: true });
-        }
-        // On page load; showMode('apps') asks again.
-        loadChatHistory();
-
-        function sendChatModelToWorker() {
-            const model = loadChatModel();
-            if (model) navigator.serviceWorker.controller?.postMessage({ type: 'set_chat_model', model });
-        }
-
-        // Now if the worker already controls the page, and when it takes control (first activation).
-        sendChatModelToWorker();
-        navigator.serviceWorker.oncontrollerchange = () => {
-            sendChatModelToWorker();
-            sendChatContextToWorker();
-        };
-
-        function getServersFromLocalStorage() {
-            const raw = localStorage.getItem('servers');
-            return raw ? JSON.parse(raw) : {};
-        }
-
-        // After service worker registration and activation:
-        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({
-                type: 'init_mcp_servers_index',
-                servers: getServersFromLocalStorage()
-            });
-        }
-
-        // Back where you were: the Workbench, or the Apps page. Last, since the chat's state
-        // above has to exist first.
-        if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
+        // Back where you were: the Workbench, or the Apps page. A launched app is on the Apps page.
+        if (LAUNCH) showMode('apps', { keep: false });
+        else if (!LOGS_ONLY && localStorage.getItem('mode') === 'apps') showMode('apps');
     </script>
 
     <!-- Styles moved to styles.css -->

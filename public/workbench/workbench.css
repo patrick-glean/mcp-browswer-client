@@ -326,8 +326,13 @@ body.wb-resizing-rows * {
         min-width: 0;
     }
 
-    .wb-apps .chat-card {
+    .wb-apps {
         grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .wb-apps > apps-splitter {
+        display: none;
     }
 
     .wb-dock-head {
@@ -735,6 +740,10 @@ wb-rail {
 
 .wb-add-note.text-error {
     color: var(--theme-error);
+}
+
+.wb-add-note a {
+    color: var(--theme-link);
 }
 
 wb-rail .saved-group + .saved-group {
@@ -1254,9 +1263,26 @@ wb-response {
     max-height: none;
 }
 
-.wb-pane .diff-head {
+.wb-pane .diff-head,
+.wb-sent-head {
     margin-bottom: 8px;
     font-size: 0.75rem;
+}
+
+.wb-sent {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+}
+
+.wb-sent dt {
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.wb-sent dd {
+    margin: 0 0 8px;
 }
 
 .collection-run-summary {
@@ -1536,15 +1562,22 @@ wb-palette {
     background: var(--theme-error);
 }
 
-/* ---------- Apps ---------- */
+/* ---------- Apps (the builder's own styles are in apps/apps.css) ---------- */
 
+/* The list of apps' splitter (apps-splitter) sits in a zero-width track and sets its width;
+   clamp keeps a width saved on a wide screen from crowding a narrow one. */
 .wb-apps {
-    display: flex;
+    display: grid;
     flex: 1;
-    flex-direction: column;
-    gap: 12px;
+    grid-template-columns: clamp(160px, var(--apps-rail-width, clamp(180px, 16vw, 232px)), 30vw) 0 minmax(0, 1fr);
     min-height: 0;
-    padding: 16px 24px;
+}
+
+.apps-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
     overflow: auto;
 }
 
@@ -1555,30 +1588,6 @@ wb-palette {
 .wb-apps-head p {
     max-width: 720px;
     margin-top: 2px;
-}
-
-.wb-apps .chat-card {
-    flex: 1;
-    grid-template-columns: minmax(0, 1fr) 360px;
-    height: auto;
-    min-height: 420px;
-}
-
-.chat-context {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 24px;
-    padding-top: 16px;
-    border-top: 1px solid var(--theme-border-light);
-}
-
-.chat-context .panel-header {
-    margin-bottom: 0;
-}
-
-.chat-context .panel-subtitle {
-    margin: 0;
 }
 
 /* ---------- Beside the guide ---------- */
