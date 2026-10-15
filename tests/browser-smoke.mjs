@@ -1316,6 +1316,18 @@ async function main() {
             check('Apps: pointing at a pin lights its wire, its transform and the pin at the other end, and the other wires dim until it leaves',
                 lit === `el:output2, ok:${countRule}, pill r:${countRule}:0, wire r:${countRule}:0` && unlit === 'nothing lit', `${lit}; ${unlit}`);
 
+            // A drag ends with the browser's own click where it's let go, which mustn't pick what's
+            // there; a click right after it, on something else, still picks.
+            await drag('el:input', 'el:output2');
+            const afterDrag = await page.run(`(() => {
+                const canvas = document.querySelector('app-canvas');
+                const before = JSON.stringify(canvas.apps.selection);
+                document.querySelector('app-canvas [data-node="${countRule}"] [data-node-status]').click();
+                return before + ' then ' + JSON.stringify(canvas.apps.selection);
+            })()`);
+            check("Apps: the click a drag on the canvas ends with picks nothing, and a click right after it still picks what it's on",
+                afterDrag === `{"kind":"wire","id":"r:${countRule}:0","ruleId":"${countRule}"} then {"kind":"rule","id":"${countRule}"}`, afterDrag);
+
             // The Inspector: what's picked heads it, in its color, and stays as the rest scrolls; the
             // rest is in sections that open and close, say what's in them while closed and stay as
             // they're left. A wire opens only its part, and picking it doesn't scroll the page.
@@ -1326,7 +1338,10 @@ async function main() {
                 const head = document.querySelector('app-inspector .app-inspector-head');
                 return head?.dataset.tone === 'tool' && getComputedStyle(head).position === 'sticky'
                     ? ['.app-inspector-kind', '.app-inspector-title', '.app-inspector-sub'].map(part => head.querySelector(part)?.textContent).join(' ') + ' | ' + ${folds} : null;
-            })()`, 5000);
+            })()`, 5000) ?? await page.run(`(() => {
+                const head = document.querySelector('app-inspector .app-inspector-head');
+                return 'picked ' + JSON.stringify(document.querySelector('app-canvas').apps.selection) + ', head ' + head?.dataset.tone + ' ' + (head && getComputedStyle(head).position) + ' ' + head?.textContent.replace(/\\s+/g, ' ').trim();
+            })()`);
             await page.run(`document.querySelector('app-inspector [data-fold="rule.call"] > summary').click()`);
             const callClosed = await page.waitFor(`(() => {
                 const call = document.querySelector('app-inspector [data-fold="rule.call"]');
