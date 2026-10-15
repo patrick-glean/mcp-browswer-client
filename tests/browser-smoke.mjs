@@ -2446,7 +2446,9 @@ async function main() {
         await runSaved('Greeting');
         const greetingAgain = await runSaved('Greeting');
         check('Run again: a saved request whose result is the same says so', /Same as the last run/.test(greetingAgain || '') && !!greetingAgain?.includes('Echo: hi world'), greetingAgain);
-        const verdictChip = await page.waitFor(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent`, 5000);
+        // The rail redraws after the run, so the first run's badge can still be there for a moment.
+        const verdictChip = await page.waitFor(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent === 'same' && 'same'`, 5000)
+            ?? await page.run(`${savedItem('Greeting')}?.querySelector('.badge')?.textContent ?? null`);
         check('saved requests: the rail shows how the last run of each went', verdictChip === 'same', verdictChip);
 
         // Runtime's Library menu swaps the library in place, and results compare the same
