@@ -21,6 +21,7 @@
     "apps/components/rule-editor.js",
     "apps/components/screen.js",
     "apps/components/server-switch.js",
+    "apps/components/share-dialog.js",
     "apps/components/splitter.js",
     "apps/components/trace.js",
     "apps/components/try.js",

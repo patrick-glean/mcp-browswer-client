@@ -189,6 +189,60 @@ apps-start[hidden] {
     margin-top: 6px;
 }
 
+/* ---------- Share: embed it, run it on its own, or a link; and the client's address ---------- */
+
+.apps-share {
+    width: min(620px, calc(100vw - 32px));
+}
+
+.app-share-option {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--theme-border-light);
+    border-radius: var(--radius-300);
+}
+
+.app-share-option h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+}
+
+.app-share-option h3 .icon {
+    width: 14px;
+    height: 14px;
+    color: var(--theme-text-secondary);
+}
+
+.app-share-code {
+    width: 100%;
+    min-height: 64px;
+    padding: 8px 10px;
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    word-break: break-all;
+    resize: vertical;
+}
+
+.app-share-option .button-row,
+.app-share-address .button-row {
+    gap: 6px;
+}
+
+.app-share-address {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 2px 0;
+}
+
+.app-share-address input {
+    width: 100%;
+}
+
 /* ---------- Preview: the app as it is when it's launched, over the whole window ---------- */
 
 /* Above the top bar and the Guide; Go to and status messages stay above it. */
@@ -323,6 +377,36 @@ body.launched .wb-app {
 
 body.launched .wb-apps {
     grid-template-columns: minmax(0, 1fr);
+}
+
+/* In another page's iframe (?embed): a slimmer bar, which says where to run it on its own. */
+body.embedded .app-preview-bar {
+    min-height: 34px;
+    padding: 3px 8px;
+    font-size: 0.75rem;
+}
+
+a.app-preview-own {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--theme-border-dark);
+    border-radius: var(--radius-full);
+    color: var(--theme-text-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+a.app-preview-own:hover {
+    background: var(--theme-hover);
+}
+
+a.app-preview-own .icon {
+    width: 12px;
+    height: 12px;
 }
 
 /* The app gets the device's whole width, and the border sits outside it. */

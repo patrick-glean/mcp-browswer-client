@@ -1,7 +1,8 @@
 // The top of the app builder: the app's name and description, Canvas or Outline, Preview, Launch
-// (the app on its own in a new tab), which version it's at, Download (a zip of a folder that runs
-// the app once served: its DML, screen and README with the client's own files; or the DML
-// alone), and ⋯ with a link that runs it, Duplicate and Delete.
+// (the app on its own in a new tab), Share (embed it, run it on its own, a link), which version
+// it's at, Download (a zip of a folder that runs the app once served: its DML, screen and README
+// with the client's own files; or the DML alone), and ⋯ with a link that runs it, Duplicate and
+// Delete.
 
 import { confirmThen, escapeHtml, timeAgo } from '../../workbench/util.js';
 import { PREVIEW, VIEWS } from '../apps.js';
@@ -35,6 +36,7 @@ export class AppHeader extends AppElement {
             if (button.dataset.appViewChoice) return this.apps.showView(button.dataset.appViewChoice);
             if (button.id === 'previewAppBtn') return this.apps.preview();
             if (button.id === 'launchAppBtn') return this.apps.launchInTab();
+            if (button.id === 'shareAppBtn') return this.apps.share();
             button.closest('details.menu')?.removeAttribute('open');
             if (button.id === 'downloadAppBtn') this.apps.download();
             if (button.id === 'downloadDmlBtn') this.apps.download({ standalone: true });
@@ -60,6 +62,7 @@ export class AppHeader extends AppElement {
                 </div>
                 <button type="button" id="previewAppBtn" class="btn-sm" title="The app as it is when it's launched: it fills the window and starts from the beginning. Escape ends it."><span class="icon icon-eye" aria-hidden="true"></span>Preview</button>
                 <button type="button" id="launchAppBtn" class="btn-sm" title="The app on its own, running in a new tab as people will use it, at an address you can bookmark"><span class="icon icon-external-link" aria-hidden="true"></span>Launch</button>
+                <button type="button" id="shareAppBtn" class="btn-sm" aria-haspopup="dialog" title="Embed it in a page, run it on its own, or send a link"><span class="icon icon-send" aria-hidden="true"></span>Share</button>
                 <span class="app-version text-secondary" id="appVersion" aria-live="polite"></span>
                 <div class="split-button">
                     <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip of a folder that runs the app once it's served: the app (app.dml, its flow as markup, and screen.html) with MCP Browser Client, which runs it, and a README that says how"><span class="icon icon-download" aria-hidden="true"></span>Download</button>

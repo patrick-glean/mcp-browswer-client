@@ -13,6 +13,7 @@ import { AppOpenAsk } from './components/open-ask.js';
 import { AppPreview } from './components/preview.js';
 import { AppsRail, AppsStart } from './components/rail.js';
 import { AppScreen } from './components/screen.js';
+import { AppsShareDialog } from './components/share-dialog.js';
 import { AppsSplitter } from './components/splitter.js';
 import { AppTry } from './components/try.js';
 
@@ -20,6 +21,7 @@ const COMPONENTS = {
     'apps-rail': AppsRail,
     'apps-start': AppsStart,
     'apps-add-dialog': AppsAddDialog,
+    'apps-share-dialog': AppsShareDialog,
     'apps-splitter': AppsSplitter,
     'app-header': AppHeader,
     'app-open-ask': AppOpenAsk,

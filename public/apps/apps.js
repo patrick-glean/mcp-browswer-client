@@ -62,7 +62,63 @@ function readChoices() {
 
 // The worker is up to take calls, as it isn't yet on a first visit; or a few seconds have gone by.
 const workerReady = () => Promise.race([navigator.serviceWorker?.ready ?? Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))]);
-const APP_URL = 'https://patrick-glean.github.io/mcp-browswer-client/';
+// The client's public site.
+export const APP_URL = 'https://patrick-glean.github.io/mcp-browswer-client/';
+// Where the client is served for others to reach, when it isn't this page's own address.
+const CLIENT_ADDRESS_KEY = 'appsClientAddress';
+
+// A client address as typed: the folder of its index.html, at http or https (http when it's on
+// this computer and says neither). '' for none.
+export function normalizeClientAddress(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    let url;
+    try {
+        url = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(text) ? text : `${isLocalAddress(`http://${text}`) ? 'http' : 'https'}://${text}`);
+    } catch {
+        throw new Error(`${text} isn't a web address`);
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('the client runs at an http or https address');
+    url.search = '';
+    url.hash = '';
+    url.pathname = url.pathname.replace(/index\.html?$/, '');
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url.href;
+}
+
+// An address only this computer reaches.
+export function isLocalAddress(address) {
+    try {
+        const { protocol, hostname } = new URL(address);
+        return protocol === 'file:' || hostname === 'localhost' || hostname.endsWith('.localhost') || /^127\./.test(hostname) || hostname === '[::1]' || hostname === '0.0.0.0';
+    } catch {
+        return false;
+    }
+}
+
+// The HTML that runs an app inside a page: an iframe of the client in its embed mode, with the app
+// in its address (`link`, Apps.linkTo with embed).
+export function embedCode(link, { name = 'App', height = 640 } = {}) {
+    return `<iframe src="${escapeHtml(link)}" title="${escapeHtml(name)}" width="100%" height="${height}" style="border: 0"></iframe>`;
+}
+
+// embed.html: a page that is the app, the iframe filling its window. Opened from a disk too, it
+// runs the app in the client at `link`'s address.
+export function embedPage(link, { name = 'App' } = {}) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(name)}</title>
+<style>html, body { height: 100%; margin: 0; } iframe { display: block; width: 100%; height: 100%; border: 0; }</style>
+</head>
+<body>
+<iframe src="${escapeHtml(link)}" title="${escapeHtml(name)}"></iframe>
+</body>
+</html>
+`;
+}
 
 export const slug = name => String(name || 'app').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 60) || 'app';
 
@@ -445,11 +501,12 @@ export class Apps {
 
     // Runs one app with nothing of the builder, the window its screen as in Preview: one of yours
     // (`id`, index.html?app=<id>, which Launch opens), one a link carries (`run`, the #run= of a
-    // link from Copy a link), or the one beside a downloaded folder's index.html (`file`). A
-    // link's or a folder's app isn't added to Your apps until you say so; a link's waits to run
-    // what Start calls as an app opening does, while yours and a folder's (which is there to run
-    // it) run it at once, as Preview does. `launched` says which, or why there's nothing to run.
-    async launch({ id = null, run = null, file = null }) {
+    // link from Copy a link or an embed), or the one beside a downloaded folder's index.html
+    // (`file`). `embed` (?embed) is an iframe's, in another page. A link's or a folder's app isn't
+    // added to Your apps until you say so; a link's waits to run what Start calls as an app
+    // opening does, while yours and a folder's (which is there to run it) run it at once, as
+    // Preview does. `launched` says which, or why there's nothing to run.
+    async launch({ id = null, run = null, file = null, embed = false }) {
         let app = null;
         let problem = '';
         if (run || file) {
@@ -471,7 +528,7 @@ export class Apps {
             app = this.list.find(candidate => candidate.id === id) || null;
             if (!app) problem = "This browser has no app with this link's id: it may have been deleted, or made in another browser. An app's own link, which runs it anywhere, is Copy a link that runs it, in its ⋯ menu in the builder.";
         }
-        this.launched = { fromLink: !!run, fromFile: !!file, problem };
+        this.launched = { fromLink: !!run, fromFile: !!file, embedded: !!embed, problem };
         this.view = PREVIEW;
         this.app = app;
         this.shownId = app?.id ?? null;
@@ -528,10 +585,67 @@ export class Apps {
         window.open(this.launchUrl(id), '_blank', 'noopener');
     }
 
-    // A link that runs the app as it is now, wherever the client is served from here: the app
-    // travels in the link, so whoever opens it runs it in their browser, on their own servers.
-    linkTo(app = this.app) {
-        return runLink(toDml(app, { standalone: true, serverNames: this.serverNamesOf(app) }), clientRoot(location.href));
+    // A link that runs the app as it is now, in the client at its address (clientAddress): the app
+    // travels in the link, so whoever opens it runs it in their browser, on their own servers. With
+    // `embed`, the client runs it in its embed mode, for an iframe.
+    linkTo(app = this.app, { embed = false } = {}) {
+        return runLink(toDml(app, { standalone: true, serverNames: this.serverNamesOf(app) }), `${this.clientAddress()}${embed ? '?embed' : ''}`);
+    }
+
+    // --- Where the client is, for others: embeds, links and a folder's way back ---
+
+    // The address embeds and links run apps at: the one set (setClientAddress), or this page's.
+    clientAddress() {
+        return localStorage.getItem(CLIENT_ADDRESS_KEY) || clientRoot(location.href);
+    }
+
+    // Sets it (normalizeClientAddress, which throws for one that isn't an address); this page's own
+    // address, or none, sets it back to that.
+    setClientAddress(value) {
+        const address = normalizeClientAddress(value);
+        if (!address || address === clientRoot(location.href)) localStorage.removeItem(CLIENT_ADDRESS_KEY);
+        else localStorage.setItem(CLIENT_ADDRESS_KEY, address);
+        this.emit('clientAddress', { address: this.clientAddress() });
+        return this.clientAddress();
+    }
+
+    // Whether MCP Browser Client answers at an address: { ok: true }, { ok: false, why }, or
+    // { ok: null, why } when this page can't tell (it can't reach it, or may not read it).
+    async checkClientAddress(address = this.clientAddress()) {
+        try {
+            const response = await fetch(new URL('index.html', address), { cache: 'no-store' });
+            if (!response.ok) return { ok: false, why: `it answers HTTP ${response.status} for index.html` };
+            // A downloaded folder's page has its app's title, and is a client too.
+            return (await response.text()).includes('MCP Browser Client') ? { ok: true } : { ok: false, why: "the page there isn't MCP Browser Client" };
+        } catch {
+            return { ok: null, why: "this page can't reach it, or isn't let read it" };
+        }
+    }
+
+    // The Share dialog: embed, run on its own, a link, and the client's address.
+    share() {
+        if (this.app) this.emit('share');
+    }
+
+    async copyEmbed({ height } = {}) {
+        const app = this.app;
+        if (!app) return;
+        await this.flush();
+        try {
+            await navigator.clipboard.writeText(embedCode(await this.linkTo(app, { embed: true }), { name: app.name, height }));
+            this.status(`Copied the embed code for ${app.name}: an iframe that runs it in MCP Browser Client at ${this.clientAddress()}.`);
+        } catch (error) {
+            this.status(`Couldn't copy the embed code: ${error.message}`, { error: true });
+        }
+    }
+
+    // embed.html: the app on a page of its own, which runs it when it's opened, from a disk too.
+    async downloadEmbed() {
+        const app = this.app;
+        if (!app) return;
+        await this.flush();
+        download(`${slug(app.name)}-embed.html`, embedPage(await this.linkTo(app, { embed: true }), { name: app.name }), 'text/html');
+        this.status(`Downloaded ${slug(app.name)}-embed.html: open it, or put its iframe in a page, and ${app.name} runs in MCP Browser Client at ${this.clientAddress()}.`);
     }
 
     async copyLink() {
@@ -955,14 +1069,15 @@ export class Apps {
         this.status(`Packing ${app.name} with the client that runs it…`);
         try {
             const parts = app.screen?.kind === 'html' ? [] : (app.screen?.components || []).filter(component => component.type === 'part');
-            const root = clientRoot(location.href);
+            // The folder ships the client served here; opened as a file, it links to the client at its address.
+            const root = this.clientAddress();
             const own = [
                 { name: APP_FILE, data: toDml(app, { serverNames }) },
                 { name: SCREEN_FILE, data: screenHtml(app) },
                 ...parts.map(part => ({ name: partFile(part.id), data: part.html || '' })),
                 { name: 'README.md', data: readmeFor(app, { serverName: url => this.serverName(url), root }) },
             ];
-            const client = await this.clientFiles(root);
+            const client = await this.clientFiles(clientRoot(location.href));
             const page = client.find(file => file.name === 'index.html');
             page.data = appIndexHtml(new TextDecoder().decode(page.data), app, { link: await this.linkTo(app), root });
             const taken = new Set(own.map(file => file.name));

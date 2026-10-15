@@ -204,6 +204,7 @@ python3 -m http.server 8000</code></pre>
     <wb-sheet id="sheet" hidden></wb-sheet>
     <wb-palette id="palette" hidden></wb-palette>
     <apps-add-dialog></apps-add-dialog>
+    <apps-share-dialog></apps-share-dialog>
     <p id="wbStatus" class="wb-status" role="status" hidden></p>
 
     <aside id="guide" class="guide-drawer" aria-labelledby="guideTitle" hidden>
@@ -353,16 +354,18 @@ python3 -m http.server 8000</code></pre>
         // name="mcp-app">), unless ?builder asks for the builder: the window is the app's screen,
         // as in Preview, with nothing of the Workbench or the builder. The page still starts the
         // worker and the Workbench's state, which the app uses.
+        // With ?embed, it's in another page's iframe (an app's embed code): its bar is slimmer.
         const LAUNCH = (() => {
             if (LOGS_ONLY) return null;
             const params = new URLSearchParams(location.search);
             const run = location.hash.startsWith('#run=') ? location.hash.slice('#run='.length) : '';
             const id = params.get('app') || '';
-            if (run || id) return { run: run || null, id: run ? null : id };
+            if (run || id) return { run: run || null, id: run ? null : id, embed: params.has('embed') };
             const file = document.querySelector('meta[name="mcp-app"]')?.content;
             return file && !params.has('builder') ? { file } : null;
         })();
         if (LAUNCH) document.body.classList.add('launched');
+        if (LAUNCH?.embed) document.body.classList.add('embedded');
         // A link to another app, pasted into this tab, only changes what follows #.
         window.addEventListener('hashchange', () => {
             if (location.hash.startsWith('#run=')) location.reload();

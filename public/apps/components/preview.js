@@ -146,18 +146,31 @@ export class AppPreview extends AppElement {
         const launched = this.apps.launched;
         if (!launched || !app || !notes) return;
         const fromLink = launched.fromLink && !this.apps.isYours();
-        actions.innerHTML = fromLink
-            ? '<button type="button" class="btn-sm" data-keep-app title="Adds it under Your apps, to change it in the builder">Add to Your apps</button>'
-            : `<button type="button" class="btn-sm" data-open-builder title="${escapeHtml(launched.fromLink ? 'Your copy of this app, in the builder: the one you have may be a different version from the link\'s'
-                : launched.fromFile ? "This folder's app, in the builder here, to change it and download it again" : 'The app in the builder, to change it')}">Open in the builder</button>`;
+        if (launched.embedded) {
+            // In another page's iframe. On its own, a tab away, it has this client's own storage,
+            // where it can sign in.
+            const own = new URL(location.href);
+            own.searchParams.delete('embed');
+            actions.innerHTML = `<a class="btn-sm app-preview-own" href="${escapeHtml(own.href)}" target="_blank" rel="noopener" title="The app on its own, in a tab of MCP Browser Client: there it can sign in to the servers it calls">Open on its own<span class="icon icon-external-link" aria-hidden="true"></span></a>`;
+        } else {
+            actions.innerHTML = fromLink
+                ? '<button type="button" class="btn-sm" data-keep-app title="Adds it under Your apps, to change it in the builder">Add to Your apps</button>'
+                : `<button type="button" class="btn-sm" data-open-builder title="${escapeHtml(launched.fromLink ? 'Your copy of this app, in the builder: the one you have may be a different version from the link\'s'
+                    : launched.fromFile ? "This folder's app, in the builder here, to change it and download it again" : 'The app in the builder, to change it')}">Open in the builder</button>`;
+        }
         const rows = [];
-        if (launched.fromLink) rows.push('<p class="app-launch-note">This app came in a link. It calls your servers, signed in as you, and each call is in History.</p>');
+        if (launched.fromLink && !launched.embedded) rows.push('<p class="app-launch-note">This app came in a link. It calls your servers, signed in as you, and each call is in History.</p>');
         for (const url of serversOf(app)) {
             const server = this.shell.servers[url];
             const name = this.apps.serverName(url);
             const named = name === url ? escapeHtml(url) : `${escapeHtml(name)} (${escapeHtml(url)})`;
-            if (!server) rows.push(`<p class="app-launch-note">It calls ${named}, which isn't one of your servers. <button type="button" class="btn-sm" data-add-server-for-app="${escapeHtml(url)}">Add it</button></p>`);
-            else if (serverState(server, this.shell.authStatus[url]) === 'signin') rows.push(`<p class="app-launch-note">${escapeHtml(name)} needs you to sign in. <button type="button" class="btn-sm" data-sign-in-for-app="${escapeHtml(url)}">Sign in</button></p>`);
+            if (!server) rows.push(`<p class="app-launch-note">It calls ${named}, which isn't one of your servers${launched.embedded ? ' here' : ''}. <button type="button" class="btn-sm" data-add-server-for-app="${escapeHtml(url)}">Add it</button></p>`);
+            // A sign-in inside another site's page comes back to the client's own storage, not the embed's.
+            else if (serverState(server, this.shell.authStatus[url]) === 'signin') {
+                rows.push(launched.embedded
+                    ? `<p class="app-launch-note">${escapeHtml(name)} needs you to sign in, which works with the app on its own: Open on its own, above.</p>`
+                    : `<p class="app-launch-note">${escapeHtml(name)} needs you to sign in. <button type="button" class="btn-sm" data-sign-in-for-app="${escapeHtml(url)}">Sign in</button></p>`);
+            }
         }
         if (this.apps.startHeld && openRules(app).length) {
             rows.push(this.apps.runOnOpen() === null
