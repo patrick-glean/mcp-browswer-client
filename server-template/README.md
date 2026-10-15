@@ -31,14 +31,16 @@ A 2026-07-28 server describes itself in its `server/discover` result: `serverInf
 
 | Field | Where this client shows it | What to put in it |
 | --- | --- | --- |
-| `serverInfo.name` | The server's name in the rail, at the start of the server bar and in Go to, unless the person named it themselves; the log (`Connected to example-helpdesk 1.4.0`) | A short, stable identifier, such as `example-helpdesk`. People see it, so keep it readable |
-| `serverInfo.title` | The server bar, after the protocol (`Example Helpdesk 1.4.0`), and Info's Server row (`Example Helpdesk 1.4.0 (example-helpdesk)`) | The name people know the product by |
-| `serverInfo.version` | After the title, and in the log | The server's release |
+| `serverInfo.title` | The server's name in the rail, the server bar, Go to and the Chat app, unless the person gave it one of their own; Info's Title row | The name people know the product by: `Example Helpdesk` |
+| `serverInfo.name` | Info's Name row, and after the title in the server bar (`example-helpdesk 1.4.0`); the server's name in the lists when it has no title; the log (`Connected to example-helpdesk 1.4.0`) | A short, stable identifier, such as `example-helpdesk` |
+| `serverInfo.version` | The server bar, Info and the log | The server's release |
+| `serverInfo.description` | Info's Description row, line breaks kept; the Chat app's model gets it | One or two sentences on what the server is for |
 | `serverInfo.websiteUrl` | Info, as a link (`http` and `https` only) | Where people learn about the server and get help |
-| `serverInfo.description` | Not shown yet; the Chat app's model gets it | One sentence on what the server is for |
-| `serverInfo.icons` | Not shown yet | Each with a `src` (an `https` URL on your own domain, or a `data:` URI), `mimeType` and `sizes`; a version for light and dark backgrounds, marked with `theme` |
+| `serverInfo.icons` | Info lists each icon with its type, sizes and theme, drawn when it's safe to (below), and the one for the page's theme sits beside the server's name at the top. An icon it won't draw is listed with the reason | A `data:` URI, or an `https` URL on the server's own origin, with its `mimeType` and `sizes`; one for light and one for dark backgrounds, marked with `theme` |
 | `instructions` | Info, under "Instructions from the server", as plain text with its line breaks; the Chat app's model gets them | How the tools fit together: which to use for what and in what order, conventions (ID formats, time zones), limits, and what not to do without asking |
 | `capabilities` | Info, a badge each, with the flags set to `true` | Declare `tools`, `resources` and `prompts` when you have them: the client only lists resources and prompts, and only opens their tabs, when they're declared |
+
+Info also has all of it as JSON, as the server sent it. As the protocol's security considerations ask, Info draws an icon only when it's an `https` URL on the same origin as the server, or a `data:` URI of PNG, JPEG, WebP or SVG whose content really is that type, and loads it in an `<img>` without a referrer, which keeps SVG scripts from running.
 
 ## Tools
 
@@ -144,7 +146,7 @@ From a web page, requests also need CORS: the server has to allow the page's ori
 
 ## A checklist
 
-- [ ] `serverInfo` has a `name`, `title`, `version`, `description`, `websiteUrl` and `icons`.
+- [ ] `serverInfo` has a `name`, `title`, `version`, `description`, `websiteUrl` and `icons`, the icons as `data:` URIs or on the server's own `https` origin.
 - [ ] `instructions` say how the tools fit together, and what not to do without asking.
 - [ ] `capabilities` declare `tools`, `resources` and `prompts`, for each one the server has.
 - [ ] Every tool has a `title`, a `description` and all four annotation hints.

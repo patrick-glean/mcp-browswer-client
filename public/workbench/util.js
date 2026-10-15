@@ -48,15 +48,70 @@ export function download(filename, text, type = 'application/json') {
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-// Alias, else the name the server gave, else its host.
+// The name the person gave the server, else the title it gave itself, else its name, else its host.
 export function serverLabel(server, url = server?.url) {
-    if (server?.alias?.trim()) return server.alias.trim();
-    if (server?.name?.trim()) return server.name.trim();
+    const label = [server?.alias, server?.serverInfo?.title, server?.name].find(text => typeof text === 'string' && text.trim());
+    if (label) return label.trim();
     try {
         return new URL(url).host;
     } catch {
         return url || '';
     }
+}
+
+// Image types an icon may have, by the spec's allowlist (PNG and JPEG required, SVG and WebP
+// recommended), each with how its content starts. A browser draws SVG in an <img> without
+// running its scripts.
+const ICON_TYPES = {
+    'image/png': start => start.startsWith('\x89PNG'),
+    'image/jpeg': start => start.startsWith('\xFF\xD8\xFF'),
+    'image/jpg': start => start.startsWith('\xFF\xD8\xFF'),
+    'image/webp': start => start.startsWith('RIFF') && start.slice(8, 12) === 'WEBP',
+    'image/svg+xml': start => /^\s*(<\?xml|<svg|<!--)/i.test(start),
+};
+
+// The first bytes of a data: URI's content, base64 or percent-encoded.
+function dataStart(src) {
+    const comma = src.indexOf(',');
+    const content = comma < 0 ? '' : src.slice(comma + 1, comma + 65);
+    try {
+        return /;base64$/i.test(src.slice(5, Math.max(comma, 5))) ? atob(content.slice(0, content.length - (content.length % 4))) : decodeURIComponent(content);
+    } catch {
+        return '';
+    }
+}
+
+// Whether this client shows an icon a server listed, as the spec's security considerations ask:
+// an https URL on the server's own origin, or a data: URI of an allowed image type whose content
+// is that type. Returns {src} to draw, or {reason} it isn't drawn.
+export function iconSource(icon, serverUrl) {
+    const src = typeof icon?.src === 'string' ? icon.src.trim() : '';
+    if (!src) return { reason: 'it has no src' };
+    if (/^data:/i.test(src)) {
+        const type = /^data:([^;,]*)/i.exec(src)[1].toLowerCase();
+        if (!Object.hasOwn(ICON_TYPES, type)) return { reason: `it's a data: URI of ${type || 'no type'}, not an image type this client shows` };
+        return ICON_TYPES[type](dataStart(src)) ? { src } : { reason: `its data isn't ${type}` };
+    }
+    let url;
+    try {
+        url = new URL(src);
+    } catch {
+        return { reason: "its src isn't a URL" };
+    }
+    if (url.protocol !== 'https:') return { reason: "it's not https: or a data: URI" };
+    let origin = '';
+    try { origin = new URL(serverUrl).origin; } catch { /* no origin to match */ }
+    if (url.origin !== origin) return { reason: `it's not on the server's origin, ${origin}` };
+    return { src: url.href };
+}
+
+// The icon to draw beside a server's name: one made for the page's theme, else one for any
+// theme, else any icon this client shows.
+export function serverIcon(server) {
+    const dark = document.documentElement.classList.contains('dark-theme');
+    const shown = (server?.serverInfo?.icons || []).filter(icon => iconSource(icon, server.url).src);
+    const icon = shown.find(item => item.theme === (dark ? 'dark' : 'light')) || shown.find(item => !item.theme) || shown[0];
+    return icon ? iconSource(icon, server.url).src : null;
 }
 
 // 'healthy', 'unhealthy', 'signin' or 'unknown', for a server's status dot.

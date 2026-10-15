@@ -1,10 +1,25 @@
-// Side sheets over the right edge: the selected server's details (its address and name, what it
-// said when it connected, sign-in or a static token, its report, Delete) and the active
-// environment's variables.
+// Side sheets over the right edge: the selected server's details (its address and name,
+// everything it said about itself, the connection, sign-in or a static token, its report,
+// Delete) and the active environment's variables.
 
 import { VARIABLE_NAME } from '../template.js';
-import { confirmThen, debounce, describeSignIn, escapeHtml, serverLabel, serverState } from '../util.js';
+import { confirmThen, debounce, describeSignIn, escapeHtml, iconSource, serverIcon, serverLabel, serverState } from '../util.js';
 import { WbElement } from './base.js';
+
+const shortSrc = src => (src.length > 72 ? `${src.slice(0, 69)}…` : src);
+
+// Each icon the server listed: drawn when it's one this client shows, else why it isn't.
+function iconsHtml(icons, serverUrl) {
+    return `<div class="wb-icons">${icons.map(icon => {
+        const { src, reason } = iconSource(icon, serverUrl);
+        const about = [icon?.mimeType, Array.isArray(icon?.sizes) ? icon.sizes.join(' ') : '', icon?.theme ? `for ${icon.theme} backgrounds` : '']
+            .filter(Boolean).map(escapeHtml).join(' · ');
+        if (src) {
+            return `<figure class="wb-icon"><img src="${escapeHtml(src)}" alt="" width="32" height="32" referrerpolicy="no-referrer" loading="lazy" decoding="async"><figcaption>${about || 'An icon'}</figcaption></figure>`;
+        }
+        return `<figure class="wb-icon wb-icon-skipped"><span class="wb-icon-none" aria-hidden="true"></span><figcaption>${about ? `${about}. ` : ''}Not shown: ${escapeHtml(reason)}. <span class="mono">${escapeHtml(shortSrc(String(icon?.src ?? '')))}</span></figcaption></figure>`;
+    }).join('')}</div>`;
+}
 
 function variableRow(name, value) {
     return `
@@ -61,9 +76,11 @@ export class WbSheet extends WbElement {
             return;
         }
         this.shownUrl = server.url;
+        this.shownAbout = null;
         this.innerHTML = `
             <header class="wb-sheet-head">
                 <span class="status-indicator" data-dot aria-hidden="true"></span>
+                <img class="wb-server-icon" data-icon alt="" width="20" height="20" referrerpolicy="no-referrer" hidden>
                 <h2 id="sheetTitle" data-title></h2>
                 <span class="wb-spacer"></span>
                 ${closeButton}
@@ -75,9 +92,14 @@ export class WbSheet extends WbElement {
                     <p class="field-help" data-saved aria-live="polite">Changes save as you type.</p>
                 </section>
                 <section class="wb-sheet-section">
+                    <h3 class="subsection-title">What the server says about itself</h3>
+                    <dl class="info-list" id="serverAbout"></dl>
+                    <div data-instructions></div>
+                    <div data-sent></div>
+                </section>
+                <section class="wb-sheet-section">
                     <h3 class="subsection-title">Connection</h3>
                     <dl class="info-list" id="serverConnection"></dl>
-                    <div data-instructions></div>
                 </section>
                 <section class="wb-sheet-section">
                     <h3 class="subsection-title">Sign-in</h3>
@@ -101,46 +123,78 @@ export class WbSheet extends WbElement {
             </div>`;
         this.$('#serverUrlField').value = server.url;
         this.$('#serverAliasField').value = server.alias || '';
-        this.$('#serverAliasField').placeholder = server.name || "The server's own name";
+        this.$('#serverAliasField').placeholder = server.serverInfo?.title || server.name || "The server's own name";
         this.$('#serverTokenField').value = server.bearerToken || '';
         this.$('#staticToken').open = !!server.bearerToken;
         this.updateServerInfo();
         this.$('#sheetTitle').focus?.();
     }
 
-    // What the server said about itself when it connected, and how this client signs in to it.
+    // Everything the server said about itself when it last connected, the connection, and how
+    // this client signs in to it.
     updateServerInfo() {
         const server = this.shell.servers[this.shownUrl];
         if (!server || !this.$('#serverConnection')) return;
         const auth = this.shell.authStatus[server.url];
         const signedIn = !!auth?.signedIn;
+        const rowsHtml = rows => rows.map(([term, value]) => `<dt>${term}</dt><dd>${value}</dd>`).join('');
         this.$('[data-dot]').className = `status-indicator ${serverState(server, auth)}`;
         this.$('[data-title]').textContent = serverLabel(server);
+        const icon = this.$('[data-icon]');
+        const iconSrc = serverIcon(server);
+        if (iconSrc && icon.getAttribute('src') !== iconSrc) icon.src = iconSrc;
+        icon.hidden = !iconSrc;
+
         const info = server.serverInfo || {};
-        const rows = [['Status', escapeHtml({ connected: 'Connected', connecting: 'Connecting…', failed: 'Not connected' }[server.status] || 'Not connected yet')]];
-        if (server.protocolVersion) rows.push(['Protocol', escapeHtml(`${server.protocolVersion} (${server.era})`)]);
-        if (info.name || info.title) {
-            const label = [info.title || info.name, info.version].filter(Boolean).join(' ');
-            rows.push(['Server', escapeHtml(label) + (info.title && info.name && info.title !== info.name ? ` <span class="text-secondary">(${escapeHtml(info.name)})</span>` : '')]);
+        const about = [];
+        for (const [term, key] of [['Title', 'title'], ['Name', 'name'], ['Version', 'version']]) {
+            if (typeof info[key] === 'string' && info[key]) about.push([term, escapeHtml(info[key])]);
         }
-        if (server.status === 'connected') {
-            const capabilities = Object.entries(server.capabilities || {}).map(([name, details]) => {
+        if (typeof info.description === 'string' && info.description) about.push(['Description', `<span class="wb-preline">${escapeHtml(info.description)}</span>`]);
+        if (typeof info.websiteUrl === 'string' && info.websiteUrl) {
+            about.push(['Website', /^https?:\/\//i.test(info.websiteUrl)
+                ? `<a href="${escapeHtml(info.websiteUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(info.websiteUrl)}</a>`
+                : `${escapeHtml(info.websiteUrl)} <span class="text-secondary">(not a link: only http and https addresses are)</span>`]);
+        }
+        if (Array.isArray(info.icons) && info.icons.length) about.push(['Icons', iconsHtml(info.icons, server.url)]);
+        if (server.capabilities) {
+            const capabilities = Object.entries(server.capabilities).map(([name, details]) => {
                 const flags = details && typeof details === 'object' ? Object.keys(details).filter(flag => details[flag] === true) : [];
                 return `<span class="badge">${escapeHtml(name)}${flags.length ? ` <span class="text-secondary">${escapeHtml(flags.join(', '))}</span>` : ''}</span>`;
             });
-            rows.push(['Capabilities', capabilities.length ? `<span class="badge-row">${capabilities.join('')}</span>` : '<span class="text-secondary">None declared</span>']);
+            about.push(['Capabilities', capabilities.length ? `<span class="badge-row">${capabilities.join('')}</span>` : '<span class="text-secondary">None declared</span>']);
         }
+        // Drawn again only when it changes, so icons don't flicker and open sections stay open.
+        const aboutHtml = about.length ? rowsHtml(about) : '<dd class="text-secondary">Connect to see what the server says about itself.</dd>';
+        const sent = server.serverInfo
+            ? { protocolVersion: server.protocolVersion, serverInfo: server.serverInfo, capabilities: server.capabilities, instructions: server.instructions || undefined }
+            : null;
+        const shown = JSON.stringify([aboutHtml, server.instructions, sent]);
+        if (shown !== this.shownAbout) {
+            this.shownAbout = shown;
+            const aboutList = this.$('#serverAbout');
+            aboutList.innerHTML = aboutHtml;
+            aboutList.querySelectorAll('.wb-icon img').forEach(image => image.addEventListener('error', () => {
+                const figure = image.closest('.wb-icon');
+                figure.classList.add('wb-icon-skipped');
+                image.replaceWith(Object.assign(document.createElement('span'), { className: 'wb-icon-none' }));
+                figure.querySelector('figcaption').append(" Couldn't load it.");
+            }, { once: true }));
+            this.$('[data-instructions]').innerHTML = server.instructions
+                ? `<details class="instructions" open><summary>Instructions from the server</summary><p>${escapeHtml(server.instructions)}</p></details>`
+                : '';
+            this.$('[data-sent]').innerHTML = sent
+                ? `<details class="instructions"><summary>All of it, as JSON</summary><pre class="wb-json">${escapeHtml(JSON.stringify(sent, null, 2))}</pre></details>`
+                : '';
+        }
+
+        const rows = [['Status', escapeHtml({ connected: 'Connected', connecting: 'Connecting…', failed: 'Not connected' }[server.status] || 'Not connected yet')]];
+        if (server.protocolVersion) rows.push(['Protocol', escapeHtml(`${server.protocolVersion} (${server.era})`)]);
         if (server.bearerToken) rows.push(['Credentials', 'Static token']);
         else if (signedIn) rows.push(['Credentials', 'Signed in (OAuth)']);
-        if (info.websiteUrl && /^https?:\/\//i.test(info.websiteUrl)) {
-            rows.push(['Website', `<a href="${escapeHtml(info.websiteUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(info.websiteUrl)}</a>`]);
-        }
         if (server.date_added) rows.push(['Added', escapeHtml(new Date(server.date_added).toLocaleString())]);
         if (server.lastError) rows.push(['Last error', `<span class="text-error">${escapeHtml(server.lastError)}</span>`]);
-        this.$('#serverConnection').innerHTML = rows.map(([term, value]) => `<dt>${term}</dt><dd>${value}</dd>`).join('');
-        this.$('[data-instructions]').innerHTML = server.instructions
-            ? `<details class="instructions" open><summary>Instructions from the server</summary><p>${escapeHtml(server.instructions)}</p></details>`
-            : '';
+        this.$('#serverConnection').innerHTML = rowsHtml(rows);
         const signing = this.shell.signingIn?.url === server.url;
         this.$('[data-auth]').textContent = signing ? 'Signing in… finish it from the bar above.'
             : signedIn ? describeSignIn(auth)

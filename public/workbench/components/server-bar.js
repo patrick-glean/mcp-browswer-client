@@ -90,12 +90,18 @@ export class WbServerBar extends WbElement {
         const linkReady = !!signing?.authorizationUrl;
 
         this.$('[data-dot]').className = `status-indicator ${serverState(server, auth)}`;
-        this.$('[data-name]').textContent = serverLabel(server);
+        const label = serverLabel(server);
+        this.$('[data-name]').textContent = label;
         this.$('[data-name]').title = url;
         const parts = [{ connected: 'Connected', connecting: 'Connecting…', failed: 'Not connected' }[server.status] || 'Not connected yet'];
         if (server.protocolVersion) parts.push(`MCP ${server.protocolVersion} (${server.era})`);
         const info = server.serverInfo;
-        if (server.status === 'connected' && (info?.title || info?.name)) parts.push([info.title || info.name, info.version].filter(Boolean).join(' '));
+        if (server.status === 'connected' && info) {
+            // The server's own title or name and its version, without repeating the heading.
+            const own = [info.title, info.name].find(text => typeof text === 'string' && text.trim() && text.trim() !== label);
+            const identity = own ? [own, info.version].filter(Boolean).join(' ') : info.version ? `version ${info.version}` : '';
+            if (identity) parts.push(identity);
+        }
         if (server.bearerToken) parts.push('static token');
         this.$('[data-detail]').textContent = parts.join(' · ');
 

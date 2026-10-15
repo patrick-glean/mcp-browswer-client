@@ -2413,7 +2413,7 @@
             serverUrls.forEach(url => {
                 const opt = document.createElement('option');
                 opt.value = url;
-                opt.textContent = servers[url].alias || servers[url].name || url;
+                opt.textContent = servers[url].alias || servers[url].serverInfo?.title || servers[url].name || url;
                 selectElement.appendChild(opt);
             });
             // Default to first server or previous selection

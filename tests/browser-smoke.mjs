@@ -547,7 +547,7 @@ async function main() {
             const schemas = [...document.querySelectorAll('#requestPane .tool-schema summary')].map(s => s.textContent).join(', ');
             const hidden = document.getElementById('hiddenTools');
             document.getElementById('serverInfoBtn').click();
-            const connection = document.getElementById('serverConnection')?.innerText.replace(/\\s+/g, ' ') || '';
+            const connection = ['serverAbout', 'serverConnection'].map(id => document.getElementById(id)?.innerText || '').join(' ').replace(/\\s+/g, ' ');
             document.querySelector('wb-sheet [data-close-sheet]').click();
             return {
                 echo, count: countBadges, schemas, hints, writes, connection,
@@ -564,7 +564,8 @@ async function main() {
             inspector.schemas === 'Input schema, Output schema, Definition (raw JSON)', inspector.schemas);
         check('inspector: hidden tools are listed with the reason', /1 hidden tool/.test(inspector.hidden) && /broken_header/.test(inspector.hidden), inspector.hidden);
         check('inspector: Info shows what the server said about itself',
-            /Mock MCP Server 2\.0\.0/.test(inspector.connection) && /Capabilities prompts resources tools/.test(inspector.connection), inspector.connection);
+            /Name Mock MCP Server Version 2\.0\.0/.test(inspector.connection) && /Capabilities prompts resources tools/.test(inspector.connection)
+                && /Status Connected Protocol 2026-07-28 \(modern\)/.test(inspector.connection), inspector.connection);
         // The mock has too few tools to be grouped, so the grouping is checked on GitHub's names.
         const groups = await page.run(`import('./workbench/components/tools.js').then(({ groupTools }) => {
             const names = ['get_me', 'list_issues', 'get_issue', 'create_issue', 'add_issue_comment', 'list_pull_requests', 'get_pull_request',
@@ -661,17 +662,20 @@ async function main() {
         const templateUrl = `${HOST}:${PORTS.template}/`;
         const helpdesk = await addAndConnect(page, templateUrl, '');
         const helpdeskTools = await toolNames(page, templateUrl);
-        check('server template: connects, and the rail names it after its serverInfo.name',
-            helpdesk?.status === 'connected' && helpdesk.name === 'example-helpdesk' && helpdeskTools.length === 6
-                && (await page.run(`${serverRow(templateUrl)}.querySelector('.wb-row-label').textContent`)) === 'example-helpdesk',
-            `${helpdesk?.name}: ${helpdeskTools.join(', ')}`);
+        const helpdeskLabel = await page.run(`${serverRow(templateUrl)}.querySelector('.wb-row-label').textContent`);
+        check('server template: connects, and without a name of the person\'s the rail shows its serverInfo.title',
+            helpdesk?.status === 'connected' && helpdesk.name === 'example-helpdesk' && helpdeskTools.length === 6 && helpdeskLabel === 'Example Helpdesk',
+            `${helpdeskLabel} (${helpdesk?.name}): ${helpdeskTools.join(', ')}`);
         const shownHelpdesk = await page.run(`(() => {
             ${serverRow(templateUrl)}.click();
             const detail = document.querySelector('wb-server-bar [data-detail]').textContent;
             document.getElementById('serverInfoBtn').click();
-            const info = document.getElementById('serverConnection').innerText.replace(/\\s+/g, ' ');
-            const website = document.querySelector('#serverConnection a')?.href || '';
+            const info = document.getElementById('serverAbout').innerText.replace(/\\s+/g, ' ').trim();
+            const website = document.querySelector('#serverAbout a')?.href || '';
             const instructions = document.querySelector('wb-sheet .instructions p')?.textContent || '';
+            const icons = [...document.querySelectorAll('#serverAbout .wb-icon')].map(icon => icon.querySelector('img') ? 'drawn' : 'skipped').join(' ');
+            const headerIcon = document.querySelector('wb-sheet [data-icon]');
+            const iconInHeader = !headerIcon.hidden && headerIcon.src.startsWith('data:image/svg+xml');
             document.querySelector('wb-sheet [data-close-sheet]').click();
             const hints = [...document.querySelectorAll('#toolList .wb-tool')]
                 .map(row => row.dataset.tool + ' ' + [...row.querySelectorAll('.hint')].map(hint => hint.textContent).join(' ')).join('; ');
@@ -682,12 +686,17 @@ async function main() {
             const query = document.querySelector('#requestForm [name="query"]').value;
             const folded = document.querySelector('#requestForm .wb-optional summary')?.textContent || '';
             ${toolRow('delete_ticket')}.click();
-            return { detail, info, website, instructions, hints, search, query, folded, remove: heading() };
+            return { detail, info, website, instructions, icons, iconInHeader, hints, search, query, folded, remove: heading() };
         })()`);
-        check('server template: the server bar and Info show its title, version, website and instructions',
-            shownHelpdesk.detail.endsWith('Example Helpdesk 1.4.0') && shownHelpdesk.info.includes('Server Example Helpdesk 1.4.0 (example-helpdesk)')
+        check('server template: the server bar and Info show everything it says about itself',
+            shownHelpdesk.detail.endsWith('example-helpdesk 1.4.0')
+                && shownHelpdesk.info.startsWith('Title Example Helpdesk Name example-helpdesk Version 1.4.0 Description Search, read and update')
+                && /Capabilities prompts resources tools$/.test(shownHelpdesk.info)
                 && shownHelpdesk.website === 'https://helpdesk.example.com/docs/mcp' && shownHelpdesk.instructions.includes('\n- To find a ticket, use search_tickets'),
-            `${shownHelpdesk.detail} | ${shownHelpdesk.info}`);
+            `${shownHelpdesk.detail} | ${shownHelpdesk.info.slice(0, 300)}`);
+        check('server template: Info draws its data: icons, one in its header, and says why it skips an icon on another origin',
+            shownHelpdesk.icons === 'drawn drawn skipped' && shownHelpdesk.iconInHeader && /Not shown: it's not on the server's origin, http:\/\/127\.0\.0\.1:18093/.test(shownHelpdesk.info),
+            `${shownHelpdesk.icons}; header icon: ${shownHelpdesk.iconInHeader}`);
         check('server template: each tool\'s annotations mark its row',
             shownHelpdesk.hints === 'search_tickets ro; get_ticket ro; update_ticket writes; delete_ticket del; ticket_volume_chart ro; fetch_help_article ro web', shownHelpdesk.hints);
         check('server template: a tool shows its title and badges, and Pre-fill fills its required field from its examples',
