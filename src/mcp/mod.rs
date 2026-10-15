@@ -24,6 +24,8 @@ pub struct Options {
     pub bearer_token: Option<String>,
     /// Refetch cached data (the tool list) instead of reusing it.
     pub refresh: bool,
+    /// Optional fields to add to what this client tells the server about itself.
+    pub client_info: Option<Value>,
 }
 
 impl Options {
@@ -226,18 +228,22 @@ fn check_result_type(result: Value) -> Result<Value, McpError> {
 
 async fn establish(url: &str, opts: &Options) -> Result<Connection, McpError> {
     let auth = opts.auth_headers();
+    let info = client_info(opts.client_info.as_ref());
     let mut version = MODERN_VERSION.to_string();
-    let mut probe = match modern::discover(url, &version, &auth).await {
-        Err(err) if err.kind == ErrorKind::Network => return legacy_after_blocked_probe(url, &auth, err).await,
+    let mut probe = match modern::discover(url, &version, &auth, &info).await {
+        Err(err) if err.kind == ErrorKind::Network => return legacy_after_blocked_probe(url, &auth, info, err).await,
         other => other?,
     };
     if let Probe::Retry(next) = probe {
         version = next;
-        probe = modern::discover(url, &version, &auth).await?;
+        probe = modern::discover(url, &version, &auth, &info).await?;
     }
     match probe {
-        Probe::Modern(result) => Ok(modern_connection(version, modern::parse_discovery(&result))),
-        Probe::Legacy => Ok(legacy_connection(legacy::initialize(url, &auth).await?)),
+        Probe::Modern(result) => Ok(modern_connection(version, modern::parse_discovery(&result), info)),
+        Probe::Legacy => {
+            let session = legacy::initialize(url, &auth, &info).await?;
+            Ok(legacy_connection(session, info))
+        }
         Probe::Retry(_) => Err(McpError::new(
             ErrorKind::UnsupportedVersion,
             "The server rejected every protocol version this client supports.",
@@ -249,13 +255,13 @@ async fn establish(url: &str, opts: &Options) -> Result<Connection, McpError> {
 /// Browsers report a CORS preflight that rejects the 2026-07-28 headers (`Mcp-Method` and
 /// the rest) exactly like an unreachable server. The 2025 handshake sends fewer headers, so a
 /// server whose allowlist predates them still gets a chance.
-async fn legacy_after_blocked_probe(url: &str, auth: &[(String, String)], probe_error: McpError) -> Result<Connection, McpError> {
+async fn legacy_after_blocked_probe(url: &str, auth: &[(String, String)], info: Value, probe_error: McpError) -> Result<Connection, McpError> {
     logging::info(
         url,
         "server/discover got no reply the browser could read, which is also what happens when CORS rejects the 2026-07-28 headers; trying the 2025 initialize handshake",
     );
-    match legacy::initialize(url, auth).await {
-        Ok(session) => Ok(legacy_connection(session)),
+    match legacy::initialize(url, auth, &info).await {
+        Ok(session) => Ok(legacy_connection(session, info)),
         Err(handshake_error) => Err(after_blocked_probe(url, probe_error, handshake_error)),
     }
 }
@@ -277,7 +283,7 @@ fn after_blocked_probe(url: &str, probe_error: McpError, handshake_error: McpErr
     }
 }
 
-fn modern_connection(version: String, discovery: modern::Discovery) -> Connection {
+fn modern_connection(version: String, discovery: modern::Discovery, client_info: Value) -> Connection {
     Connection {
         era: Era::Modern,
         version,
@@ -285,11 +291,12 @@ fn modern_connection(version: String, discovery: modern::Discovery) -> Connectio
         capabilities: discovery.capabilities,
         server_info: discovery.server_info,
         instructions: discovery.instructions,
+        client_info,
         tools: None,
     }
 }
 
-fn legacy_connection(session: legacy::Session) -> Connection {
+fn legacy_connection(session: legacy::Session, client_info: Value) -> Connection {
     Connection {
         era: Era::Legacy,
         version: session.version,
@@ -297,6 +304,7 @@ fn legacy_connection(session: legacy::Session) -> Connection {
         capabilities: session.capabilities,
         server_info: session.server_info,
         instructions: session.instructions,
+        client_info,
         tools: None,
     }
 }
@@ -309,14 +317,20 @@ pub fn connection_info(url: &str, connection: &Connection) -> Value {
         "serverInfo": connection.server_info,
         "capabilities": connection.capabilities,
         "instructions": connection.instructions,
+        "clientInfo": connection.client_info,
     })
 }
 
 /// The remembered connection, or a new one. After a service worker restart the registry is
-/// empty, so the first request reconnects on its own.
+/// empty, so the first request reconnects on its own. What the client tells the server about
+/// itself is part of the connection, so a change to it connects again.
 async fn connection_for(url: &str, opts: &Options) -> Result<Connection, McpError> {
     if let Some(connection) = registry::get(url) {
-        return Ok(connection);
+        if connection.client_info == client_info(opts.client_info.as_ref()) {
+            return Ok(connection);
+        }
+        logging::info(url, "Reconnecting: what this client tells the server about itself changed");
+        registry::remove(url);
     }
     let connection = establish(url, opts).await?;
     registry::put(url, connection.clone());
@@ -366,7 +380,7 @@ async fn send(
         Era::Modern => {
             headers.extend(modern::request_headers(method, &connection.version, &params));
             headers.extend(extra_headers.iter().cloned());
-            request_body(next_request_id(), method, modern::with_meta(params, &connection.version))
+            request_body(next_request_id(), method, modern::with_meta(params, &connection.version, &connection.client_info))
         }
         Era::Legacy => {
             headers.extend(legacy::session_headers(&connection.version, connection.session_id.as_deref()));
@@ -392,16 +406,19 @@ mod tests {
             capabilities: json!({ "tools": {} }),
             server_info: Some(json!({ "name": "Mock", "version": "1.0.0" })),
             instructions: None,
+            client_info: client_info(None),
             tools: None,
         }
     }
 
     #[test]
     fn parses_options_from_the_service_worker() {
-        let opts = Options::parse(r#"{"bearerToken":" abc ","refresh":true}"#).unwrap();
+        let opts = Options::parse(r#"{"bearerToken":" abc ","refresh":true,"clientInfo":{"title":"MCP Browser Client"}}"#).unwrap();
         assert!(opts.refresh);
         assert_eq!(opts.auth_headers(), vec![("Authorization".to_string(), "Bearer abc".to_string())]);
+        assert_eq!(client_info(opts.client_info.as_ref())["title"], "MCP Browser Client");
         assert!(Options::parse("").unwrap().auth_headers().is_empty());
+        assert!(Options::parse("").unwrap().client_info.is_none());
         assert!(Options::parse(r#"{"bearerToken":"  "}"#).unwrap().auth_headers().is_empty());
         assert!(Options::parse("not json").is_err());
     }
@@ -467,6 +484,7 @@ mod tests {
         assert_eq!(info["protocolVersion"], MODERN_VERSION);
         assert_eq!(info["serverInfo"]["name"], "Mock");
         assert_eq!(info["capabilities"], json!({ "tools": {} }));
+        assert_eq!(info["clientInfo"], json!({ "name": CLIENT_NAME, "version": CLIENT_VERSION }));
     }
 
     #[test]

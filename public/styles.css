@@ -140,6 +140,7 @@ hr.divider {
 .icon-download { --icon: url('icons/download.svg'); }
 .icon-help { --icon: url('icons/help-circle.svg'); }
 .icon-search { --icon: url('icons/search.svg'); }
+.icon-settings { --icon: url('icons/settings.svg'); }
 .icon-theme { --icon: url('icons/moon.svg'); }
 .dark-theme .icon-theme { --icon: url('icons/sun.svg'); }
 

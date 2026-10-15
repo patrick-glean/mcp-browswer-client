@@ -64,7 +64,12 @@ function wireTopBar(workbench) {
     workbench.on('environment', renderEnvironments);
     const variables = document.getElementById('editEnvBtn');
     variables.addEventListener('click', () => (workbench.sheet === 'variables' ? workbench.closeSheet() : workbench.openSheet('variables')));
-    workbench.on('sheet', ({ kind }) => variables.setAttribute('aria-expanded', String(kind === 'variables')));
+    const settings = document.getElementById('settingsBtn');
+    settings.addEventListener('click', () => (workbench.sheet === 'settings' ? workbench.closeSheet() : workbench.openSheet('settings')));
+    workbench.on('sheet', ({ kind }) => {
+        variables.setAttribute('aria-expanded', String(kind === 'variables'));
+        settings.setAttribute('aria-expanded', String(kind === 'settings'));
+    });
     document.getElementById('gotoBtn').addEventListener('click', () => workbench.emit('palette'));
 }
 

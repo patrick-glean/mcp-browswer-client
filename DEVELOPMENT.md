@@ -39,7 +39,7 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 
 | Export | Returns |
 | --- | --- |
-| `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions}` |
+| `connect(url, options)` | `{url, era, protocolVersion, serverInfo, capabilities, instructions, clientInfo}` |
 | `list_tools(url, options)` | `{tools, rejected, ttlMs, cacheScope, fromCache}` |
 | `call_tool(url, name, argsJson, options)` | the JSON-RPC `result` (check `resultType`: `complete` or `input_required`) |
 | `list_resources(url, options)` | `{resources}`, every page |
@@ -56,7 +56,7 @@ Every library exports the same functions. MCP and sign-in calls take and return 
 | `get_uptime()`, `increment_uptime()`, `get_metadata()` | the Runtime menu's health check |
 | `reset()` (optional) | nothing; drops every connection when the worker unloads the library |
 
-`options` is `{"bearerToken"?: string, "refresh"?: boolean}`. Every call connects on its own if needed, so it keeps working after the browser restarts the worker. Only the tool list is cached (for its `ttlMs`); resources, templates and prompts are fetched fresh each time, and `resources/read` and `prompts/get` send `Mcp-Name` (the URI or the prompt's name) on modern servers, as `tools/call` does. That's the whole interface: anything an app needs beyond MCP and sign-in, such as the Chat app's instructions, belongs to the worker.
+`options` is `{"bearerToken"?: string, "refresh"?: boolean, "clientInfo"?: {title?, description?, websiteUrl?, icons?}}`. `clientInfo` adds those fields to how the library introduces the client, whose `name` (`mcp-browser-client`) and `version` are the library's own: in `_meta` on every 2026-07-28 request, and in the 2025 `initialize`. It's part of the connection, so a call with a different `clientInfo` connects again (the log says "Reconnecting: what this client tells the server about itself changed"), and `connect` returns the `clientInfo` it sent. Every call connects on its own if needed, so it keeps working after the browser restarts the worker. Only the tool list is cached (for its `ttlMs`); resources, templates and prompts are fetched fresh each time, and `resources/read` and `prompts/get` send `Mcp-Name` (the URI or the prompt's name) on modern servers, as `tools/call` does. That's the whole interface: anything an app needs beyond MCP and sign-in, such as the Chat app's instructions, belongs to the worker.
 
 The auth exports do the network steps and checks but store nothing; the worker keeps their records in IndexedDB (`authStore.js`):
 
@@ -104,6 +104,8 @@ Both pass the same smoke test and send the same requests in the same order, with
 | `{type: 'check_client'}` | the JSON-RPC notification `client_status {status: {healthy, uptime}, metadata}` to every page |
 | `{type: 'reload_client'}`, `{type: 'unload_client'}` | `client_loaded` after a reload; `client_status {healthy: false}` if it fails |
 | `{type: 'init_mcp_servers_index', servers}` | none; the server list (with static tokens) for calls the worker starts itself |
+
+Messages about a server (`connect-mcp`, the lists, `read_resource`, `get_prompt`, `call_tool`) also carry `clientInfo?`: the fields of the client's description (Settings) ticked in the server's Info. The worker passes it to the library (`clientInfoFor` in `sw.js`), falling back to the server list for calls it starts itself. The page keeps the description in `localStorage` `clientDescription`, and each server's ticked fields and the values they give (`clientInfoFields`, `clientInfo`) in its record in `servers`; `AppShell.refreshClientInfo` brings them up to date and connects the server again when they change.
 
 `status` is `{signedIn, issuer?, scope?, expiresAt?, refreshable?, clientId?}`: pages learn whether they're signed in, never the tokens. MCP calls get their credentials in the worker: a static `bearerToken` wins, otherwise the stored access token, refreshed first when it expires within a minute. When a server turns down an OAuth token with `auth_required`, the worker refreshes it once and retries (`withAuth` in `sw.js`). Refreshes for one server run one at a time, because refresh tokens may rotate.
 

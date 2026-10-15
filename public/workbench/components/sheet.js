@@ -1,6 +1,7 @@
 // Side sheets over the right edge: the selected server's details (its address and name,
-// everything it said about itself, the connection, sign-in or a static token, its report,
-// Delete) and the active environment's variables.
+// everything it said about itself, the connection, what this client tells it, sign-in or a
+// static token, its report, Delete), the active environment's variables, and Settings (how this
+// client describes itself).
 
 import { VARIABLE_NAME } from '../template.js';
 import { confirmThen, debounce, describeSignIn, escapeHtml, iconSource, serverIcon, serverLabel, serverState } from '../util.js';
@@ -32,9 +33,13 @@ function variableRow(name, value) {
 
 const closeButton = '<button type="button" class="btn-icon btn-sm btn-tertiary" data-close-sheet aria-label="Close"><span class="icon icon-x" aria-hidden="true"></span></button>';
 
+// The fields of this client's description a server can also get, with Settings' key for each.
+const CLIENT_FIELDS = [['title', 'Title', 'title'], ['description', 'Description', 'description'], ['websiteUrl', 'Website', 'websiteUrl'], ['icons', 'Icon', 'iconUrl']];
+
 export class WbSheet extends WbElement {
     setup(signal) {
         this.saveServerSoon = debounce(() => this.saveServerFields(), 600);
+        this.saveDescriptionSoon = debounce(() => this.saveDescription(), 800);
         this.workbench.on('sheet', () => this.render(), signal);
         this.shell.on('select', () => {
             if (this.workbench.sheet === 'server') this.render();
@@ -44,6 +49,7 @@ export class WbSheet extends WbElement {
         };
         this.shell.on('servers', serverChanged, signal);
         this.shell.on('auth', serverChanged, signal);
+        this.shell.on('client-description', serverChanged, signal);
         this.workbench.on('environment', ({ edited }) => {
             if (this.workbench.sheet === 'variables' && !edited) this.render();
         }, signal);
@@ -51,6 +57,10 @@ export class WbSheet extends WbElement {
         this.addEventListener('input', event => this.edited(event), { signal });
         this.addEventListener('change', event => {
             if (event.target.id === 'sheetEnvSelect') this.workbench.selectEnvironment(event.target.value);
+            if (event.target.dataset.clientField !== undefined) {
+                const fields = [...this.querySelectorAll('[data-client-field]:checked')].map(box => box.dataset.clientField);
+                this.shell.setClientInfoFields(this.shownUrl, fields);
+            }
         }, { signal });
     }
 
@@ -64,6 +74,7 @@ export class WbSheet extends WbElement {
         this.setAttribute('role', 'dialog');
         this.setAttribute('aria-labelledby', 'sheetTitle');
         if (kind === 'server') this.renderServer();
+        else if (kind === 'settings') this.renderSettings();
         else this.renderVariables();
     }
 
@@ -77,6 +88,7 @@ export class WbSheet extends WbElement {
         }
         this.shownUrl = server.url;
         this.shownAbout = null;
+        this.shownClient = null;
         this.innerHTML = `
             <header class="wb-sheet-head">
                 <span class="status-indicator" data-dot aria-hidden="true"></span>
@@ -101,6 +113,7 @@ export class WbSheet extends WbElement {
                     <h3 class="subsection-title">Connection</h3>
                     <dl class="info-list" id="serverConnection"></dl>
                 </section>
+                <section class="wb-sheet-section" id="clientInfoSection"></section>
                 <section class="wb-sheet-section">
                     <h3 class="subsection-title">Sign-in</h3>
                     <p class="text-secondary" data-auth></p>
@@ -195,6 +208,11 @@ export class WbSheet extends WbElement {
         if (server.date_added) rows.push(['Added', escapeHtml(new Date(server.date_added).toLocaleString())]);
         if (server.lastError) rows.push(['Last error', `<span class="text-error">${escapeHtml(server.lastError)}</span>`]);
         this.$('#serverConnection').innerHTML = rowsHtml(rows);
+        const clientHtml = this.clientInfoHtml(server);
+        if (clientHtml !== this.shownClient) {
+            this.shownClient = clientHtml;
+            this.$('#clientInfoSection').innerHTML = clientHtml;
+        }
         const signing = this.shell.signingIn?.url === server.url;
         this.$('[data-auth]').textContent = signing ? 'Signing in… finish it from the bar above.'
             : signedIn ? describeSignIn(auth)
@@ -204,6 +222,31 @@ export class WbSheet extends WbElement {
         this.$('[data-sheet-sign-in]').hidden = signing || signedIn || !server.needsSignIn;
         this.$('[data-sheet-sign-out]').hidden = signing || !signedIn;
         this.$('[data-sheet-connect]').textContent = server.status === 'connected' ? 'Reconnect' : 'Connect';
+    }
+
+    // What this client tells the server about itself: its name and version always, and whichever
+    // fields of Settings' description are ticked here. Below, what it told the server when it last
+    // connected, as the MCP client library reported it.
+    clientInfoHtml(server) {
+        const description = this.shell.clientDescription;
+        const chosen = new Set(server.clientInfoFields || []);
+        const boxes = CLIENT_FIELDS.map(([field, label, key]) => {
+            const value = String(description[key] || '').trim();
+            const shown = value.length > 60 ? `${value.slice(0, 57)}…` : value;
+            return `
+                <label class="wb-check">
+                    <input type="checkbox" data-client-field="${field}" ${chosen.has(field) && value ? 'checked' : ''} ${value ? '' : 'disabled'}>
+                    <span><strong>${label}</strong> <span class="text-secondary">${value ? escapeHtml(shown) : 'empty in Settings'}</span></span>
+                </label>`;
+        }).join('');
+        const sent = server.clientInfoSent
+            ? `<details class="instructions"><summary>What it told the server when it last connected</summary><pre class="wb-json">${escapeHtml(JSON.stringify(server.clientInfoSent, null, 2))}</pre></details>`
+            : '';
+        return `
+            <h3 class="subsection-title">What this client tells it</h3>
+            <p class="text-secondary">Every server gets this client's name and version. This one also gets what you tick, from <button type="button" class="link-button" data-open-settings>Settings</button>:</p>
+            <div class="wb-client-fields">${boxes}</div>
+            ${sent}`;
     }
 
     // Saves the address, name and token; a new address is a new server to connect to.
@@ -220,6 +263,47 @@ export class WbSheet extends WbElement {
         saved.textContent = /^https?:\/\/\S+$/i.test(address) ? 'Saved.' : 'Saved, except the address, which needs to start with https:// or http://.';
         clearTimeout(this.savedTimer);
         this.savedTimer = setTimeout(() => { saved.textContent = 'Changes save as you type.'; }, 2500);
+    }
+
+    // --- Settings ---
+
+    // How this client describes itself. Servers get its name and version, and only the fields
+    // their Info ticks of the rest.
+    renderSettings() {
+        const version = this.shell.clientVersion ? escapeHtml(this.shell.clientVersion) : "the MCP client library's";
+        this.innerHTML = `
+            <header class="wb-sheet-head">
+                <h2 id="sheetTitle" tabindex="-1">Settings</h2>
+                <span class="wb-spacer"></span>
+                ${closeButton}
+            </header>
+            <div class="wb-sheet-body">
+                <section class="wb-sheet-section">
+                    <h3 class="subsection-title">How this client describes itself</h3>
+                    <p class="text-secondary">Every server gets this client's name and version. A server also gets the fields below that you tick in its Info; until you do, it gets nothing more.</p>
+                    <dl class="info-list"><dt>Name</dt><dd class="mono">mcp-browser-client</dd><dt>Version</dt><dd>${version}</dd></dl>
+                    <label class="field"><span class="field-label">Title</span><input type="text" data-description-field="title" autocomplete="off"></label>
+                    <label class="field"><span class="field-label">Description</span><textarea data-description-field="description" rows="3"></textarea></label>
+                    <label class="field"><span class="field-label">Website</span><input type="text" data-description-field="websiteUrl" spellcheck="false" autocomplete="off"></label>
+                    <label class="field"><span class="field-label">Icon</span><input type="text" data-description-field="iconUrl" spellcheck="false" autocomplete="off" placeholder="An https URL, or a data: URI"></label>
+                    <p class="field-help" data-description-saved aria-live="polite">Changes save as you type. A server that gets a changed field connects again, so it hears the new one.</p>
+                    <div class="button-row"><button type="button" class="btn-sm" data-reset-description>Reset to the defaults</button></div>
+                </section>
+            </div>`;
+        for (const input of this.querySelectorAll('[data-description-field]')) input.value = this.shell.clientDescription[input.dataset.descriptionField] || '';
+        this.$('#sheetTitle').focus?.();
+    }
+
+    saveDescription() {
+        const fields = [...this.querySelectorAll('[data-description-field]')];
+        if (!fields.length) return;
+        this.shell.setClientDescription(Object.fromEntries(fields.map(input => [input.dataset.descriptionField, input.value.trim()])));
+        const saved = this.$('[data-description-saved]');
+        saved.textContent = 'Saved.';
+        clearTimeout(this.descriptionTimer);
+        this.descriptionTimer = setTimeout(() => {
+            saved.textContent = 'Changes save as you type. A server that gets a changed field connects again, so it hears the new one.';
+        }, 2500);
     }
 
     // --- Variables ---
@@ -279,6 +363,7 @@ export class WbSheet extends WbElement {
     edited(event) {
         if (event.target.closest('#envVariables') || event.target.id === 'envName') return this.variablesEdited();
         if (['serverUrlField', 'serverAliasField', 'serverTokenField'].includes(event.target.id)) this.saveServerSoon();
+        if (event.target.dataset.descriptionField !== undefined) this.saveDescriptionSoon();
     }
 
     async clicked(event) {
@@ -286,6 +371,11 @@ export class WbSheet extends WbElement {
         if (!button || button.disabled) return;
         const url = this.shownUrl;
         if (button.dataset.closeSheet !== undefined) return this.workbench.closeSheet();
+        if (button.dataset.openSettings !== undefined) return this.workbench.openSheet('settings');
+        if (button.dataset.resetDescription !== undefined) {
+            this.shell.resetClientDescription();
+            return this.renderSettings();
+        }
         if (button.dataset.sheetConnect !== undefined) return this.shell.connectMcpServer(url);
         if (button.dataset.sheetReport !== undefined) return this.shell.exportToolList(url);
         if (button.dataset.sheetSignIn !== undefined) return this.shell.signIn(url);

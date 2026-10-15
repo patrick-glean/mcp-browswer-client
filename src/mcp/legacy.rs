@@ -15,11 +15,12 @@ pub struct Session {
     pub instructions: Option<String>,
 }
 
-pub fn initialize_params() -> Value {
+/// The `initialize` request's params; `client_info` is what this client tells the server about itself.
+pub fn initialize_params(client_info: &Value) -> Value {
     json!({
         "protocolVersion": LEGACY_VERSIONS[0],
         "capabilities": {},
-        "clientInfo": { "name": CLIENT_NAME, "version": CLIENT_VERSION }
+        "clientInfo": client_info
     })
 }
 
@@ -53,8 +54,8 @@ pub fn session_headers(version: &str, session_id: Option<&str>) -> Vec<(String, 
     headers
 }
 
-pub async fn initialize(url: &str, auth: &[(String, String)]) -> Result<Session, McpError> {
-    let body = request_body(next_request_id(), "initialize", initialize_params());
+pub async fn initialize(url: &str, auth: &[(String, String)], client_info: &Value) -> Result<Session, McpError> {
+    let body = request_body(next_request_id(), "initialize", initialize_params(client_info));
     let reply = transport::post(url, auth, &body, CONNECT_TIMEOUT_MS).await?;
     let result = interpret_reply(&reply)?;
     let session = parse_initialize(&result, reply.session_id.clone())?;
@@ -90,8 +91,10 @@ mod tests {
 
     #[test]
     fn offers_the_newest_legacy_version() {
-        assert_eq!(initialize_params()["protocolVersion"], LEGACY_VERSIONS[0]);
-        assert_eq!(initialize_params()["clientInfo"]["name"], CLIENT_NAME);
+        let params = initialize_params(&client_info(Some(&json!({ "websiteUrl": "https://example.com/" }))));
+        assert_eq!(params["protocolVersion"], LEGACY_VERSIONS[0]);
+        assert_eq!(params["clientInfo"]["name"], CLIENT_NAME);
+        assert_eq!(params["clientInfo"]["websiteUrl"], "https://example.com/");
     }
 
     #[test]

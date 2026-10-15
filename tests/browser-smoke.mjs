@@ -733,6 +733,78 @@ async function main() {
         await page.run(`${serverRow(modernUrl)}.click()`);
         await showView('tools');
 
+        // What this client tells servers about itself: its name and version, plus only the fields
+        // of Settings' description a server's Info ticks. The trace has what each request carried.
+        const lastSent = (url, method) => `(() => {
+            const sent = ${entries}.filter(e => e.source === ${JSON.stringify(CLIENT.logSource)} && e.level === 'debug' && e.server === ${JSON.stringify(url)} && e.message.startsWith('→ ${method}'));
+            const params = sent.at(-1)?.detail?.body?.params;
+            const info = params?._meta?.['io.modelcontextprotocol/clientInfo'] ?? params?.clientInfo;
+            return info ? JSON.stringify(info) : null;
+        })()`;
+        // Connects again and waits for the request that introduces the client to differ from `before`.
+        const reconnectAndRead = async (url, method, before) => {
+            await page.run(`appShell.connectMcpServer(${JSON.stringify(url)})`);
+            await page.waitFor(`${lastSent(url, method)} !== ${JSON.stringify(before)} && appShell.servers[${JSON.stringify(url)}].status === 'connected'`, 10000);
+            return page.run(lastSent(url, method));
+        };
+        const ofInfo = text => (text ? JSON.parse(text) : {});
+        const bareInfo = ofInfo(await reconnectAndRead(modernUrl, 'server/discover', 'none yet'));
+        check('client description: a server gets only the client\'s name and version until its Info ticks more',
+            JSON.stringify(Object.keys(bareInfo).sort()) === '["name","version"]' && bareInfo.name === 'mcp-browser-client', JSON.stringify(bareInfo));
+        const settings = await page.run(`(() => {
+            document.getElementById('settingsBtn').click();
+            const title = document.querySelector('wb-sheet [data-description-field="title"]');
+            const shown = title.value;
+            title.value = 'Smoke Test Client';
+            title.dispatchEvent(new Event('input', { bubbles: true }));
+            return shown;
+        })()`);
+        await page.waitFor(`appShell.clientDescription.title === 'Smoke Test Client'`, 5000);
+        const bareSent = await page.run(lastSent(modernUrl, 'server/discover'));
+        await page.run(`(() => {
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            ${serverRow(modernUrl)}.click();
+            document.getElementById('serverInfoBtn').click();
+            const boxes = ['title', 'description'].map(field => document.querySelector('#clientInfoSection [data-client-field="' + field + '"]'));
+            boxes.forEach(box => { box.checked = true; });
+            boxes[1].dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        await page.waitFor(`${lastSent(modernUrl, 'server/discover')} !== ${JSON.stringify(bareSent)} && appShell.servers[${JSON.stringify(modernUrl)}].status === 'connected'`, 10000);
+        const richInfo = ofInfo(await page.run(lastSent(modernUrl, 'server/discover')));
+        const toldInInfo = await page.waitFor(`document.querySelector('#clientInfoSection pre')?.textContent.includes('Smoke Test Client') || null`, 5000);
+        check('client description: Settings has the client\'s description, and a server whose Info ticks fields connects again with them',
+            settings === 'MCP Browser Client' && richInfo.title === 'Smoke Test Client' && /^A browser-based MCP client/.test(richInfo.description || '')
+                && !('websiteUrl' in richInfo) && !('icons' in richInfo) && !!toldInInfo,
+            `${settings} → ${JSON.stringify(richInfo).slice(0, 160)}`);
+        await page.run(`(() => {
+            document.getElementById('settingsBtn').click();
+            const title = document.querySelector('wb-sheet [data-description-field="title"]');
+            title.value = 'Smoke Test Client, renamed';
+            title.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await page.waitFor(`${lastSent(modernUrl, 'server/discover')}?.includes('Smoke Test Client, renamed') && appShell.servers[${JSON.stringify(modernUrl)}].status === 'connected'`, 10000);
+        const renamed = ofInfo(await page.run(lastSent(modernUrl, 'server/discover')));
+        check('client description: changing a field a server gets connects it again with the new value', renamed.title === 'Smoke Test Client, renamed', renamed.title);
+        const legacyUrl = `${HOST}:${PORTS.legacy}/`;
+        const legacyBefore = await page.run(lastSent(legacyUrl, 'initialize'));
+        await page.run(`(() => {
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+            ${serverRow(legacyUrl)}.click();
+            document.getElementById('serverInfoBtn').click();
+            const box = document.querySelector('#clientInfoSection [data-client-field="websiteUrl"]');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('wb-sheet [data-close-sheet]').click();
+        })()`);
+        await page.waitFor(`${lastSent(legacyUrl, 'initialize')} !== ${JSON.stringify(legacyBefore)} && appShell.servers[${JSON.stringify(legacyUrl)}].status === 'connected'`, 10000);
+        const legacyInfo = ofInfo(await page.run(lastSent(legacyUrl, 'initialize')));
+        const dualInfo = ofInfo(await reconnectAndRead(`${HOST}:${PORTS.dual}/`, 'server/discover', 'none yet'));
+        check('client description: the 2025 handshake carries the ticked fields too, and other servers stay bare',
+            legacyInfo.websiteUrl === 'https://patrick-glean.github.io/mcp-browswer-client/' && !('title' in legacyInfo)
+                && JSON.stringify(Object.keys(dualInfo).sort()) === '["name","version"]',
+            `legacy ${JSON.stringify(legacyInfo)}; dual ${JSON.stringify(dualInfo)}`);
+        await page.run(`${serverRow(modernUrl)}.click()`);
+
         // Splitters, at a width where request and response sit side by side.
         await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
         const toolsWidth = `Math.round(document.querySelector('wb-tools').getBoundingClientRect().width)`;

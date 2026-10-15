@@ -1499,6 +1499,28 @@ wb-sheet {
     overflow-wrap: anywhere;
 }
 
+.wb-client-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wb-check {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.wb-check:has(input:disabled) {
+    cursor: default;
+}
+
+.wb-check span {
+    overflow-wrap: anywhere;
+}
+
 .wb-sheet-actions {
     align-items: center;
 }

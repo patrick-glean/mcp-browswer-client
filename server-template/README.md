@@ -140,7 +140,20 @@ The Chat app's model is an MCP tool, on any server. To offer one, give its input
 
 ## What the client tells your server
 
-Every 2026-07-28 request carries `_meta["io.modelcontextprotocol/clientInfo"]`, `{"name": "mcp-browser-client", "version": "0.1.0"}`, and empty client capabilities; the 2025 `initialize` handshake sends the same. The client can't answer sampling, elicitation or roots requests, and shows an `input_required` result as Needs input, so a tool has to work without them. It registers for sign-in as "MCP Browser Client".
+Every 2026-07-28 request carries `_meta["io.modelcontextprotocol/clientInfo"]` and empty client capabilities; the 2025 `initialize` handshake sends the same. By default `clientInfo` is bare, `{"name": "mcp-browser-client", "version": "0.1.0"}`. The person can choose, server by server, to also send a `title`, `description`, `websiteUrl` and `icons` from the client's Settings, so a server should work with the bare form and may show the others when they're there:
+
+```json
+{
+  "name": "mcp-browser-client",
+  "title": "MCP Browser Client",
+  "version": "0.1.0",
+  "description": "A browser-based MCP client for testing servers and client libraries: a Workbench to call their tools by hand, and an agent loop over them.",
+  "websiteUrl": "https://patrick-glean.github.io/mcp-browswer-client/",
+  "icons": [{ "src": "https://patrick-glean.github.io/mcp-browswer-client/favicon.svg", "mimeType": "image/svg+xml", "sizes": ["any"] }]
+}
+```
+
+The client can't answer sampling, elicitation or roots requests, and shows an `input_required` result as Needs input, so a tool has to work without them. It registers for sign-in as "MCP Browser Client".
 
 From a web page, requests also need CORS: the server has to allow the page's origin and the 2026-07-28 headers. See [MCP Support](../README.md#mcp-support) for the list.
 

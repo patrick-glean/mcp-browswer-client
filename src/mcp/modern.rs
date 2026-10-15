@@ -7,7 +7,8 @@ use crate::logging;
 use serde_json::{json, Map, Value};
 
 /// Adds the per-request protocol fields to `params`, keeping any `_meta` entries already there.
-pub fn with_meta(params: Value, version: &str) -> Value {
+/// `client_info` is what the connection tells the server about this client.
+pub fn with_meta(params: Value, version: &str, client_info: &Value) -> Value {
     let mut params = match params {
         Value::Object(map) => map,
         _ => Map::new(),
@@ -18,10 +19,7 @@ pub fn with_meta(params: Value, version: &str) -> Value {
     }
     if let Some(meta) = meta.as_object_mut() {
         meta.insert("io.modelcontextprotocol/protocolVersion".into(), json!(version));
-        meta.insert(
-            "io.modelcontextprotocol/clientInfo".into(),
-            json!({ "name": CLIENT_NAME, "version": CLIENT_VERSION }),
-        );
+        meta.insert("io.modelcontextprotocol/clientInfo".into(), client_info.clone());
         meta.insert("io.modelcontextprotocol/clientCapabilities".into(), json!({}));
     }
     Value::Object(params)
@@ -130,8 +128,8 @@ pub fn parse_discovery(result: &Value) -> Discovery {
     }
 }
 
-pub async fn discover(url: &str, version: &str, auth: &[(String, String)]) -> Result<Probe, McpError> {
-    let params = with_meta(json!({}), version);
+pub async fn discover(url: &str, version: &str, auth: &[(String, String)], client_info: &Value) -> Result<Probe, McpError> {
+    let params = with_meta(json!({}), version, client_info);
     let mut headers = auth.to_vec();
     headers.extend(request_headers("server/discover", version, &params));
     let body = request_body(next_request_id(), "server/discover", params);
@@ -165,13 +163,15 @@ mod tests {
 
     #[test]
     fn adds_protocol_fields_and_keeps_existing_meta() {
-        let params = with_meta(json!({ "name": "echo", "_meta": { "progressToken": 5 } }), MODERN_VERSION);
+        let info = client_info(Some(&json!({ "title": "MCP Browser Client" })));
+        let params = with_meta(json!({ "name": "echo", "_meta": { "progressToken": 5 } }), MODERN_VERSION, &info);
         assert_eq!(params["name"], "echo");
         assert_eq!(params["_meta"]["progressToken"], 5);
         assert_eq!(params["_meta"]["io.modelcontextprotocol/protocolVersion"], MODERN_VERSION);
         assert_eq!(params["_meta"]["io.modelcontextprotocol/clientInfo"]["name"], CLIENT_NAME);
+        assert_eq!(params["_meta"]["io.modelcontextprotocol/clientInfo"]["title"], "MCP Browser Client");
         assert_eq!(params["_meta"]["io.modelcontextprotocol/clientCapabilities"], json!({}));
-        assert!(with_meta(Value::Null, MODERN_VERSION)["_meta"].is_object());
+        assert!(with_meta(Value::Null, MODERN_VERSION, &info)["_meta"].is_object());
     }
 
     #[test]

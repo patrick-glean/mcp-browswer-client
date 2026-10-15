@@ -225,6 +225,115 @@ let wasm_bindgen;
     };
 
     /**
+     * Reads a resource and returns the JSON-RPC `result`, `{contents}`.
+     * @param {string} url
+     * @param {string} uri
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.read_resource = function(url, uri, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(uri, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.read_resource(ptr0, len0, ptr1, len1, ptr2, len2);
+        return ret;
+    };
+
+    /**
+     * Returns `{prompts}`, every page of the server's prompt list.
+     * @param {string} url
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.list_prompts = function(url, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.list_prompts(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Gets a prompt with JSON-encoded arguments and returns the JSON-RPC `result`,
+     * `{description?, messages}`.
+     * @param {string} url
+     * @param {string} name
+     * @param {string} args
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.get_prompt = function(url, name, args, options) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(args, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.get_prompt(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        return ret;
+    };
+
+    /**
+     * @param {string} url
+     */
+    __exports.forget_server = function(url) {
+        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.forget_server(ptr0, len0);
+    };
+
+    /**
+     * Starts signing in to a server that needs OAuth: discovery, client registration if needed,
+     * and the URL to open. `options` is `{redirectUri, applicationType, clients, wwwAuthenticate?}`;
+     * returns `{authorizationUrl, pending, client, newClient, authServer, scope}`.
+     * @param {string} server_url
+     * @param {string} options
+     * @returns {Promise<string>}
+     */
+    __exports.auth_begin = function(server_url, options) {
+        const ptr0 = passStringToWasm0(server_url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.auth_begin(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Finishes a sign-in with the callback's `{code, state, iss, error, errorDescription}` and
+     * returns the tokens to store.
+     * @param {string} pending
+     * @param {string} callback
+     * @returns {Promise<string>}
+     */
+    __exports.auth_finish = function(pending, callback) {
+        const ptr0 = passStringToWasm0(pending, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(callback, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.auth_finish(ptr0, len0, ptr1, len1);
+        return ret;
+    };
+
+    /**
+     * Refreshes stored tokens. Rejects with kind `auth_required` when the user has to sign in again.
+     * @param {string} tokens
+     * @returns {Promise<string>}
+     */
+    __exports.auth_refresh = function(tokens) {
+        const ptr0 = passStringToWasm0(tokens, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.auth_refresh(ptr0, len0);
+        return ret;
+    };
+
+    /**
      * @returns {string}
      */
     __exports.get_version = function() {
@@ -364,117 +473,8 @@ let wasm_bindgen;
         return ret;
     };
 
-    /**
-     * Reads a resource and returns the JSON-RPC `result`, `{contents}`.
-     * @param {string} url
-     * @param {string} uri
-     * @param {string} options
-     * @returns {Promise<string>}
-     */
-    __exports.read_resource = function(url, uri, options) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(uri, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.read_resource(ptr0, len0, ptr1, len1, ptr2, len2);
-        return ret;
-    };
-
-    /**
-     * Returns `{prompts}`, every page of the server's prompt list.
-     * @param {string} url
-     * @param {string} options
-     * @returns {Promise<string>}
-     */
-    __exports.list_prompts = function(url, options) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.list_prompts(ptr0, len0, ptr1, len1);
-        return ret;
-    };
-
-    /**
-     * Gets a prompt with JSON-encoded arguments and returns the JSON-RPC `result`,
-     * `{description?, messages}`.
-     * @param {string} url
-     * @param {string} name
-     * @param {string} args
-     * @param {string} options
-     * @returns {Promise<string>}
-     */
-    __exports.get_prompt = function(url, name, args, options) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(args, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.get_prompt(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-        return ret;
-    };
-
-    /**
-     * @param {string} url
-     */
-    __exports.forget_server = function(url) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.forget_server(ptr0, len0);
-    };
-
-    /**
-     * Starts signing in to a server that needs OAuth: discovery, client registration if needed,
-     * and the URL to open. `options` is `{redirectUri, applicationType, clients, wwwAuthenticate?}`;
-     * returns `{authorizationUrl, pending, client, newClient, authServer, scope}`.
-     * @param {string} server_url
-     * @param {string} options
-     * @returns {Promise<string>}
-     */
-    __exports.auth_begin = function(server_url, options) {
-        const ptr0 = passStringToWasm0(server_url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.auth_begin(ptr0, len0, ptr1, len1);
-        return ret;
-    };
-
-    /**
-     * Finishes a sign-in with the callback's `{code, state, iss, error, errorDescription}` and
-     * returns the tokens to store.
-     * @param {string} pending
-     * @param {string} callback
-     * @returns {Promise<string>}
-     */
-    __exports.auth_finish = function(pending, callback) {
-        const ptr0 = passStringToWasm0(pending, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(callback, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.auth_finish(ptr0, len0, ptr1, len1);
-        return ret;
-    };
-
-    /**
-     * Refreshes stored tokens. Rejects with kind `auth_required` when the user has to sign in again.
-     * @param {string} tokens
-     * @returns {Promise<string>}
-     */
-    __exports.auth_refresh = function(tokens) {
-        const ptr0 = passStringToWasm0(tokens, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.auth_refresh(ptr0, len0);
-        return ret;
-    };
-
     function __wbg_adapter_26(arg0, arg1) {
-        wasm._dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h3c5941f0d731c178(arg0, arg1);
+        wasm._dyn_core_608f92abc48d28da___ops__function__FnMut_____Output______as_wasm_bindgen_68aa18c3e367eca1___closure__WasmClosure___describe__invoke______(arg0, arg1);
     }
 
     function __wbg_adapter_29(arg0, arg1, arg2) {
@@ -482,7 +482,7 @@ let wasm_bindgen;
     }
 
     function __wbg_adapter_101(arg0, arg1, arg2, arg3) {
-        wasm.closure143_externref_shim(arg0, arg1, arg2, arg3);
+        wasm.closure145_externref_shim(arg0, arg1, arg2, arg3);
     }
 
     async function __wbg_load(module, imports) {
@@ -713,11 +713,11 @@ let wasm_bindgen;
             const ret = false;
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper446 = function(arg0, arg1, arg2) {
-            const ret = makeMutClosure(arg0, arg1, 112, __wbg_adapter_26);
+        imports.wbg.__wbindgen_closure_wrapper277 = function(arg0, arg1, arg2) {
+            const ret = makeMutClosure(arg0, arg1, 81, __wbg_adapter_26);
             return ret;
         };
-        imports.wbg.__wbindgen_closure_wrapper587 = function(arg0, arg1, arg2) {
+        imports.wbg.__wbindgen_closure_wrapper591 = function(arg0, arg1, arg2) {
             const ret = makeMutClosure(arg0, arg1, 122, __wbg_adapter_29);
             return ret;
         };

@@ -119,6 +119,7 @@ The Workbench doubles as an inspector, in the spirit of the MCP Inspector but wi
 - **Tools**: the count, a filter on name, title and description (`/` jumps to it), and filters for what the annotations say: Read-only, Writes (anything that doesn't say it only reads) and Reaches out (open world). Each row marks the tool `ro`, `writes`, `del` or `?` (no read-only hint, so assume it may write), plus `web` and `app` (MCP Apps UI). Servers with many tools are grouped by what their tools work on (`issue`, `pull request`, `search`). Annotations are hints from the server, not guarantees.
 - **Tool details**: the request pane shows the tool's title and badges and the argument form; Schema has the input schema, output schema and raw definition.
 - **Hidden tools**: tools the client won't call, listed after the others with the reason.
+- **What this client tells the server**: every server gets only the client's name and version. Settings, the gear in the top bar, holds a richer description: a title, description, website and icon. Tick the fields a server should also get under "What this client tells it" in its Info, and it connects again with them. Info then shows what the client told it.
 - **Download the server report**, in the server bar's ⋯ menu or under Info, saves the server's details and full tool list as JSON.
 
 ### Resources and prompts
@@ -140,7 +141,7 @@ This client is only as good as what servers say about themselves. MCP has a fiel
 - **Results show by content type**: JSON text indented, images and audio drawn, links with their titles, structured content beside them.
 - **The Chat app's model** is told every server's instructions and every tool's definition, and chooses tools from their names and descriptions alone.
 
-A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do; see [what the client tells your server](server-template/README.md#what-the-client-tells-your-server).
+A server that leaves them out still works, but it looks like a list of names: tools marked `?` because they don't say whether they change anything, forms with no help, and test data the server turns down. In the other direction, every request tells the server which client this is and what it can do: its name and version, plus whichever fields of its description in Settings the person chose for that server. See [what the client tells your server](server-template/README.md#what-the-client-tells-your-server).
 
 [`server-template/`](server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](server-template/example.json), the replies of a well-described server to copy. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies server-template/example.json`, and add `http://127.0.0.1:8081`.
 

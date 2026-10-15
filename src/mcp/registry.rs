@@ -29,6 +29,8 @@ pub struct Connection {
     pub capabilities: Value,
     pub server_info: Option<Value>,
     pub instructions: Option<String>,
+    /// What this client told the server about itself when it connected.
+    pub client_info: Value,
     pub tools: Option<ToolCache>,
 }
 
@@ -129,6 +131,7 @@ mod tests {
             capabilities: json!({}),
             server_info: None,
             instructions: None,
+            client_info: json!({ "name": "mcp-browser-client", "version": "0.1.0" }),
             tools: None,
         };
         put("http://a", connection.clone());

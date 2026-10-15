@@ -28,7 +28,7 @@ function parse(json, what) {
 function options(json) {
     const opts = json?.trim() ? parse(json, 'options') : {};
     const token = typeof opts.bearerToken === 'string' ? opts.bearerToken.trim() : '';
-    return { bearerToken: token || undefined, refresh: !!opts.refresh };
+    return { bearerToken: token || undefined, refresh: !!opts.refresh, clientInfo: opts.clientInfo };
 }
 
 function toolArguments(json) {
@@ -50,7 +50,7 @@ function exported(operation) {
     };
 }
 
-/** Detects the server's protocol era and returns {url, era, protocolVersion, serverInfo, capabilities, instructions}. */
+/** Detects the server's protocol era and returns {url, era, protocolVersion, serverInfo, capabilities, instructions, clientInfo}. */
 export const connect = exported((url, json) => mcp.connect(url.trim(), options(json)));
 
 /** Returns {tools, rejected, ttlMs, cacheScope, fromCache}. Pass {"refresh": true} to skip the cache. */
