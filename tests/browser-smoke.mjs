@@ -175,13 +175,14 @@ function notice(name, detail) {
     console.log(`NOTE  ${name}  (${detail})`);
 }
 
-// A small Chrome DevTools Protocol client for one page target.
-async function openPage(match = () => true) {
+// A small Chrome DevTools Protocol client for one page target, or (`type: 'iframe'`) one frame
+// that runs in a process of its own, such as the client embedded in another site's page.
+async function openPage(match = () => true, { type = 'page' } = {}) {
     let target;
     for (let i = 0; i < 100 && !target; i++) {
         try {
             const targets = await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json();
-            target = targets.find(t => t.type === 'page' && match(t));
+            target = targets.find(t => t.type === type && match(t));
         } catch {
             // Chrome is still starting.
         }
@@ -2019,6 +2020,79 @@ async function main() {
             await page.run(`document.querySelector('app-preview [data-device="desktop"]').click()`);
             await page.run(`document.querySelector('app-preview [data-exit-preview]').click()`);
             await page.waitFor(`document.querySelector('app-preview').hidden`, 5000);
+
+            // Share: an embed of the app is an iframe of the client at its address, in its embed
+            // mode. The address is this page's unless set, which the dialog checks answers.
+            await page.run(`document.getElementById('shareAppBtn').click()`);
+            const shareShown = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog?.querySelector('[data-address-note]')?.textContent || '';
+                const code = dialog?.querySelector('[data-embed-code]')?.value || '';
+                return dialog?.open && code && !note.startsWith('Checking')
+                    ? [dialog.querySelector('h2').textContent, code.replace(/#run=[\\w-]+/, '#run=…'), dialog.querySelector('[data-client-address]').value, note].join(' | ') : null;
+            })()`, 10000);
+            check("Apps: Share offers the app's embed code, an iframe of the client at its address in its embed mode; the address is this page's, which answers, and is on this computer",
+                shareShown === `Share Front desk | <iframe src="${HOST}:${PORTS.app}/?embed#run=…" title="Front desk" width="100%" height="640" style="border: 0"></iframe> | ${HOST}:${PORTS.app}/ | MCP Browser Client answers there. That address is on this computer, so what you share runs only here; to share it, use one others reach, such as the public client.`,
+                shareShown);
+
+            // embed.html, opened as a file, runs the app in the client in an iframe: in its embed
+            // mode, with storage of its own (none of the builder's servers), and a way to open it
+            // on its own.
+            const embedDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-embed-'));
+            await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: embedDownloads });
+            await page.run(`document.querySelector('apps-share-dialog [data-download-embed]').click()`);
+            let embedFile;
+            for (let i = 0; i < 50 && !embedFile; i++) {
+                embedFile = readdirSync(embedDownloads).find(name => name.endsWith('.html'));
+                if (!embedFile) await sleep(100);
+            }
+            await page.send('Target.createTarget', { url: `file://${join(embedDownloads, embedFile || 'missing.html')}` });
+            const embedded = await openPage(target => target.url.startsWith(`${HOST}:${PORTS.app}/?embed${RUN_HASH}`), { type: 'iframe' });
+            const embedShown = await embedded.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                if (!document.body.classList.contains('embedded') || !preview?.querySelector('iframe') || !Object.keys(appShell.servers).length) return null;
+                const own = preview.querySelector('[data-launch-actions] a');
+                return [document.title, own.textContent.trim(), own.getAttribute('href').replace(/#run=[\\w-]+/, '#run=…'), own.target, Object.keys(appShell.servers).join(' ')].join(' | ');
+            })()`, 20000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('visitor')`, 10000, { inPage: embedded });
+            await frameRun(`(() => {
+                document.getElementById('visitor').value = 'ada';
+                document.getElementById('find').click();
+                return true;
+            })()`, { inPage: embedded });
+            const embedFound = await frameWaitFor(`(() => { const visit = document.getElementById('visit'); return visit?.offsetParent ? visit.textContent.split('\\n')[0] : null; })()`, 10000, { inPage: embedded });
+            embedded.close();
+            await closeTab(await openPage(target => target.url.startsWith('file://')));
+            await page.send('Page.bringToFront');
+            check("Apps: embed.html, opened as a file, runs the app in the client in its embed mode, with storage of its own and a link to open it on its own",
+                embedFile === 'front-desk-embed.html'
+                    && embedShown === `Front desk | Open on its own | ${HOST}:${PORTS.app}/#run=… | _blank | https://frontdesk.demo.invalid/mcp`
+                    && embedFound === 'Ada Lovelace, Analytical Engines',
+                `${embedFile}; ${embedShown}; ${embedFound}`);
+
+            // Another client address is the one embeds and links use (normalized: http for one on
+            // this computer, the folder of its page); this page's sets it back.
+            await page.run(`navigator.clipboard.writeText = text => { window.copiedLink = text; return Promise.resolve(); }`);
+            await page.run(`(() => {
+                const field = document.querySelector('apps-share-dialog [data-client-address]');
+                field.value = 'localhost:${PORTS.app}/index.html';
+                field.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            const otherAddress = await page.waitFor(`(() => {
+                const dialog = document.querySelector('apps-share-dialog dialog');
+                const note = dialog.querySelector('[data-address-note]').textContent;
+                return note.startsWith('Checking') ? null : [dialog.querySelector('[data-client-address]').value, dialog.querySelector('[data-embed-code]').value.match(/src="([^#]+)#/)?.[1], note.split('.')[0]].join(' | ');
+            })()`, 10000);
+            await page.run(`document.querySelector('apps-share-dialog [data-copy-link]').click()`);
+            const linkThere = await page.waitFor(`window.copiedLink?.startsWith('http://localhost:${PORTS.app}/${RUN_HASH}') ? 'http://localhost:${PORTS.app}/${RUN_HASH}…' : null`, 5000);
+            await page.run(`document.querySelector('apps-share-dialog [data-use-address="${HOST}:${PORTS.app}/"]').click()`);
+            const setBack = await page.waitFor(`document.querySelector('apps-share-dialog [data-client-address]').value === '${HOST}:${PORTS.app}/' ? 'kept ' + localStorage.getItem('appsClientAddress') : null`, 5000);
+            await page.run(`document.querySelector('apps-share-dialog [data-close]').click()`);
+            rmSync(embedDownloads, { recursive: true, force: true });
+            check("Apps: the client's address, set to another, is the one embeds and links use; this page's sets it back",
+                otherAddress === `http://localhost:${PORTS.app}/ | http://localhost:${PORTS.app}/?embed | Couldn't check it: this page can't reach it, or isn't let read it`
+                    && linkThere === `http://localhost:${PORTS.app}/${RUN_HASH}…` && setBack === 'kept null',
+                `${otherAddress}; ${linkThere}; ${setBack}`);
 
             // Front desk came with its demo server, built in. The mock server has the same tools,
             // so the Inspector's Servers it calls offers it in its place, and not the servers without

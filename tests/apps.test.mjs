@@ -11,7 +11,8 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
 import {
-    appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, openRules, readmeFor, startCallsOnlyDemos,
+    APP_URL, appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, embedCode, embedPage, foundModel, frontDeskApp, isLocalAddress, modelName, normalizeClientAddress,
+    openRules, readmeFor, startCallsOnlyDemos,
 } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
@@ -1063,6 +1064,30 @@ test("a download's index.html is the client's own page, naming the app beside it
     assert.match(readme, /It runs `app\.dml` as it is in the folder, so a change to it shows on the next reload\. `\?builder` after the folder's address opens the builder/);
     assert.match(readme, /It calls this server:\n\n- Mock server: http:\/\/127\.0\.0\.1:8081\/\n$/);
     assert.match(readmeFor(app), /MCP Browser Client at https:\/\/patrick-glean\.github\.io\/mcp-browswer-client\//, 'the public client when no other is said');
+});
+
+test("the client's address is the folder of its page, at http or https, and one on this computer is told apart", () => {
+    assert.equal(normalizeClientAddress('patrick-glean.github.io/mcp-browswer-client'), 'https://patrick-glean.github.io/mcp-browswer-client/');
+    assert.equal(normalizeClientAddress(' https://example.com/apps/index.html?builder#run=abc '), 'https://example.com/apps/', 'the page itself, a query and a hash come off');
+    assert.equal(normalizeClientAddress('localhost:8080'), 'http://localhost:8080/', 'one on this computer, without a scheme, is at http');
+    assert.equal(normalizeClientAddress('127.0.0.1:3000/front-desk-v1/'), 'http://127.0.0.1:3000/front-desk-v1/');
+    assert.equal(normalizeClientAddress(''), '');
+    assert.throws(() => normalizeClientAddress('ftp://example.com/'), /http or https/);
+    assert.throws(() => normalizeClientAddress('https://exa mple.com'), /isn't a web address/);
+    for (const local of ['http://localhost:8080/', 'http://127.0.0.1/', 'http://app.localhost/', 'http://[::1]:3000/', 'file:///tmp/front-desk/index.html']) assert.equal(isLocalAddress(local), true, local);
+    for (const reached of [APP_URL, 'https://example.com/', 'http://10.0.0.5/', 'not an address']) assert.equal(isLocalAddress(reached), false, reached);
+});
+
+test('an embed is an iframe of the client in its embed mode, and embed.html a page that is the app', () => {
+    const link = 'https://patrick-glean.github.io/mcp-browswer-client/?embed#run=abc-_123';
+    assert.equal(embedCode(link, { name: 'Ask & answer <test>', height: 800 }), '<iframe src="https://patrick-glean.github.io/mcp-browswer-client/?embed#run=abc-_123" title="Ask &amp; answer &lt;test&gt;" width="100%" height="800" style="border: 0"></iframe>');
+    assert.match(embedCode(link), /title="App" width="100%" height="640"/);
+    const page = embedPage(link, { name: 'Front desk' });
+    assert.match(page, /^<!DOCTYPE html>\n<html lang="en">\n/);
+    assert.match(page, /<title>Front desk<\/title>/);
+    assert.match(page, /<body>\n<iframe src="https:\/\/patrick-glean\.github\.io\/mcp-browswer-client\/\?embed#run=abc-_123" title="Front desk"><\/iframe>\n<\/body>/);
+    assert.match(page, /iframe \{ display: block; width: 100%; height: 100%; border: 0; \}/, 'the iframe fills the window');
+    assert.doesNotMatch(page, /<script/, 'nothing in it runs but the client in the iframe');
 });
 
 test("a folder's app is its app.dml with the files it names beside it, its screen and parts, and one that's missing says so", async () => {
