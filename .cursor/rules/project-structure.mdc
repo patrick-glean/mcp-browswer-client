@@ -38,11 +38,13 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 ## Server template
 - [public/server-template/README.md](mdc:public/server-template/README.md): for people building servers and their agents, each field a server sends, where this client shows it and what to put in it. Keep it in step with what the Workbench shows
 - [public/server-template/example.json](mdc:public/server-template/example.json): a well-described server's replies, by method; `python3 test_mcp_server.py --replies FILE` serves a file like it
+- [public/server-template/index.html](mdc:public/server-template/index.html): the guide as a page of the site, rendered from its README by [markdown.js](mdc:public/server-template/markdown.js); `examples/` has the same server on each official SDK
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`
 - `npm run test:unit` ([tests/prefill.test.mjs](mdc:tests/prefill.test.mjs), [tests/uri-template.test.mjs](mdc:tests/uri-template.test.mjs), [tests/server-template.test.mjs](mdc:tests/server-template.test.mjs)): Pre-fill's test data from [public/workbench/prefill.js](mdc:public/workbench/prefill.js), validated with Ajv, resource template URIs against RFC 6570's examples, and the server template against the SDK's protocol schemas and its guide's checklist
 - `npm run bench` ([tests/bench.mjs](mdc:tests/bench.mjs), [public/bench/](mdc:public/bench/index.html)): tool-call throughput per library
+- `npm run test:examples` ([tests/examples.mjs](mdc:tests/examples.mjs)): the server template on each official SDK in `public/server-template/examples/` (Go, TypeScript, Python, Rust, Java, C#), checked against `example.json` through the TypeScript SDK client
 
 ## Naming
 - Say "MCP client library" (or "library") for the pluggable protocol implementation, and use `client` in code: `set_client`, `client_loaded`, `client_status`, `?client=`, `--client=`

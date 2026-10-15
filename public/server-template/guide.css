@@ -316,8 +316,9 @@
     min-width: 140px;
 }
 
-/* A field's name is one word: it wraps between names, never inside one. */
-.guide-content td:first-child code {
+/* A field's or file's name is one word: it wraps between names, never inside one. */
+.guide-content td:first-child code,
+.guide-content td a code {
     white-space: nowrap;
     overflow-wrap: normal;
 }

@@ -6,6 +6,7 @@ This folder is for people building a server this client connects to, and for the
 
 - **This guide**: each descriptive field MCP 2026-07-28 has, where this client shows it, and what to put in it.
 - **[`example.json`](example.json)**: the replies of a well-described server, Example Helpdesk, keyed by method: `server/discover`, each list, and a result for each of its tools, resources and prompts. Copy its shapes; `npm run test:unit` checks that it's valid MCP and follows this guide.
+- **[The same server on the official SDKs](#the-same-server-on-the-official-sdks)**: Example Helpdesk in Go, TypeScript, Python, Rust, Java and C#, each checked against `example.json`.
 
 To see how replies look in the client, serve them with the mock server and connect to it:
 
@@ -156,6 +157,30 @@ Every 2026-07-28 request carries `_meta["io.modelcontextprotocol/clientInfo"]` a
 The client can't answer sampling, elicitation or roots requests, and shows an `input_required` result as Needs input, so a tool has to work without them. It registers for sign-in as "MCP Browser Client".
 
 From a web page, requests also need CORS: the server has to allow the page's origin and the 2026-07-28 headers. See [MCP Support](../../README.md#mcp-support) for the list.
+
+## The same server on the official SDKs
+
+Each of these is Example Helpdesk on one of the official SDKs, with every field `example.json` has: the server's identity, icons and instructions; each tool's title, description, hints, input schema and output schema; its results; the resources, the template and the prompts; and cache hints where the SDK takes them. Each serves Streamable HTTP at `http://127.0.0.1:8090/mcp` (`PORT` picks another port) and lets this client's pages through CORS. All but Java speak 2026-07-28 and answer 2025 clients too; the Java SDK speaks up to 2025-11-25, so clients connect to it with the initialize handshake. Run one and add its address with + beside Servers.
+
+| Language | SDK | Server | Run it, in its folder |
+| --- | --- | --- | --- |
+| Go | [go-sdk](https://github.com/modelcontextprotocol/go-sdk) 1.8.0 | [`main.go`](examples/go/main.go) | `go run .` |
+| TypeScript | [@modelcontextprotocol/server](https://www.npmjs.com/package/@modelcontextprotocol/server) 2.3.1 | [`server.ts`](examples/typescript/server.ts) | `npm install && npm start` |
+| Python | [mcp](https://pypi.org/project/mcp/) 2.3.0 | [`server.py`](examples/python/server.py) | `pip install -r requirements.txt && python server.py` |
+| Rust | [rmcp](https://crates.io/crates/rmcp) 3.5.1 | [`main.rs`](examples/rust/src/main.rs) | `cargo run` |
+| Java | [io.modelcontextprotocol.sdk:mcp](https://central.sonatype.com/artifact/io.modelcontextprotocol.sdk/mcp) 2.0.1 | [`HelpdeskServer.java`](examples/java/src/main/java/com/example/helpdesk/HelpdeskServer.java) | `mvn package && java -jar target/helpdesk.jar` |
+| C# | [ModelContextProtocol.AspNetCore](https://www.nuget.org/packages/ModelContextProtocol.AspNetCore) 2.2.0 | [`Program.cs`](examples/csharp/Program.cs) | `dotnet run` |
+
+`npm run test:examples` runs each one whose toolchain is installed and checks, through the official TypeScript SDK client, that it describes itself as `example.json` does (the fields above, as this client shows them) and that a page may call it. Change `example.json` and the examples that no longer match fail.
+
+What each SDK needs to describe a server well:
+
+- **Go.** `jsonschema` struct tags give each field its description, fields without `omitempty` are required, and properties keep their field order. Add enums, examples, formats, patterns, ranges and defaults to the schema `jsonschema.For` infers. Go infers a slice as `["null", "array"]`, so set it to `array`. `DestructiveHint` and `OpenWorldHint` are pointers: set them, or they're left out and read as `true`. Declare `Capabilities`, or the SDK adds `listChanged` and `logging`, and use `SetCacheable` for the lists' cache hints.
+- **TypeScript.** Zod's `.describe()` writes descriptions and `.meta()` adds the keywords Zod has no method for (examples, `format`, `uniqueItems`). `z.strictObject` gives `additionalProperties: false`. `z.email()` adds a long `pattern` as well as `format: "email"`, so use `.meta({ format: 'email' })` to send the format alone. Cache hints go in the server's `cacheHints` and each resource's `cacheHint`.
+- **Python.** `Annotated[..., Field(...)]` describes each argument. Write an optional argument as `X | SkipJsonSchema[None] = None`, with a `json_schema_extra` that drops the `default: null`, so it shows as its own type rather than `anyOf` with null. Return `Annotated[CallToolResult, Model]` to send your own content blocks and still declare and check an output schema. `MCPServer` can't set a resource's `size` or a prompt result's own description, so the example's subclass adds them. It can't send `additionalProperties: false` at all.
+- **Rust.** Doc comments are descriptions, and `#[schemars(...)]` adds lengths, ranges, patterns, formats and examples. `#[schemars(inline)]` keeps enums out of `$defs`, `#[serde(deny_unknown_fields)]` gives `additionalProperties: false`, and serde_json's `preserve_order` feature keeps properties in declared order. One schemars `transform` makes an `Option` field optional rather than nullable and drops Rust's integer formats.
+- **Java.** `Tool.builder().inputSchema(mapper, json)` takes the schema as written, so every keyword is exactly as you send it. The SDK speaks MCP up to 2025-11-25, so this client connects with the initialize handshake, and it serves through a servlet; the example runs it on embedded Jetty.
+- **C#.** The handlers return the protocol's own objects, with each tool's schemas as JSON, and `TimeToLive` and `CacheScope` on the results. `lastModified` is a `DateTimeOffset`, written as `+00:00` rather than `Z`.
 
 ## A checklist
 

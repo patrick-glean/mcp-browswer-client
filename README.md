@@ -145,6 +145,8 @@ A server that leaves them out still works, but it looks like a list of names: to
 
 [`public/server-template/`](public/server-template/README.md) is for people building a server for this client, and their coding agents: a guide to each field, where the client shows it and what to put in it, and [`example.json`](public/server-template/example.json), the replies of a well-described server to copy. The site has the same guide as a page, [Describing your server](https://patrick-glean.github.io/mcp-browswer-client/server-template/), rendered from that README so the two never differ; the in-app Guide links to it. To see how replies like those look in the client before the server exists, serve them with the mock server, `python3 test_mcp_server.py --replies public/server-template/example.json`, and add `http://127.0.0.1:8081`.
 
+[`examples/`](public/server-template/README.md#the-same-server-on-the-official-sdks) has that server written on the official Go, TypeScript, Python, Rust, Java and C# SDKs, with what each SDK needs to describe a server well. `npm run test:examples` runs each one whose toolchain is installed and checks that it describes itself as `example.json` does.
+
 ## MCP Support
 
 Both libraries work out which protocol era a server speaks the same way:
@@ -248,6 +250,7 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
 - `npm run test:public`: The browser smoke test plus the public servers the Guide suggests (needs internet)
 - `npm run bench`: Load-test tool calls on every library against the mock server and an in-memory one, plus a cold start and calls through the whole app (`-- --quick` for a fast pass)
+- `npm run test:examples`: Run each SDK example in `public/server-template/examples/` whose toolchain is installed (Go, Node, the venv's Python, Cargo, Maven, .NET) and check it against `example.json` (name some to run only those: `-- go python`)
 
 ### Changing a library
 
@@ -317,7 +320,8 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 │   │   ├── README.md      # The guide: each descriptive field, where the client shows it and what to put in it
 │   │   ├── example.json   # A well-described server's replies, by method (test_mcp_server.py --replies serves them)
 │   │   ├── index.html     # The guide as a page of the site, rendered from README.md (guide.js, guide.css)
-│   │   └── markdown.js    # The Markdown renderer behind it
+│   │   ├── markdown.js    # The Markdown renderer behind it
+│   │   └── examples/      # The same server on the official Go, TypeScript, Python, Rust, Java and C# SDKs
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── styles.css         # UI styles (Glean design language)
 │   ├── tokens.css         # Design tokens: light and dark theme colors, type, radii, shadows
@@ -326,6 +330,7 @@ The layout is CSS: each component sits in a named grid area, set by the `data-la
 ├── tests/
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
+│   ├── examples.mjs       # Runs each SDK example and checks it against example.json
 │   └── reference_server.py # A server on the official MCP Python SDK, for interop checks
 ├── test_mcp_server.py     # Mock MCP server: tools, resources and prompts; modern, legacy or dual-era; JSON or SSE; tokens; OAuth; strict CORS
 ├── DEVELOPMENT.md         # The library interface, the worker's messages, the agent loop, logging
@@ -431,6 +436,7 @@ npm run test:unit                    # Pre-fill's test data against a dozen kind
 npm run test:rust                    # the Rust library: SSE parsing, headers, era detection, OAuth discovery and checks, redaction
 npm run test:public                  # plus the public servers above (needs internet)
 npm run bench                        # tool-call throughput of every library (-- --quick for a fast pass)
+npm run test:examples                # the server template on each official SDK, against example.json
 ```
 
 The browser test starts its own servers on ports 18080-18093 and drives the UI the way a person would. It covers modern, legacy, SSE, dual-era, strict-CORS and token-protected servers; the server template's replies, shown where its guide says; sign-in through the pop-up and without one (in this tab, from another tab, and from another browser by pasting the address back), both kinds of refresh, sign-out, and rejected sign-in responses (wrong issuer, unknown state); finding Glean from an email, with `app.glean.com` answered by the test; the Workbench's layout, resizing it, and inspector views (badges, annotation filters, tool groups, hidden tools, Info, the report download); resources and prompts on both protocol eras (listing every page, text, binary and template reads, prompts with and without their arguments, an embedded resource, the server's errors); the Workbench itself (test data for the required fields when a tool opens, Fill beside a field, each Pre-fill source, a 20-field tool whose test data the server accepts, variables in text and number fields with their resolved values, saved requests and collections, running again and Run all with what changed, the Runs tab, history in the rail and the dock including the chat's calls and after a reload, Go to and the keyboard shortcuts, the dock, export and import, and no tokens in its store); the Chat app, including that the model gets the server list without tokens and that conversations saved before its rename carry over; switching the MCP client library while the app runs; a worker restart, a second tab, the log pop-out, the Guide; and what the log records (timings, fallback reasons, no tokens anywhere, no HTML). It exits non-zero if a check fails, printing the client's own log and saving all of it as JSON.
