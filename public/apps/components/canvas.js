@@ -644,8 +644,12 @@ export class AppCanvas extends AppElement {
     renderNodes() {
         const app = this.app;
         const problems = new Map(flowProblems(app.flow, { elements: this.elements(), servers: this.shell.servers }));
-        const goesTo = (rule, phase) => routeTargets(rule, phase)
-            .map(id => (this.kindOf(id) === 'screen' ? `go to ${this.component(id)?.label || id}` : id)).join(', ');
+        // Where an outcome goes: elements by id, screens by name with a screen's icon, in a screen's blue.
+        const goesTo = (rule, phase, { html = false } = {}) => routeTargets(rule, phase).map(id => {
+            if (this.kindOf(id) !== 'screen') return html ? escapeHtml(id) : id;
+            const label = this.component(id)?.label || id;
+            return html ? `<span class="app-node-screen"><span class="icon icon-monitor" aria-hidden="true"></span>${escapeHtml(label)}</span>` : `go to ${label}`;
+        }).join(', ');
         this.$('[data-nodes]').innerHTML = app.flow.map(rule => {
             const at = this.at.tools.get(rule.id);
             const server = this.shell.servers[rule.call?.serverUrl];
@@ -662,7 +666,7 @@ export class AppCanvas extends AppElement {
                 return `
                     <div class="app-node-row app-node-out" data-out="${phase}">
                         <span class="app-port app-port-${port === 'ok' ? 'answer' : port === 'err' ? 'error' : 'sent'}" data-port="${port}:${escapeHtml(rule.id)}" title="${escapeHtml(help)}"></span>
-                        <span class="app-node-name">${name}</span><span class="app-node-value app-node-where"${full(where && `${name.slice(2)}: ${where}`)}>${where ? `→ ${escapeHtml(where)}` : '—'}</span>
+                        <span class="app-node-name">${name}</span><span class="app-node-value app-node-where"${full(where && `${name.slice(2)}: ${where}`)}>${where ? `→ ${goesTo(rule, phase, { html: true })}` : '—'}</span>
                     </div>`;
             };
             return `

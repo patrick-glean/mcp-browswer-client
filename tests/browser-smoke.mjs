@@ -1756,10 +1756,11 @@ async function main() {
                 deskShown === deskOpened && firstScreen === 'welcome* confirm done notfound', `${deskShown || await page.run(deskCanvas)}; ${firstScreen}`);
             const deskLooks = await page.run(`[
                 [...document.querySelectorAll('app-canvas [data-card-bar]')].map(bar => bar.querySelector('.app-screen-name').textContent + (bar.querySelector('.icon-monitor') ? '' : ' (no monitor)') + ' ' + (bar.querySelector('.app-screen-opens, .app-screen-kind')?.textContent || '')).join(', '),
-                ...[...document.querySelectorAll('app-canvas [data-node]')].map(node => node.querySelector('.app-node-title').textContent + ': ' + [...node.querySelectorAll('[data-out]')].map(row => row.querySelector('.app-node-where').textContent).join(' / ')),
+                ...[...document.querySelectorAll('app-canvas [data-node]')].map(node => node.querySelector('.app-node-title').textContent + ': ' + [...node.querySelectorAll('[data-out]')].map(row => [...row.querySelector('.app-node-where').childNodes]
+                    .map(part => (part.nodeType === Node.ELEMENT_NODE && part.matches('.app-node-screen') && part.querySelector('.icon-monitor') ? '▭' : '') + part.textContent).join('')).join(' / ')),
             ].join(' | ')`);
-            check("Apps: each of Front desk's cards says it's a screen (the first that it opens there), and each tool's outputs say where they go, the screens they go to by name",
-                deskLooks === 'Welcome Opens here, Confirm Screen, Checked in Screen, Not found Screen | find_visit: — / → visit, go to Confirm / → missing, go to Not found | check_in: — / → badge, go to Checked in / → visit | call_front_desk: — / → missing / → missing',
+            check("Apps: each of Front desk's cards says it's a screen (the first that it opens there), and each tool's outputs say where they go, a screen by its name with a screen's icon",
+                deskLooks === 'Welcome Opens here, Confirm Screen, Checked in Screen, Not found Screen | find_visit: — / → visit, ▭Confirm / → missing, ▭Not found | check_in: — / → badge, ▭Checked in / → visit | call_front_desk: — / → missing / → missing',
                 deskLooks);
 
             // Picking a card picks its screen and shows the app there; a button that goes to a

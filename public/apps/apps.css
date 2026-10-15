@@ -1912,6 +1912,19 @@ app-canvas[data-mode='run'] .app-port {
     font-family: var(--font-mono);
 }
 
+.app-node-screen {
+    color: var(--app-screen);
+    font-family: var(--font-body);
+    font-weight: 600;
+}
+
+.app-node-screen .icon {
+    width: 11px;
+    height: 11px;
+    margin-right: 2px;
+    vertical-align: -1px;
+}
+
 .app-node-head:active {
     cursor: grabbing;
 }
@@ -1925,10 +1938,13 @@ app-canvas[data-mode='run'] .app-port {
     white-space: nowrap;
 }
 
+/* The tool's name takes the room it needs first, and the server what's left. */
 .app-node-server {
+    flex: 1 1 0;
     min-width: 0;
     margin-left: auto;
     overflow: hidden;
+    text-align: right;
     color: var(--theme-text-secondary);
     font-size: 0.6875rem;
     text-overflow: ellipsis;
