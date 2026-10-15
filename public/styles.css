@@ -398,6 +398,49 @@ input[type='checkbox'] {
     color: var(--theme-error);
 }
 
+/* ---------- Opened as a file: only what says to serve the folder ---------- */
+
+html.from-file body > :not(#fromFile) {
+    display: none !important;
+}
+
+.from-file-notice {
+    max-width: 38rem;
+    margin: 12vh auto;
+    padding: 0 24px;
+}
+
+.from-file-notice h1 {
+    margin-bottom: 12px;
+    font-size: 1.5rem;
+}
+
+.from-file-notice p {
+    margin: 0 0 12px;
+}
+
+.from-file-notice pre {
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    border-radius: var(--radius-300);
+    background: var(--theme-background-light);
+    font-size: 0.875rem;
+}
+
+.from-file-run {
+    display: inline-block;
+    padding: 8px 18px;
+    border-radius: 999px;
+    background: var(--theme-primary-highlight);
+    color: var(--theme-alternate);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.from-file-run:hover {
+    background: var(--theme-primary-hover);
+}
+
 /* ---------- App shell (the frame itself is in workbench/workbench.css) ---------- */
 
 .app-title {

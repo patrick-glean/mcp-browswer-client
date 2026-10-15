@@ -1,7 +1,7 @@
 // The top of the app builder: the app's name and description, Canvas or Outline, Preview, Launch
-// (the app on its own in a new tab), which version it's at, Download (a zip of the flow's DML, the
-// screen's HTML and a README, or the DML alone), and ⋯ with a link that runs it, Duplicate and
-// Delete.
+// (the app on its own in a new tab), which version it's at, Download (a zip of a folder that runs
+// the app once served: its DML, screen and README with the client's own files; or the DML
+// alone), and ⋯ with a link that runs it, Duplicate and Delete.
 
 import { confirmThen, escapeHtml, timeAgo } from '../../workbench/util.js';
 import { PREVIEW, VIEWS } from '../apps.js';
@@ -62,7 +62,7 @@ export class AppHeader extends AppElement {
                 <button type="button" id="launchAppBtn" class="btn-sm" title="The app on its own, running in a new tab as people will use it, at an address you can bookmark"><span class="icon icon-external-link" aria-hidden="true"></span>Launch</button>
                 <span class="app-version text-secondary" id="appVersion" aria-live="polite"></span>
                 <div class="split-button">
-                    <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip with index.html, which runs the app, app.dml (the flow, as markup), screen.html (the screen) and a README"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
+                    <button type="button" id="downloadAppBtn" class="btn-primary btn-sm" title="A zip of a folder that runs the app once it's served: the app (app.dml, its flow as markup, and screen.html) with MCP Browser Client, which runs it, and a README that says how"><span class="icon icon-download" aria-hidden="true"></span>Download</button>
                     <details class="menu app-menu">
                         <summary class="btn-sm" aria-label="Other ways to download it">▾</summary>
                         <div class="menu-list" role="menu">

@@ -9,6 +9,8 @@
             var stored = localStorage.getItem('theme');
             var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
             document.documentElement.classList.toggle('dark-theme', dark);
+            // Opened as a file, the page can't run (see #fromFile).
+            document.documentElement.classList.toggle('from-file', location.protocol === 'file:');
         })();
     </script>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
@@ -19,6 +21,36 @@
     <link rel="stylesheet" href="./apps/apps.css">
 </head>
 <body>
+    <!-- Opened as a file, from a double-click, the client can't run: browsers start a service
+         worker, which is where it calls MCP servers and keeps sign-ins and runs, only at a web
+         address, and load its modules only from one. This says how to serve its folder, and for a
+         downloaded app (<meta name="mcp-app">), links to the client it came from. -->
+    <main class="from-file-notice" id="fromFile" hidden>
+        <h1 data-from-file-title>MCP Browser Client runs from a web address</h1>
+        <p>Opened as a file, it won't run: a browser starts its service worker, which calls MCP servers for it and keeps sign-ins and runs, only at a web address. Serve this folder and open its address. In the folder, run one of</p>
+        <pre><code>npx serve
+python3 -m http.server 8000</code></pre>
+        <p>and open the address it prints. Any static host serves the folder as it is, too: GitHub Pages, Netlify, an S3 bucket.</p>
+        <div data-from-file-run hidden>
+            <p>Or run this version now in MCP Browser Client at <span data-from-file-root></span>, where it was downloaded from:</p>
+            <p><a class="from-file-run" data-from-file-link>Run <span data-from-file-name></span> there</a></p>
+        </div>
+    </main>
+    <script>
+        (function () {
+            if (location.protocol !== 'file:') return;
+            var notice = document.getElementById('fromFile');
+            var app = document.querySelector('meta[name="mcp-app"]');
+            notice.hidden = false;
+            if (!app) return;
+            notice.querySelector('[data-from-file-title]').textContent = app.dataset.name + ' runs from a web address';
+            if (!app.dataset.run) return;
+            notice.querySelector('[data-from-file-run]').hidden = false;
+            notice.querySelector('[data-from-file-name]').textContent = app.dataset.name;
+            notice.querySelector('[data-from-file-root]').textContent = app.dataset.root;
+            notice.querySelector('[data-from-file-link]').href = app.dataset.run;
+        })();
+    </script>
     <div class="wb-app">
         <header class="wb-topbar">
             <div class="app-title">
@@ -310,18 +342,25 @@
     </aside>
 
     <script>
+        if (location.protocol === 'file:') throw new Error('MCP Browser Client runs from a web address, not a file: serve its folder (the page says how).');
+
         // The logs pop-out (?logs=1) only listens: registering the worker again from a second
         // window would restart it and drop every open tab's connections.
         const LOGS_ONLY = new URLSearchParams(location.search).has('logs');
 
-        // ?app=<id> runs one of your apps on its own, and #run=… one a link carries (apps/link.js):
-        // the window is the app's screen, as in Preview, with nothing of the Workbench or the
-        // builder. The page still starts the worker and the Workbench's state, which the app uses.
+        // ?app=<id> runs one of your apps on its own, #run=… one a link carries (apps/link.js),
+        // and a downloaded app's folder the one its index.html names, beside it (<meta
+        // name="mcp-app">), unless ?builder asks for the builder: the window is the app's screen,
+        // as in Preview, with nothing of the Workbench or the builder. The page still starts the
+        // worker and the Workbench's state, which the app uses.
         const LAUNCH = (() => {
             if (LOGS_ONLY) return null;
+            const params = new URLSearchParams(location.search);
             const run = location.hash.startsWith('#run=') ? location.hash.slice('#run='.length) : '';
-            const id = new URLSearchParams(location.search).get('app') || '';
-            return run || id ? { run: run || null, id: run ? null : id } : null;
+            const id = params.get('app') || '';
+            if (run || id) return { run: run || null, id: run ? null : id };
+            const file = document.querySelector('meta[name="mcp-app"]')?.content;
+            return file && !params.has('builder') ? { file } : null;
         })();
         if (LAUNCH) document.body.classList.add('launched');
         // A link to another app, pasted into this tab, only changes what follows #.

@@ -5,11 +5,12 @@
 //   node --test "tests/*.test.mjs"    (npm run test:unit)
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { deflateRawSync } from 'node:zlib';
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
-import { chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, launcherHtml, modelName, openRules, readmeFor } from '../public/apps/apps.js';
+import { appIndexHtml, appInFolder, chatApp, dashboardApp, demoModel, foundModel, frontDeskApp, modelName, openRules, readmeFor } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
 import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
 import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
@@ -185,7 +186,7 @@ test('a zip of the files comes back the same, and its checksums are checked', as
         { name: 'index.html', data: componentsHtml(sampleApp().screen.components) },
         { name: 'folder/README – notes.md', data: '# Notes ☕\n' },
     ];
-    const bytes = zip(files, { date: new Date(2026, 9, 9, 16, 45, 30) });
+    const bytes = await zip(files, { date: new Date(2026, 9, 9, 16, 45, 30) });
     const back = await unzip(bytes);
     assert.deepEqual([...back.keys()], files.map(file => file.name));
     const decoder = new TextDecoder();
@@ -201,7 +202,7 @@ test('a zip made by a zip tool, with deflated files, can be read', async () => {
     const text = 'deflated text '.repeat(50);
     const raw = new TextEncoder().encode(text);
     const packed = deflateRawSync(raw);
-    const stored = zip([{ name: 'a.txt', data: raw }]);
+    const stored = await zip([{ name: 'a.txt', data: raw }]);
     // Rewrite the stored entry as a deflated one: same headers, method 8, the compressed size.
     const name = new TextEncoder().encode('a.txt');
     const local = stored.slice(0, 30);
@@ -221,6 +222,33 @@ test('a zip made by a zip tool, with deflated files, can be read', async () => {
     const bytes = new Uint8Array([...local, ...name, ...packed, ...central, ...name, ...new Uint8Array(end.buffer)]);
     const back = await unzip(bytes);
     assert.equal(new TextDecoder().decode(back.get('a.txt')), text);
+});
+
+test('a zip can deflate what gets smaller, which zip tools read; what doesn\'t is stored', async () => {
+    const text = 'a line the client repeats\n'.repeat(400);
+    const noise = crypto.getRandomValues(new Uint8Array(4096));
+    const files = [{ name: 'repeats.txt', data: text }, { name: 'noise.bin', data: noise }, { name: 'empty.txt', data: '' }];
+    const stored = await zip(files);
+    const deflated = await zip(files, { deflate: true });
+    assert.ok(deflated.length < stored.length / 2, `${deflated.length} bytes deflated, ${stored.length} stored`);
+    const back = await unzip(deflated);
+    assert.equal(new TextDecoder().decode(back.get('repeats.txt')), text);
+    assert.deepEqual(back.get('noise.bin'), noise);
+    assert.equal(back.get('empty.txt').length, 0);
+    // Each entry's method, as a zip tool reads it from the list at the end: 8 deflated, 0 stored.
+    const view = new DataView(deflated.buffer, deflated.byteOffset, deflated.byteLength);
+    const methods = [];
+    for (let at = view.getUint32(deflated.length - 22 + 16, true), n = 0; n < files.length; n++) {
+        methods.push(view.getUint16(at + 10, true));
+        const local = view.getUint32(at + 42, true);
+        if (methods.at(-1) === 8) {
+            const start = local + 30 + view.getUint16(local + 26, true);
+            const name = new TextDecoder().decode(deflated.subarray(at + 46, at + 46 + view.getUint16(at + 28, true)));
+            assert.equal(inflateRawSync(deflated.subarray(start, start + view.getUint32(at + 20, true))).toString(), files.find(file => file.name === name).data, `a standard inflater reads ${name}`);
+        }
+        at += 46 + view.getUint16(at + 28, true);
+    }
+    assert.deepEqual(methods, [8, 0, 0]);
 });
 
 test("a tool's answer gives its routes text, structured content, JSON and errors", () => {
@@ -1014,19 +1042,44 @@ test("the client's root is where its index.html is, whatever page of it is open"
     assert.equal(clientRoot('http://127.0.0.1:8080/?app=1'), 'http://127.0.0.1:8080/');
 });
 
-test("a download's index.html runs the app in the client it came from, and its README says how", () => {
+test("a download's index.html is the client's own page, naming the app beside it and the client it came from, and its README says how to serve it", () => {
     const app = { ...sampleApp(), version: 3 };
-    const html = launcherHtml(app, { link: 'http://127.0.0.1:8080/#run=abc-_123', root: 'http://127.0.0.1:8080/' });
+    const client = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+    const html = appIndexHtml(client, app, { link: 'http://127.0.0.1:8080/#run=abc-_123', root: 'http://127.0.0.1:8080/' });
+    assert.match(html, /^<!DOCTYPE html>\n<html lang="en">\n<head>\n {4}<meta name="mcp-app" content="app\.dml" data-name="Ask &amp; answer &lt;test&gt;" data-run="http:\/\/127\.0\.0\.1:8080\/#run=abc-_123" data-root="http:\/\/127\.0\.0\.1:8080\/">\n/);
     assert.match(html, /<title>Ask &amp; answer &lt;test&gt;<\/title>/);
-    assert.match(html, /<p>Line one\nline &quot;two&quot;\twith a tab<\/p>/);
-    assert.match(html, /<a class="run" id="run" href="http:\/\/127\.0\.0\.1:8080\/#run=abc-_123">Run Ask &amp; answer &lt;test&gt;<\/a>/);
-    assert.match(html, /<script>location\.replace\(document\.getElementById\('run'\)\.href\);<\/script>/, 'opening it goes to the link');
-    assert.match(html, /It runs in MCP Browser Client at <a href="http:\/\/127\.0\.0\.1:8080\/">http:\/\/127\.0\.0\.1:8080\/<\/a>, in your browser.* This page runs version 3, which its link carries/);
+    assert.equal(html.replace(/\n {4}<meta name="mcp-app"[^>]*>/, '').replace(/<title>[^<]*<\/title>/, '<title>MCP Browser Client</title>'), client, 'the rest of it is the page as the client has it');
+    assert.throws(() => appIndexHtml('<p>no head</p>', app, { link: '', root: '' }), /has no <head>/);
+    // The page runs the app its <meta> names unless asked for the builder, and opened as a file says to serve the folder.
+    assert.match(client, /const file = document\.querySelector\('meta\[name="mcp-app"\]'\)\?\.content;\n\s+return file && !params\.has\('builder'\) \? \{ file \} : null;/);
+    assert.match(client, /<main class="from-file-notice" id="fromFile" hidden>/);
+    assert.match(client, /if \(location\.protocol === 'file:'\) throw new Error\('MCP Browser Client runs from a web address, not a file/);
     const readme = readmeFor(app, { serverName: () => 'Mock server', root: 'http://127.0.0.1:8080/' });
-    assert.match(readme, /\n- `index\.html`: opens the app, running, in MCP Browser Client \(see Run it\)\.\n- `screen\.html`: the screen, what people see\. It was built from components, which app\.dml lists\.\n- `app\.dml`: /);
-    assert.match(readme, /\n## Run it\n\nOpen `index\.html` in a browser: it runs the app in MCP Browser Client at http:\/\/127\.0\.0\.1:8080\/, which calls its servers for it from your browser, with your sign-ins, and there's nothing to install\. It runs version 3, which travels in the page's link, so a change to app\.dml doesn't change what it runs\./);
-    assert.match(readme, /It calls this server, which you add under Servers in the Workbench, or with Add it when the app runs:\n\n- Mock server: http:\/\/127\.0\.0\.1:8081\/\n$/);
+    assert.match(readme, /\n- `index\.html`: the app, running, once the folder is served \(see Run it\)\. It's MCP Browser Client's page, and the rest of the folder is the client that runs the app: its service worker, which makes the app's calls, the MCP client libraries, and the Workbench and builder\.\n- `screen\.html`: the screen, what people see\. It was built from components, which app\.dml lists\.\n- `app\.dml`: /);
+    assert.match(readme, /\n## Run it\n\nServe this folder and open its address\. In the folder, run one of\n\n {4}npx serve\n {4}python3 -m http\.server 8000\n\nand open the address it prints\. Any static host serves it as it is, too/);
+    assert.match(readme, /Opened as a file, from a double-click, it won't run: browsers start its service worker, which makes the app's calls and keeps sign-ins and runs, only at a web address\. The page says so then, with a link that runs version 3 in MCP Browser Client at http:\/\/127\.0\.0\.1:8080\/, where it was downloaded from\./);
+    assert.match(readme, /It runs `app\.dml` as it is in the folder, so a change to it shows on the next reload\. `\?builder` after the folder's address opens the builder/);
+    assert.match(readme, /It calls this server:\n\n- Mock server: http:\/\/127\.0\.0\.1:8081\/\n$/);
     assert.match(readmeFor(app), /MCP Browser Client at https:\/\/patrick-glean\.github\.io\/mcp-browswer-client\//, 'the public client when no other is said');
+});
+
+test("a folder's app is its app.dml with the files it names beside it, its screen and parts, and one that's missing says so", async () => {
+    const app = sampleApp();
+    const files = { 'folder/app.dml': toDml(app), 'folder/screen.html': componentsHtml(app.screen.components), 'folder/parts/dash.html': DASH };
+    const asked = [];
+    const get = async url => {
+        const name = url.pathname.slice(1);
+        asked.push(name);
+        if (!Object.hasOwn(files, name)) throw new Error(`there's no ${name.split('/').pop()} beside it (HTTP 404)`);
+        return files[name];
+    };
+    const { app: back } = await appInFolder('app.dml', { base: 'http://127.0.0.1:3000/folder/?builder', get });
+    assert.deepEqual(withoutRuleIds(back), withoutRuleIds(app));
+    assert.deepEqual(asked, ['folder/app.dml', 'folder/screen.html', 'folder/parts/dash.html']);
+    delete files['folder/parts/dash.html'];
+    await assert.rejects(appInFolder('app.dml', { base: 'http://127.0.0.1:3000/folder/', get }), /there's no dash\.html beside it/);
+    files['folder/app.dml'] = toDml(app).replace('src="parts/dash.html"', 'src="../outside.html"');
+    await assert.rejects(appInFolder('app.dml', { base: 'http://127.0.0.1:3000/folder/', get }), /dash/, "a file outside the folder isn't read");
 });
 
 test("where what comes out of a tool goes: each of its rule's routes for it, once, in order", () => {

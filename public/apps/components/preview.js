@@ -148,7 +148,8 @@ export class AppPreview extends AppElement {
         const fromLink = launched.fromLink && !this.apps.isYours();
         actions.innerHTML = fromLink
             ? '<button type="button" class="btn-sm" data-keep-app title="Adds it under Your apps, to change it in the builder">Add to Your apps</button>'
-            : `<button type="button" class="btn-sm" data-open-builder title="${escapeHtml(launched.fromLink ? 'Your copy of this app, in the builder: the one you have may be a different version from the link\'s' : 'The app in the builder, to change it')}">Open in the builder</button>`;
+            : `<button type="button" class="btn-sm" data-open-builder title="${escapeHtml(launched.fromLink ? 'Your copy of this app, in the builder: the one you have may be a different version from the link\'s'
+                : launched.fromFile ? "This folder's app, in the builder here, to change it and download it again" : 'The app in the builder, to change it')}">Open in the builder</button>`;
         const rows = [];
         if (launched.fromLink) rows.push('<p class="app-launch-note">This app came in a link. It calls your servers, signed in as you, and each call is in History.</p>');
         for (const url of serversOf(app)) {

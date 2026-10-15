@@ -12,7 +12,7 @@
 // setup.sh creates. Exits non-zero if any check fails.
 
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -87,11 +87,11 @@ const MIME_TYPES = {
     '.woff2': 'font/woff2',
 };
 
-// Serves public/ the way `npm start` does, without the dependency. Python's http.server resets
-// connections when many requests arrive at once, as the page's and worker's modules do.
-function serveApp(port) {
-    const root = join(ROOT, 'public');
-    const app = { label: 'app', output: '' };
+// Serves public/ the way `npm start` does, without the dependency, or another folder (`root`),
+// such as a downloaded app's. Python's http.server resets connections when many requests arrive
+// at once, as the page's and worker's modules do.
+function serveApp(port, { root = join(ROOT, 'public'), label = 'app' } = {}) {
+    const app = { label, output: '' };
     const server = createHttpServer((request, response) => {
         let file = normalizePath(join(root, decodeURIComponent(new URL(request.url, HOST).pathname)));
         let status = 200;
@@ -969,43 +969,90 @@ async function main() {
             const toolScreen = await frameWaitFor(`(() => { const text = document.getElementById('answer')?.textContent; return text?.startsWith('You said') ? text : null; })()`);
             check('Apps: the flow works the same on a screen a tool made', toolScreen === 'You said a tool made this, and it said Echo: a tool made this', toolScreen);
 
-            // Download is a zip of the flow as DML, the screen as HTML, a page that runs the app and
-            // a README; importing it brings the app back.
+            // Download is a zip of a folder that runs the app once it's served: the flow as DML, the
+            // screen as HTML and a README, beside the client's own files, whose index.html names the
+            // app. Importing it brings the app back.
             const appDownloads = mkdtempSync(join(tmpdir(), 'mcp-smoke-app-'));
             await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: appDownloads });
             await page.run(`document.getElementById('downloadAppBtn').click()`);
             let zipName;
-            for (let i = 0; i < 50 && !zipName; i++) {
+            for (let i = 0; i < 100 && !zipName; i++) {
                 zipName = readdirSync(appDownloads).find(name => name.endsWith('.zip'));
                 if (!zipName) await sleep(100);
             }
             const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
-            const zippedText = name => (zipped.has(name) ? new TextDecoder().decode(zipped.get(name)) : '');
+            const zippedText = name => (zipped.has(`new-app-v1/${name}`) ? new TextDecoder().decode(zipped.get(`new-app-v1/${name}`)) : '');
             let fromZip;
             try {
                 fromZip = fromDml(zippedText('app.dml'), { files: { 'screen.html': zippedText('screen.html') } }).app;
             } catch (error) {
                 fromZip = { error: error.message };
             }
-            check('Apps: Download saves a zip with the flow as DML, the screen as HTML, a page that runs it and a README',
-                zipName === 'new-app-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, screen.html, README.md'
+            const zippedNames = [...zipped.keys()];
+            const clientList = JSON.parse(readFileSync(join(ROOT, 'public', 'client-files.json'), 'utf8')).files;
+            const leftOut = clientList.filter(file => !zipped.has(`new-app-v1/${file}`));
+            const named = zippedText('index.html').match(/<meta name="mcp-app" content="app\.dml" data-name="New app" data-run="([^"]+)" data-root="([^"]+)">/);
+            check('Apps: Download saves a zip of a folder: the flow as DML, the screen as HTML and a README, with the client that runs it, whose page names the app',
+                zipName === 'new-app-v1.zip' && zippedNames.every(name => name.startsWith('new-app-v1/')) && zippedNames.slice(0, 3).join(', ') === 'new-app-v1/app.dml, new-app-v1/screen.html, new-app-v1/README.md'
+                    && !leftOut.length && zippedNames.length === clientList.length + 3 && !zipped.has('new-app-v1/sdk_client.js.map')
+                    && named?.[2] === `${HOST}:${PORTS.app}/` && named[1].startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`)
                     && fromZip.version === 1 && fromZip.screen?.kind === 'html' && fromZip.screen.from?.toolName === 'make_screen'
                     && /<input id="question"/.test(zippedText('screen.html')) && fromZip.flow?.[0]?.when?.[0]?.element === 'ask'
                     && zippedText('README.md').includes('1. When `ask` is clicked, call echo on modern server with text = {{question}}; if it works, put “You said {{question}}, and it said {{text}}” into `answer`')
-                    && zippedText('README.md').includes(`Open \`index.html\` in a browser: it runs the app in MCP Browser Client at ${HOST}:${PORTS.app}/,`),
-                `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+                    && zippedText('README.md').includes('## Run it\n\nServe this folder and open its address.')
+                    && zippedText('README.md').includes(`a link that runs version 1 in MCP Browser Client at ${HOST}:${PORTS.app}/, where it was downloaded from.`),
+                `${zipName}: ${zippedNames.length} files, ${zippedNames.slice(0, 3).join(', ')}…${leftOut.length ? `; without ${leftOut.join(', ')}` : ''}; ${named ? named[2] : 'no <meta> naming the app'}${fromZip.error ? `; ${fromZip.error}` : ''}`);
 
-            // index.html runs it: its link is the client's root, as the address bar had it, with the
-            // app in it, and opening the page from the disk goes there and runs the app.
-            const launcherLink = zippedText('index.html').match(/<a class="run" id="run" href="([^"]+)">Run New app<\/a>/)?.[1] || '';
+            // Served, the folder runs its app.dml. At its own address the client has none of this
+            // one's servers, so the app's bar offers to add the one it calls; once added, it answers.
+            const unzipped = join(appDownloads, 'unzipped');
+            for (const [name, data] of zipped) {
+                mkdirSync(dirname(join(unzipped, name)), { recursive: true });
+                writeFileSync(join(unzipped, name), data);
+            }
+            const folderPort = await freePort();
+            serveApp(folderPort, { root: unzipped, label: 'download' });
+            await page.send('Target.createTarget', { url: `${HOST}:${folderPort}/new-app-v1/?client=${CLIENT_NAME}` });
+            const served = await openPage(target => target.url.startsWith(`${HOST}:${folderPort}/`));
+            const servedShown = await served.waitFor(`(() => {
+                const preview = document.querySelector('app-preview');
+                const notes = preview?.querySelector('[data-launch-notes]');
+                if (!preview || preview.hidden || !preview.querySelector('iframe') || !notes || notes.hidden) return null;
+                return [document.title, preview.querySelector('[data-launch-actions]')?.textContent.trim(), notes.innerText.replace(/\\s+/g, ' ').trim()].join(' | ');
+            })()`, 20000);
+            await served.run(`document.querySelector('app-preview [data-add-server-for-app]')?.click()`);
+            await served.waitFor(`Object.values(appShell.servers).some(server => server.status === 'connected' && server.tools?.some(tool => tool.name === 'echo'))`, 15000);
+            await frameWaitFor(`document.readyState === 'complete' && !!document.getElementById('ask')`, 10000, { inPage: served });
+            await frameRun(`(() => {
+                document.getElementById('question').value = 'from the folder';
+                document.getElementById('ask').click();
+                return true;
+            })()`, { inPage: served });
+            const servedAnswered = await frameWaitFor(`document.getElementById('answer')?.textContent || null`, 10000, { inPage: served });
+            await closeTab(served);
+            check("Apps: the download's folder, served, runs its app.dml; at its own address it offers to add the server the app calls, and once added the app answers",
+                servedShown === `New app | Open in the builder | It calls modern server (${HOST}:${PORTS.modern}/), which isn't one of your servers. Add it`
+                    && servedAnswered === 'You said from the folder, and it said Echo: from the folder',
+                `${servedShown}; ${servedAnswered}`);
+
+            // Opened as a file, the page can't run, and says to serve the folder; its link runs the
+            // app, as it is in the zip, in the client it came from.
             let linked;
             try {
-                linked = fromDml(await unpackApp(launcherLink.split(RUN_HASH)[1] || '')).app;
+                linked = fromDml(await unpackApp(named?.[1].split(RUN_HASH)[1] || '')).app;
             } catch (error) {
                 linked = { error: error.message };
             }
-            writeFileSync(join(appDownloads, 'index.html'), zippedText('index.html'));
-            await page.send('Target.createTarget', { url: `file://${join(appDownloads, 'index.html')}` });
+            await page.send('Target.createTarget', { url: `file://${join(unzipped, 'new-app-v1', 'index.html')}` });
+            const asFile = await openPage(target => target.url.startsWith('file://'));
+            const fileNotice = await asFile.waitFor(`(() => {
+                const notice = document.getElementById('fromFile');
+                if (!notice || notice.hidden) return null;
+                const link = notice.querySelector('[data-from-file-link]');
+                return [notice.querySelector('[data-from-file-title]').textContent, getComputedStyle(document.querySelector('.wb-app')).display, link.textContent.trim(), link.getAttribute('href') === ${JSON.stringify(named?.[1] || '')} ? 'the link in the page' : link.getAttribute('href')].join(' | ');
+            })()`, 10000);
+            await asFile.run(`document.querySelector('[data-from-file-link]').click()`);
+            asFile.close();
             const fromDisk = await openPage(target => target.url.startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`));
             const diskShown = await fromDisk.waitFor(`(() => {
                 const preview = document.querySelector('app-preview');
@@ -1021,10 +1068,11 @@ async function main() {
             const diskAnswered = await frameWaitFor(`document.getElementById('answer')?.textContent || null`, 10000, { inPage: fromDisk });
             await closeTab(fromDisk);
             await page.send('Page.bringToFront');
-            check("Apps: the download's index.html, opened from the disk, runs the app in the client it came from, as it is in the zip",
-                launcherLink.startsWith(`${HOST}:${PORTS.app}/${RUN_HASH}`) && linked.screen?.html === fromZip.screen?.html && linked.flow?.[0]?.call?.toolName === 'echo'
+            check("Apps: the folder's page, opened as a file, says to serve the folder, and its link runs the app as it is in the zip in the client it came from",
+                fileNotice === 'New app runs from a web address | none | Run New app there | the link in the page'
+                    && linked.screen?.html === fromZip.screen?.html && linked.flow?.[0]?.call?.toolName === 'echo'
                     && diskShown === 'New app | Open in the builder' && diskAnswered === 'You said from the download, and it said Echo: from the download',
-                `${launcherLink.slice(0, 40)}…; ${linked.error || ''}; ${diskShown}; ${diskAnswered}`);
+                `${fileNotice}; ${linked.error || ''}; ${diskShown}; ${diskAnswered}`);
             const firstVersion = await page.waitFor(`(() => {
                 const version = document.getElementById('appVersion')?.textContent || '';
                 return version.startsWith('Version 1, downloaded') ? version + ' | ' + document.getElementById('downloadAppBtn').textContent.trim() : null;
@@ -1480,23 +1528,23 @@ async function main() {
                 if (!zipName) await sleep(100);
             }
             const zipped = zipName ? await unzip(readFileSync(join(appDownloads, zipName))) : new Map();
-            const zippedText = name => (zipped.has(name) ? new TextDecoder().decode(zipped.get(name)) : '');
+            const zippedText = name => (zipped.has(`new-app-2-v1/${name}`) ? new TextDecoder().decode(zipped.get(`new-app-2-v1/${name}`)) : '');
             let fromZip;
             try {
-                fromZip = fromDml(zippedText('app.dml'), { files: Object.fromEntries([...zipped.keys()].map(name => [name, zippedText(name)])) }).app;
+                fromZip = fromDml(zippedText('app.dml'), { files: { 'screen.html': zippedText('screen.html'), 'parts/part.html': zippedText('parts/part.html') } }).app;
             } catch (error) {
                 fromZip = { error: error.message };
             }
             const part = fromZip.screen?.components?.find(component => component.type === 'part');
             const counting = fromZip.flow?.find(rule => rule.call?.toolName === 'count');
             check('Apps: the download keeps the part\'s HTML in parts/, what the model was asked, Start, and where each tool sits',
-                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].join(', ') === 'app.dml, index.html, screen.html, parts/part.html, README.md'
+                zipName === 'new-app-2-v1.zip' && [...zipped.keys()].slice(0, 4).join(', ') === 'new-app-2-v1/app.dml, new-app-2-v1/screen.html, new-app-2-v1/parts/part.html, new-app-2-v1/README.md'
                     && part?.ask === 'a ticket dashboard' && part.from?.toolName === 'chat' && /id="refresh"/.test(part.html)
                     && /id="part\.refresh"/.test(zippedText('screen.html'))
                     && counting?.when?.map(candidate => candidate.event).join(', ') === 'click, open'
                     && fromZip.flow.length === 3 && fromZip.flow.every(rule => Number.isFinite(rule.position?.x) && Number.isFinite(rule.position?.y))
                     && zippedText('README.md').includes('- `parts/part.html`: the part `part`, made by a model asked for "a ticket dashboard".'),
-                `${zipName}: ${[...zipped.keys()].join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
+                `${zipName}: ${[...zipped.keys()].slice(0, 4).join(', ')}${fromZip.error ? `; ${fromZip.error}` : ''}`);
             rmSync(appDownloads, { recursive: true, force: true });
 
             // A part with a grid of keys and long ids, as a model writes a calculator: the keys fill

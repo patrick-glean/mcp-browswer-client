@@ -281,39 +281,42 @@ export const EXAMPLES = {
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 
-// The zip's index.html: opening it runs the app, in the client at `root` (where it was downloaded
-// from), through `link`, which carries the app (link.js). A page opened from a disk or another
-// site can't use the client's worker, sign-ins or servers, which belong to the client's origin,
-// so it hands the app to the client.
-export function launcherHtml(app, { link, root }) {
-    const name = escapeHtml(app.name || 'App');
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${name}</title>
-<style>
-  :root { color-scheme: light dark; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  body { max-width: 36rem; margin: 12vh auto; padding: 0 1.5rem; }
-  .run { display: inline-block; padding: 0.55rem 1.1rem; border-radius: 999px; background: #18181b; color: #fafafa; font-weight: 600; text-decoration: none; }
-  .note { color: GrayText; font-size: 0.875rem; }
-  @media (prefers-color-scheme: dark) { .run { background: #fafafa; color: #18181b; } }
-</style>
-</head>
-<body>
-<h1>${name}</h1>
-<p>${escapeHtml(app.description || 'An app built in MCP Browser Client.')}</p>
-<p><a class="run" id="run" href="${escapeHtml(link)}">Run ${name}</a></p>
-<p class="note">It runs in MCP Browser Client at <a href="${escapeHtml(root)}">${escapeHtml(root)}</a>, in your browser: the client calls the app's servers for it, with your sign-ins, and there's nothing to install. This page runs ${app.version ? `version ${app.version}` : 'the version it was downloaded with'}, which its link carries; app.dml beside it is the app as markup, and screen.html its screen.</p>
-<script>location.replace(document.getElementById('run').href);</script>
-</body>
-</html>
-`;
+// The file in a downloaded folder that its index.html runs: the app, as DML.
+export const APP_FILE = 'app.dml';
+// The list of the client's own files (scripts/client-files.mjs), which a download ships.
+const CLIENT_FILES = 'client-files.json';
+
+async function fetchText(url) {
+    const response = await fetch(url, { cache: 'no-cache' });
+    if (!response.ok) throw new Error(`there's no ${url.pathname.split('/').pop()} beside it (HTTP ${response.status})`);
+    return response.text();
 }
 
-// The README that travels in an app's zip: what's in it, the flow in words, and how to run it,
-// in the client at `root`.
+// The app a downloaded folder's index.html names (`file`, beside it), with the files its DML
+// names beside it in turn: its screen and its parts. `get(url)` reads one.
+export async function appInFolder(file, { base = location.href, get = fetchText } = {}) {
+    const at = new URL(file, base);
+    const dml = await get(at);
+    const files = {};
+    for (const [, src] of dml.matchAll(/\bsrc="([^"]+)"/g)) {
+        if (Object.hasOwn(files, src) || !/^\w[\w./-]*$/.test(src) || src.includes('..')) continue;
+        files[src] = await get(new URL(src, at));
+    }
+    return fromDml(dml, { files });
+}
+
+// A download's index.html: the client's own page (`html`), naming the app beside it, which it
+// runs when the folder is served. Opened as a file the page can't run, and says how to serve the
+// folder, with `link`, which runs this version in the client at `root`, where it came from.
+export function appIndexHtml(html, app, { link, root }) {
+    if (!html.includes('<head>')) throw new Error("the client's index.html has no <head>");
+    const name = escapeHtml(app.name || 'App');
+    const meta = `<meta name="mcp-app" content="${APP_FILE}" data-name="${name}" data-run="${escapeHtml(link)}" data-root="${escapeHtml(root)}">`;
+    return html.replace(/<title>[^<]*<\/title>/, `<title>${name}</title>`).replace('<head>', `<head>\n    ${meta}`);
+}
+
+// The README that travels in an app's zip: what's in it, the flow in words, and how to run it:
+// served as it is, or from a file through the client at `root`.
 export function readmeFor(app, { serverName = url => url, root = APP_URL } = {}) {
     const elements = new Map(elementsOf(app.screen).map(element => [element.id, element]));
     const elementName = id => {
@@ -346,7 +349,7 @@ An app built in MCP Browser Client${app.version ? `, version ${app.version}` : '
 
 ## What's here
 
-- \`index.html\`: opens the app, running, in MCP Browser Client (see Run it).
+- \`index.html\`: the app, running, once the folder is served (see Run it). It's MCP Browser Client's page, and the rest of the folder is the client that runs the app: its service worker, which makes the app's calls, the MCP client libraries, and the Workbench and builder.
 - \`${SCREEN_FILE}\`: the screen, what people see. ${app.screen?.kind === 'html' ? (app.screen.from ? `A call to \`${app.screen.from.toolName}\` on ${serverName(app.screen.from.serverUrl)} made it.` : 'It was written as HTML.') : 'It was built from components, which app.dml lists.'}
 - \`app.dml\`: the screen's components and the flow, what happens when people use it, as markup.${parts.map(part => `\n- \`${partFile(part.id)}\`: the part \`${part.id}\`, ${made(part)}. On the screen its ids start with \`${part.id}.\`.`).join('')}
 
@@ -375,7 +378,18 @@ ${agent.join(' ')}
 
 ## Run it
 
-Open \`index.html\` in a browser: it runs the app in MCP Browser Client at ${root}, which calls its servers for it from your browser, with your sign-ins, and there's nothing to install. It runs ${app.version ? `version ${app.version}` : 'the version it was downloaded with'}, which travels in the page's link, so a change to app.dml doesn't change what it runs. To change the app, or run a changed app.dml, open MCP Browser Client, choose Apps, then Import, and pick this zip. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}, which you add under Servers in the Workbench, or with Add it when the app runs:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}${demoServerAt(url) ? ', a demo server built into MCP Browser Client, which running or importing the app adds for you' : ''}`).join('\n')}` : "It doesn't call any servers yet."}
+Serve this folder and open its address. In the folder, run one of
+
+    npx serve
+    python3 -m http.server 8000
+
+and open the address it prints. Any static host serves it as it is, too: GitHub Pages, Netlify, an S3 bucket. The app runs in your browser, which calls its servers for it, with your sign-ins.
+
+Opened as a file, from a double-click, it won't run: browsers start its service worker, which makes the app's calls and keeps sign-ins and runs, only at a web address. The page says so then, with a link that runs ${app.version ? `version ${app.version}` : 'this version'} in MCP Browser Client at ${root}, where it was downloaded from.
+
+It runs \`app.dml\` as it is in the folder, so a change to it shows on the next reload. \`?builder\` after the folder's address opens the builder, to change the app there and download it again; or import this zip in MCP Browser Client (Apps, then Import).
+
+Served from a new address, the client starts with none of your servers or sign-ins: the bar above the app offers to add the servers it calls, and to sign in. A server that takes calls only from some web addresses (CORS) has to allow the one it's served from. ${servers.length ? `It calls ${servers.length === 1 ? 'this server' : 'these servers'}:\n\n${servers.map(url => `- ${serverName(url) === url ? url : `${serverName(url)}: ${url}`}${demoServerAt(url) ? ', a demo server built into MCP Browser Client, which running or importing the app adds for you' : ''}`).join('\n')}` : "It doesn't call any servers yet."}
 `;
 }
 
@@ -430,16 +444,17 @@ export class Apps {
     // --- Launched: one app on its own, as people use it ---
 
     // Runs one app with nothing of the builder, the window its screen as in Preview: one of yours
-    // (`id`, index.html?app=<id>, which Launch opens), or one a link carries (`run`, the #run=
-    // of a link from Copy a link or a download's index.html). A link's app isn't added to Your
-    // apps until you say so, and it waits to run what Start calls as an app opening does; yours
-    // runs it at once, as Preview does. `launched` says which, or why there's nothing to run.
-    async launch({ id = null, run = null }) {
+    // (`id`, index.html?app=<id>, which Launch opens), one a link carries (`run`, the #run= of a
+    // link from Copy a link), or the one beside a downloaded folder's index.html (`file`). A
+    // link's or a folder's app isn't added to Your apps until you say so; a link's waits to run
+    // what Start calls as an app opening does, while yours and a folder's (which is there to run
+    // it) run it at once, as Preview does. `launched` says which, or why there's nothing to run.
+    async launch({ id = null, run = null, file = null }) {
         let app = null;
         let problem = '';
-        if (run) {
+        if (run || file) {
             try {
-                const { app: carried, servers } = fromDml(await unpackApp(run));
+                const { app: carried, servers } = run ? fromDml(await unpackApp(run)) : await appInFolder(file);
                 const now = Date.now();
                 app = {
                     ...normalizeApp(carried),
@@ -450,13 +465,13 @@ export class Apps {
                     serverNames: Object.fromEntries(servers.filter(server => server.name).map(server => [server.url, server.name])),
                 };
             } catch (error) {
-                problem = `The app in this link can't run: ${error.message}.`;
+                problem = `The app in this ${run ? 'link' : 'folder'} can't run: ${error.message.replace(/\.$/, '')}.`;
             }
         } else {
             app = this.list.find(candidate => candidate.id === id) || null;
             if (!app) problem = "This browser has no app with this link's id: it may have been deleted, or made in another browser. An app's own link, which runs it anywhere, is Copy a link that runs it, in its ⋯ menu in the builder.";
         }
-        this.launched = { fromLink: !!run, problem };
+        this.launched = { fromLink: !!run, fromFile: !!file, problem };
         this.view = PREVIEW;
         this.app = app;
         this.shownId = app?.id ?? null;
@@ -480,21 +495,25 @@ export class Apps {
         return !!app && this.list.some(candidate => candidate.id === app.id);
     }
 
-    // The app a link carried, added to Your apps, as Import adds one.
+    // The app a link carried, or a folder's, added to Your apps, as Import adds one. A folder's
+    // replaces the one with its id, since the folder's app.dml is the one that runs here.
     async keepLaunched() {
         const app = this.app;
-        if (!this.launched?.fromLink || !app || this.isYours(app)) return;
+        const { fromLink, fromFile } = this.launched || {};
+        if (!app || !(fromFile || (fromLink && !this.isYours(app)))) return;
         await store.saveApp(app);
-        this.list = [...this.list, app];
+        this.list = [...this.list.filter(candidate => candidate.id !== app.id), app];
         this.emit('list');
         this.status(`Added ${app.name} to Your apps. Open it in the builder to change it.`);
     }
 
-    // The builder, in this tab, showing the launched app if it's one of yours.
-    openInBuilder() {
+    // The builder, in this tab, showing the launched app if it's one of yours. A folder's
+    // index.html runs its app unless the address asks for the builder (?builder).
+    async openInBuilder() {
+        if (this.launched?.fromFile) await this.keepLaunched();
         if (this.isYours()) localStorage.setItem(SHOWN_KEY, this.app.id);
         localStorage.setItem(MODE_KEY, 'apps');
-        location.assign(clientRoot(location.href));
+        location.assign(`${clientRoot(location.href)}${this.launched?.fromFile ? '?builder' : ''}`);
     }
 
     // Where one of your apps runs on its own: index.html?app=<id>, in this browser.
@@ -900,7 +919,23 @@ export class Apps {
         return Object.fromEntries(serversOf(app).map(url => [url, this.serverName(url, app)]).filter(([url, name]) => name !== url));
     }
 
-    // Each download is a version: the first is 1, and one after any change is the next number.
+    // The client's own files, as this page is served them (client-files.json lists them), which a
+    // download ships with the app: [{ name, data }].
+    async clientFiles(root = clientRoot(location.href)) {
+        const get = async name => {
+            const response = await fetch(new URL(name, root), { cache: 'no-cache' });
+            if (!response.ok) throw new Error(`couldn't fetch the client's ${name} (HTTP ${response.status})`);
+            return new Uint8Array(await response.arrayBuffer());
+        };
+        const { files } = JSON.parse(new TextDecoder().decode(await get(CLIENT_FILES)));
+        const fetched = [];
+        for (let at = 0; at < files.length; at += 8) fetched.push(...await Promise.all(files.slice(at, at + 8).map(async name => ({ name, data: await get(name) }))));
+        return fetched;
+    }
+
+    // Each download is a version: the first is 1, and one after any change is the next number. It
+    // is a folder that runs the app once it's served: the app's own files beside the client's,
+    // whose index.html names the app (appIndexHtml).
     async download({ standalone = false } = {}) {
         const app = this.app;
         if (!app) return;
@@ -914,25 +949,35 @@ export class Apps {
         const base = `${slug(app.name)}-v${app.version}`;
         if (standalone) {
             download(`${base}.dml`, toDml(app, { standalone: true, serverNames }), 'application/xml');
-        } else {
+            this.status(`Downloaded ${app.name}, version ${app.version}, as DML.`);
+            return;
+        }
+        this.status(`Packing ${app.name} with the client that runs it…`);
+        try {
             const parts = app.screen?.kind === 'html' ? [] : (app.screen?.components || []).filter(component => component.type === 'part');
             const root = clientRoot(location.href);
-            const files = [
-                { name: 'app.dml', data: toDml(app, { serverNames }) },
-                { name: 'index.html', data: launcherHtml(app, { link: await this.linkTo(app), root }) },
+            const own = [
+                { name: APP_FILE, data: toDml(app, { serverNames }) },
                 { name: SCREEN_FILE, data: screenHtml(app) },
                 ...parts.map(part => ({ name: partFile(part.id), data: part.html || '' })),
                 { name: 'README.md', data: readmeFor(app, { serverName: url => this.serverName(url), root }) },
             ];
+            const client = await this.clientFiles(root);
+            const page = client.find(file => file.name === 'index.html');
+            page.data = appIndexHtml(new TextDecoder().decode(page.data), app, { link: await this.linkTo(app), root });
+            const taken = new Set(own.map(file => file.name));
+            const files = [...own, ...client.filter(file => !taken.has(file.name))].map(file => ({ ...file, name: `${base}/${file.name}` }));
             const link = document.createElement('a');
-            link.href = URL.createObjectURL(new Blob([zip(files)], { type: 'application/zip' }));
+            link.href = URL.createObjectURL(new Blob([await zip(files, { deflate: true })], { type: 'application/zip' }));
             link.download = `${base}.zip`;
             document.body.appendChild(link);
             link.click();
             link.remove();
             setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+            this.status(`Downloaded ${app.name}, version ${app.version}: serve the folder in it, and it runs (its README says how).`);
+        } catch (error) {
+            this.status(`Couldn't download ${app.name}: ${error.message}`, { error: true });
         }
-        this.status(`Downloaded ${app.name}, version ${app.version}${standalone ? ', as DML' : ''}.`);
     }
 
     // A zip from Download, or a .dml file. An app with the same id is replaced, so importing a
@@ -945,9 +990,13 @@ export class Apps {
             if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
                 const decoder = new TextDecoder();
                 const entries = [...await unzip(bytes)];
-                // A download zipped again from its folder has that folder in front of every name.
+                // A download has its folder in front of every name (one from before, only if it was
+                // zipped again from its folder). A DML names only HTML files: its screen and parts.
                 const folder = entries.some(([name]) => name === 'app.dml') ? '' : entries.find(([name]) => /^[^/]+\/app\.dml$/.test(name))?.[0].slice(0, -'app.dml'.length) || '';
-                for (const [name, data] of entries) files[name.startsWith(folder) ? name.slice(folder.length) : name] = decoder.decode(data);
+                for (const [name, data] of entries) {
+                    const local = name.startsWith(folder) ? name.slice(folder.length) : name;
+                    if (/\.(dml|html)$/.test(local)) files[local] = decoder.decode(data);
+                }
                 dml = files['app.dml'] ?? Object.entries(files).find(([name]) => name.endsWith('.dml'))?.[1];
                 if (dml === undefined) throw new Error("there's no app.dml in it");
             } else {
