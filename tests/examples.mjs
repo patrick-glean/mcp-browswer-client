@@ -135,7 +135,12 @@ async function described(get) {
         facts.calls[tool.name] = { content: (result.content || []).map(content), structuredContent: result.structuredContent ?? null, isError: !!result.isError };
     }
     const { resources } = await get('resources/list');
-    facts.resources = Object.fromEntries(resources.map(resource => [resource.uri, pick(resource, ['name', 'title', 'description', 'mimeType', 'annotations'])]));
+    // A timestamp as the instant it names: 12:00:00Z and 12:00:00+00:00 are the same time.
+    const instant = annotations => (annotations?.lastModified ? { ...annotations, lastModified: new Date(annotations.lastModified).toISOString() } : annotations);
+    facts.resources = Object.fromEntries(resources.map(resource => [resource.uri, {
+        ...pick(resource, ['name', 'title', 'description', 'mimeType']),
+        ...(resource.annotations ? { annotations: instant(resource.annotations) } : {}),
+    }]));
     facts.reads = {};
     facts.sizes = {};
     for (const resource of resources) {
