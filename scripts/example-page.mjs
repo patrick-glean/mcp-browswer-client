@@ -16,7 +16,7 @@ import { runLink } from '../public/apps/link.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
 
 export const PAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'examples', 'team-home.html');
-export const EMBED_HEIGHT = 660;
+export const EMBED_HEIGHT = 720;
 const MARKED = /(<!-- app -->\n)([ \t]*)[^\n]*(\n[ \t]*<!-- \/app -->)/;
 
 // The example, with an ID of its own so the page is the same each time it's written.

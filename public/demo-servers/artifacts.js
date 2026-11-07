@@ -284,7 +284,7 @@ const SLIDE_CSS = `${BASE_CSS}
 .ga-title { margin: 0; font-size: 1.6rem; line-height: 1.2; letter-spacing: -0.02em; }
 .ga-summary { display: -webkit-box; overflow: hidden; margin: 0; color: var(--muted, #727272); -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .ga-byline { display: flex; align-items: center; gap: 10px; margin-top: 2px; font-size: 0.875rem; line-height: 1.35; }
-.ga-byline strong { display: block; }
+.ga-byline strong, .ga-byline small { display: block; }
 .ga-byline small { color: var(--muted, #727272); font-size: inherit; }
 .ga-open { display: inline-flex; align-items: center; align-self: flex-start; gap: 7px; margin-top: 6px; padding: 9px 18px; border-radius: 999px; background: var(--ga-accent); color: var(--ga-on-accent); font-weight: 600; text-decoration: none; }
 .ga-open:hover { filter: brightness(1.08); }
@@ -310,7 +310,7 @@ export function slideHtml(artifact, content, { at = 1, of = 1, now = Date.now(),
     if (note) preview.note = note;
     const kind = [artifact.kind || TYPES[type].kind, artifact.version ? `v${artifact.version}` : ''].filter(Boolean).join(' · ');
     const when = ago(artifact.updatedAt, now);
-    const byline = [artifact.department, when && `updated ${when}`].filter(Boolean).join(' · ');
+    const byline = [artifact.department, when && `updated ${when}`].filter(Boolean).map(line => `<small>${escapeHtml(line)}</small>`).join('');
     const after = Array.from({ length: Math.max(0, of - at + 1) }, (_, index) => `[data-at="${at + index}"]`);
     const current = `.ga-strip [data-at="${at}"] a { border-color: var(--ga-accent); box-shadow: inset 0 0 0 1px var(--ga-accent); }${at > 1
         ? `\n.ga-strip li { order: 1; }\n.ga-strip li:is(${after.join(', ')}) { order: 0; }`
@@ -325,7 +325,7 @@ ${current}${preview.css ? `\n${preview.css}` : ''}
   <div class="ga-about">
     <p class="ga-kind">${icon(TYPES[type].icon)}<span>${escapeHtml(kind)}</span></p>
     <h3 class="ga-title">${escapeHtml(artifact.title)}</h3>${artifact.summary ? `\n    <p class="ga-summary">${escapeHtml(artifact.summary)}</p>` : ''}
-    <div class="ga-byline">${avatar(artifact.author)}<span><strong>${escapeHtml(artifact.author || 'Someone on your team')}</strong><small>${escapeHtml(byline)}</small></span></div>
+    <div class="ga-byline">${avatar(artifact.author)}<span><strong>${escapeHtml(artifact.author || 'Someone on your team')}</strong>${byline}</span></div>
     <a class="ga-open" href="${escapeHtml(artifact.url)}">Open in Glean ${icon('external', 14)}</a>${preview.note ? `\n    <p class="ga-note">${escapeHtml(preview.note)}</p>` : ''}
   </div>
 </article>`;
