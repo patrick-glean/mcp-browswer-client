@@ -342,6 +342,75 @@ export function frontDeskApp({ name }) {
     return newApp({ name, screen: { kind: 'components', components }, flow: [find, checkIn, desk] });
 }
 
+// How many of the team's newest artifacts the carousel goes through.
+const ARTIFACTS_SHOWN = 12;
+
+// The carousel's part: a heading the team's name goes in, Previous and Next with where it is, the
+// stage the slide goes in, and the strip of all of them. Its styles use the screen's colors, so
+// it's light or dark with the page.
+export const CAROUSEL_HTML = `<style>
+.ga-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 14px; }
+.ga-eyebrow { margin: 0 0 4px; color: var(--accent); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.ga-heading { margin: 0; font-size: 1.5rem; line-height: 1.2; letter-spacing: -0.02em; }
+#summary { margin: 4px 0 0; color: var(--muted); font-size: 0.875rem; }
+.ga-nav { display: flex; align-items: center; gap: 8px; }
+.ga-nav button { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--bg); color: var(--fg); }
+.ga-nav button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ga-count { min-width: 64px; margin: 0; color: var(--muted); font-size: 0.875rem; text-align: center; font-variant-numeric: tabular-nums; }
+#counter { color: var(--fg); font-weight: 700; }
+#stage { box-sizing: border-box; min-height: 360px; border: 1px solid var(--line); border-radius: 18px; background: var(--bg); box-shadow: 0 24px 48px -36px rgba(15, 23, 42, 0.45); transition: opacity 0.2s; }
+#stage:empty::before { content: "Getting your team's newest artifact…"; display: block; padding: 22px 26px; color: var(--muted); }
+#stage[aria-busy='true'] { opacity: 0.55; }
+#stage[data-state='error'] { padding: 22px 26px; color: var(--error); }
+#strip { margin-top: 14px; }
+</style>
+<header class="ga-head">
+  <div>
+    <p class="ga-eyebrow">Glean artifacts</p>
+    <h2 class="ga-heading"><span id="team">Built by your team</span></h2>
+    <p id="summary">Getting the newest…</p>
+  </div>
+  <nav class="ga-nav" aria-label="Artifacts">
+    <button id="prev" type="button" aria-label="Previous artifact"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <p class="ga-count"><span id="counter">1</span> of <span id="total">…</span></p>
+    <button id="next" type="button" aria-label="Next artifact"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+  </nav>
+</header>
+<div id="stage" aria-live="polite"></div>
+<div id="strip"></div>`;
+
+// The Team artifacts example: a carousel of the Glean artifacts your team made, to put in other
+// pages. It's one part, filled by a Glean artifacts server's two tools: get_artifact for the
+// slide, when the app opens and on Previous and Next, which send the place the counter shows and
+// a step; and list_team_artifacts for the team, how many and the strip of all of them. It calls
+// its own demo server, a made-up team, until you move it to the bridge (glean-bridge/), which
+// serves your team's from Glean.
+export function artifactsApp({ name }) {
+    const call = (toolName, args) => ({ serverUrl: DEMO_SERVERS.artifacts.url, toolName, args });
+    const slide = [
+        { if: 'ok', show: '{{html}}', into: 'carousel.stage', how: 'html' },
+        { if: 'ok', show: '{{structured.position}}', into: 'carousel.counter', how: 'replace' },
+        { if: 'ok', show: '{{structured.total}}', into: 'carousel.total', how: 'replace' },
+        { if: 'error', show: '{{error}}', into: 'carousel.stage', how: 'replace' },
+    ];
+    const first = { ...newRule({ event: 'open', ...call('get_artifact', { at: 1, limit: ARTIFACTS_SHOWN }), into: null }), then: slide };
+    const team = {
+        ...newRule({ event: 'open', ...call('list_team_artifacts', { limit: ARTIFACTS_SHOWN }), into: null }),
+        then: [
+            { if: 'ok', show: '{{structured.heading}}', into: 'carousel.team', how: 'replace' },
+            { if: 'ok', show: '{{structured.summary}}', into: 'carousel.summary', how: 'replace' },
+            { if: 'ok', show: '{{html}}', into: 'carousel.strip', how: 'html' },
+            { if: 'error', show: '{{error}}', into: 'carousel.summary', how: 'replace' },
+        ],
+    };
+    const step = (button, by) => ({
+        ...newRule({ element: `carousel.${button}`, event: 'click', ...call('get_artifact', { at: '{{carousel.counter}}', step: by, limit: ARTIFACTS_SHOWN }), into: null }),
+        then: slide,
+    });
+    const components = [newComponent('part', [], { id: 'carousel', label: 'Team artifacts', html: CAROUSEL_HTML })];
+    return newApp({ name, screen: { kind: 'components', size: 'wide', components }, flow: [first, team, step('prev', -1), step('next', 1)] });
+}
+
 // What create() starts from: the examples, and a blank app. Each with the name its app gets, what
 // it is in a few words (`kind`) and in a sentence (`about`), the demo servers it calls
 // (`servers`), and whether it calls the model (`model`), the demo model when there's no other.
@@ -349,6 +418,7 @@ export const EXAMPLES = {
     chat: { name: 'Chat', make: chatApp, kind: 'agent loop', model: true, about: "A conversation with a model, which can call your servers' tools" },
     dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', model: true, about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
     frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', servers: ['frontdesk'], about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, on a demo server of its own" },
+    artifacts: { name: 'Team artifacts', make: artifactsApp, kind: 'carousel', servers: ['artifacts'], about: "A carousel of the Glean artifacts your team made, to embed in other pages: a made-up team's on a demo server, or yours through the Glean bridge" },
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 

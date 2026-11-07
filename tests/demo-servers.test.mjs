@@ -71,7 +71,7 @@ test("installDemoServers answers only the demo servers' addresses, one instance 
     const before = scope.fetch;
     installDemoServers(scope);
     assert.equal(scope.fetch, before, 'installing twice changes nothing');
-    assert.deepEqual([demoServerAt(MODEL)?.id, demoServerAt('https://example.com/'), Object.keys(DEMO_SERVERS)], ['model', null, ['frontdesk', 'model']]);
+    assert.deepEqual([demoServerAt(MODEL)?.id, demoServerAt('https://example.com/'), Object.keys(DEMO_SERVERS)], ['model', null, ['frontdesk', 'model', 'artifacts']]);
 });
 
 test("the front desk's tools find today's visit by part of a name, check people in and call for help, as the mock server's do", async () => {
@@ -93,7 +93,7 @@ test("the front desk's tools find today's visit by part of a name, check people 
 
 test('a tool that throws fails as a tool, not as the server', async () => {
     const server = mcpServer({ name: 'Throws', tools: [{ name: 'boom', inputSchema: { type: 'object' }, call: () => { throw new Error('It broke.'); } }] });
-    const response = server.answer({ method: 'POST', headers: new Headers(), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'boom', _meta: META } }) });
+    const response = await server.answer({ method: 'POST', headers: new Headers(), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'boom', _meta: META } }) });
     assert.deepEqual((await response.json()).result, { resultType: 'complete', content: [{ type: 'text', text: 'It broke.' }], isError: true });
 });
 

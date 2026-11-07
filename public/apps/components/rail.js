@@ -7,7 +7,7 @@ import { EXAMPLES } from '../apps.js';
 import { AppElement } from './base.js';
 import { ModelPicker } from './model-picker.js';
 
-const SHOWN_EXAMPLES = ['chat', 'dashboard', 'frontdesk'];
+const SHOWN_EXAMPLES = ['chat', 'dashboard', 'frontdesk', 'artifacts'];
 
 export class AppsRail extends AppElement {
     setup(signal) {
@@ -134,7 +134,7 @@ export class AppsStart extends AppElement {
                 </li>`).join('')}
             </ul>
             <div class="apps-start-model">
-                <p class="app-note text-secondary">Chat and Project pulse call this model: Glean's chat if you've added Glean, else a server's chat tool, else the demo model, built in, which makes up its answers. Front desk calls no model: it comes with a demo server of its own. Both run in this page, so the examples work with nothing to install.</p>
+                <p class="app-note text-secondary">Chat and Project pulse call this model: Glean's chat if you've added Glean, else a server's chat tool, else the demo model, built in, which makes up its answers. Front desk and Team artifacts call no model: each comes with a demo server of its own. The demo model and servers run in this page, so the examples work with nothing to install.</p>
                 <div data-model-picker></div>
             </div>`;
         this.picker = new ModelPicker({ shell: this.shell, apps: this.apps, container: this.$('[data-model-picker]'), signal: this.signal });

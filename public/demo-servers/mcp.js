@@ -3,6 +3,7 @@
 // MCP client library talks to it the way it talks to any server: MCP 2026-07-28 requests with no
 // session (server/discover, tools/list, tools/call), and the 2025 handshake (initialize, then
 // requests in its session) for a client that falls back to it. It answers in JSON, never SSE.
+// Node serves one too (glean-bridge/server.mjs), since it needs only Request and Response.
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
@@ -16,17 +17,18 @@ function reply(status, message, headers = {}) {
 }
 
 // A server from its name and tools: [{ ...definition, call(args, state) }], where `call` returns
-// a CallToolResult ({ content, structuredContent?, isError? }) and may throw to fail. `state` is
-// the server's own, for as long as the worker runs.
-export function mcpServer({ name, version = '1.0.0', instructions = '', tools }) {
-    const serverInfo = { name, version };
+// a CallToolResult ({ content, structuredContent?, isError? }), or a promise of one, and may throw
+// to fail. `state` is the server's own, for as long as the worker runs. `about` adds the rest of
+// what serverInfo can say: { title, description, websiteUrl, icons }.
+export function mcpServer({ name, version = '1.0.0', about = {}, instructions = '', tools }) {
+    const serverInfo = { name, version, ...about };
     const capabilities = { tools: {} };
     const definitions = tools.map(({ call, ...definition }) => definition);
     const calls = new Map(tools.map(tool => [tool.name, tool.call]));
     const sessions = new Set();
     const state = {};
 
-    function dispatch({ id, method, params }, modern) {
+    async function dispatch({ id, method, params }, modern) {
         const result = value => reply(200, { jsonrpc: '2.0', id, result: { ...(modern ? { resultType: 'complete' } : {}), ...value } });
         if (method === 'server/discover' && modern) {
             return result({ supportedVersions: SUPPORTED, capabilities, _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo }, ...(instructions ? { instructions } : {}), ttlMs: 60_000, cacheScope: 'public' });
@@ -37,7 +39,7 @@ export function mcpServer({ name, version = '1.0.0', instructions = '', tools })
             const call = calls.get(params.name);
             if (!call) return reply(200, rpcError(id, -32602, `Unknown tool: ${params.name}`));
             try {
-                return result(call(params.arguments || {}, state));
+                return result(await call(params.arguments || {}, state));
             } catch (error) {
                 return result({ content: [{ type: 'text', text: error.message }], isError: true });
             }
@@ -45,8 +47,9 @@ export function mcpServer({ name, version = '1.0.0', instructions = '', tools })
         return reply(modern ? 404 : 200, rpcError(id, -32601, `Method not found: ${method}`));
     }
 
-    // One HTTP request to the server: its method, headers (a Headers) and body (text).
-    function answer({ method = 'GET', headers = new Headers(), body = '' }) {
+    // One HTTP request to the server: its method, headers (a Headers) and body (text). Returns a
+    // promise of the Response.
+    async function answer({ method = 'GET', headers = new Headers(), body = '' }) {
         if (method === 'DELETE') {
             sessions.delete(headers.get('Mcp-Session-Id'));
             return reply(204, null);

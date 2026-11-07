@@ -979,7 +979,7 @@ async function main() {
             return shown && model ? [examples, rail, model].join(' / ') : null;
         })()`, 10000);
         check('Apps: with no app yet, the page offers the examples and a blank app, the rail lists the examples, and the model is a chat tool it found',
-            start === 'Chat, Project pulse, Front desk, New app / Chat agent loop | Project pulse dashboard | Front desk screens / chat on modern server, asked in message', start);
+            start === 'Chat, Project pulse, Front desk, Team artifacts, New app / Chat agent loop | Project pulse dashboard | Front desk screens | Team artifacts carousel / chat on modern server, asked in message', start);
         await page.run(`(() => {
             const tool = document.querySelector('#appsStart [data-model-tool]');
             tool.value = 'echo';

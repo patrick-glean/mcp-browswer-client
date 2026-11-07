@@ -5,6 +5,7 @@
 // way it talks to any server. You add one as you'd add any server, and an app that calls one can
 // call your own server instead, if it has the same tools.
 
+import { artifactsServer, artifactTools, demoSource } from './artifacts.js';
 import { DEMO_CHAT, demoModelServer } from './demo-model.js';
 import { FRONT_DESK_TOOLS, frontDeskServer } from './front-desk.js';
 
@@ -27,6 +28,14 @@ export const DEMO_SERVERS = {
         about: 'A stand-in for a model: it repeats what you say, writes the tool calls you ask for, and makes up what boxes and pages need',
         tools: [definition(DEMO_CHAT)],
         make: demoModelServer,
+    },
+    artifacts: {
+        id: 'artifacts',
+        url: 'https://artifacts.demo.invalid/mcp',
+        name: 'Glean artifacts (demo)',
+        about: "A Glean artifacts bridge over a made-up team's artifacts: it lists what the team made and shows each one, as glean-bridge/ does with your team's",
+        tools: artifactTools(demoSource()).map(definition),
+        make: () => artifactsServer(demoSource(), { name: 'Glean artifacts demo server', about: { title: 'Glean artifacts (demo)' } }),
     },
 };
 
