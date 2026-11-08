@@ -21,7 +21,7 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
   - Routes page messages to the active library (`mcpClient`); never builds JSON-RPC itself
   - Owns sign-in storage (`authStore.js`) and run history (`workbench/store.js`)
   - Runs only the calls pages send (`handleToolCall`), each with its own server's token; it keeps no server list
-  - Hosts the demo servers built in ([public/demo-servers/](mdc:public/demo-servers/index.js)): `installDemoServers` answers requests to their `.invalid` addresses from `self.fetch`, with `mcpServer` (`mcp.js`, both protocol eras) and their tools (`front-desk.js`, `demo-model.js`); `DEMO_SERVERS` is the catalog the page shares
+  - Hosts the demo servers built in ([public/demo-servers/](mdc:public/demo-servers/index.js)): `installDemoServers` answers requests to their `.invalid` addresses from `self.fetch`, with `mcpServer` (`mcp.js`, both protocol eras) and their tools (`front-desk.js`, `demo-model.js`, `glean.js`); `DEMO_SERVERS` is the catalog the page shares
 
 ### Web Interface
 - Page: [public/index.html](mdc:public/index.html)
@@ -32,8 +32,8 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
   - Shared state in `workbench.js`; the layout is grid areas in `workbench.css`, sized by the splitters' CSS variables
   - Resource templates' URIs in `uri-template.js` (RFC 6570); Pre-fill's test data in `prefill.js`
 - App builder: [public/apps/](mdc:public/apps/index.js)
- - An app is a screen (components, among them HTML parts a model or a tool makes, or HTML) and a flow (rules: when, call, then); the state is `apps.js` (with the model the builder asks and the examples, `chatApp`, `dashboardApp` and `frontDeskApp`), the components are in `components/`: rail and start page (`rail.js`), header, the canvas (`canvas.js`) and its Inspector, the Outline's Screen, Flow and Try it (`try.js`), Preview (`preview.js`, the app as it is when launched, over the whole window), and the editors they share (`rule-editor.js`, `html-source.js`, `call-editor.js`, `model-picker.js`, `trace.js`)
- - `runner.js` runs an app: its screen in a sandboxed frame (`frameRuntime`, `frameDocument`), its flow in the page, each call through `AppShell.runTool` with source `app`, and the agent loop: the tool calls in a model's answer, with source `reply`
+ - An app is a screen (components, among them HTML parts a model or a tool makes, or HTML) and a flow (rules: when, call, then); the state is `apps.js` (with the model the builder asks and the examples, `chatApp`, `dashboardApp`, `frontDeskApp` and `teamArtifactsApp`), the components are in `components/`: rail and start page (`rail.js`), header, the canvas (`canvas.js`) and its Inspector, the Outline's Screen, Flow and Try it (`try.js`), Preview (`preview.js`, the app as it is when launched, over the whole window), and the editors they share (`rule-editor.js`, `html-source.js`, `call-editor.js`, `model-picker.js`, `trace.js`)
+ - `runner.js` runs an app: its screen in a sandboxed frame (`frameRuntime`, `frameDocument`), with a whole HTML page in a document box in a frame of its own inside it (`artifact.html`), its flow in the page, each call through `AppShell.runTool` with source `app`, and the agent loop: the tool calls in a model's answer, with source `reply`
  - `flow.js` (triggers, templates, arguments, the JSON in an answer, problems, sentences), `graph.js` (the flow as ports and wires), `boxes.js` (what boxes and conversations show, the request a rule adds to its prompt, drawing answers), `agent.js` (what a model is told about your tools, the calls in its answer, the limit) and `screen.js` (components, screens and parts to HTML, and the list helpers that keep a screen whole) are pure but for `sanitizePart`; `ask.js` asks the model for HTML; `dml.js` reads and writes the DML an app downloads as, `zip.js` the zip, `store.js` keeps apps in IndexedDB `mcp_apps`; `servers.js` lists the servers an app calls and moves its calls to another with the same tools (Servers it calls, `components/server-switch.js`)
 
 ## Build System
@@ -43,7 +43,7 @@ MCP Browser Client is a system for testing MCP (Model Context Protocol) client l
 ## Server template
 - [public/server-template/README.md](mdc:public/server-template/README.md): for people building servers and their agents, each field a server sends, where this client shows it and what to put in it. Keep it in step with what the Workbench shows
 - [public/server-template/example.json](mdc:public/server-template/example.json): a well-described server's replies, by method; `python3 test_mcp_server.py --replies FILE` serves a file like it
-- [public/server-template/index.html](mdc:public/server-template/index.html): the guide as a page of the site, rendered from its README by [markdown.js](mdc:public/server-template/markdown.js); `examples/` has the same server on each official SDK
+- [public/server-template/index.html](mdc:public/server-template/index.html): the guide as a page of the site, rendered from its README by [markdown.js](mdc:public/markdown.js), which apps' document boxes use too; `examples/` has the same server on each official SDK
 
 ## Testing and measuring
 - `npm run test:browser` (the default library; `--client=sdk|wasm`, `--reference`), `npm run test:browser:wasm`, `npm run test:rust`

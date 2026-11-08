@@ -1,9 +1,9 @@
 // An app's flow: rules that say, in order, when something happens on the screen, which tool to
 // call with what, and where on the screen its answer goes. Values move with {{name}}: in a call's
 // arguments, {{question}} is what the screen's `question` element holds; in what a rule shows,
-// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{html}}, {{result.…}},
-// {{error}}). An element of a part (HTML a model or a tool made) is named part.element, as
-// {{dashboard.search}}.
+// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{html}}, {{document}},
+// {{result.…}}, {{error}}). An element of a part (HTML a model or a tool made) is named
+// part.element, as {{dashboard.search}}.
 //
 // A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position?,
 //           prompt?, instructions?, tools? }
@@ -40,7 +40,7 @@ export const ROUTE_HOW = {
 };
 
 // The names a tool's answer brings to a rule's routes, so no element may use them as its id.
-export const ANSWER_NAMES = ['text', 'structured', 'json', 'html', 'result', 'error'];
+export const ANSWER_NAMES = ['text', 'structured', 'json', 'html', 'document', 'result', 'error'];
 
 const PLACEHOLDERS = /\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
 export const ELEMENT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
@@ -174,6 +174,37 @@ export function htmlFromResult(result) {
     return /<(!doctype\s+html|html|head|body|main|section|article|div|form|input|textarea|button|h[1-6]|p)\b/i.test(candidate) ? candidate : null;
 }
 
+// A whole HTML document, as a page or a web app is: a document box shows one in a frame of its own,
+// and anything else it shows as Markdown.
+export const isHtmlDocument = value => typeof value === 'string' && /^\s*(?:<!--[\s\S]*?-->\s*)*<(?:!doctype\s+html|html)[\s>]/i.test(value);
+
+// What Glean's read_document says of what it read, before the document itself: a list (TOON) of
+// the documents, with each one's ID, type, title and link. Its replies don't promise to keep that
+// shape, so it's only left out, never read. And the ID of the call, which Glean says to ignore.
+const GLEAN_LISTING = /^\s*documents\[\d+\](?:\{[^}\n]*\})?:[^\n]*(?:\n[ \t]+[^\n]*)*/;
+const GLEAN_INVOCATION = /\s*glean_invocation_id:\s*[\w-]+\s*$/;
+
+// The document in a tool's answer, as a box shows it: an embedded text/html resource (made a whole
+// document) or Markdown one; else a whole HTML document in its text; else its text, without what
+// only describes the call (Glean's listing and invocation ID, and the details its chat puts after
+// an answer). What only describes the call stays when there's nothing else. '' when there's no text.
+export function documentOf(result) {
+    const content = Array.isArray(result?.content) ? result.content : [];
+    for (const item of content) {
+        const resource = item?.type === 'resource' ? item.resource : null;
+        if (typeof resource?.text !== 'string') continue;
+        if (/^text\/html\b/i.test(resource.mimeType || '')) {
+            return isHtmlDocument(resource.text) ? resource.text : `<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body>\n${resource.text}\n</body></html>`;
+        }
+        if (/^text\/(?:markdown|plain)\b/i.test(resource.mimeType || '')) return resource.text;
+    }
+    const blocks = content.filter(item => item?.type === 'text' && typeof item.text === 'string').map(item => item.text);
+    const kept = blocks.map(block => answerText(block.replace(GLEAN_LISTING, '').replace(GLEAN_INVOCATION, ''))).filter(block => block.trim());
+    const page = kept.find(isHtmlDocument);
+    if (page) return page.trim();
+    return (kept.length ? kept.join('\n\n') : blocks.join('\n')).trim();
+}
+
 // What a call's answer gives its routes: whether it worked, and the values {{…}} can name. A
 // result the tool marked isError counts as failing, with its text as the error.
 export function answerOf(message) {
@@ -186,7 +217,7 @@ export function answerOf(message) {
     else if (result.isError) error = text || 'The tool reported an error.';
     return {
         ok: !error,
-        values: { text, structured: result?.structuredContent ?? null, json: jsonIn(text), html: htmlFromResult(result) ?? '', result, error },
+        values: { text, structured: result?.structuredContent ?? null, json: jsonIn(text), html: htmlFromResult(result) ?? '', document: documentOf(result), result, error },
     };
 }
 

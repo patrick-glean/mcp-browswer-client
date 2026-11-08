@@ -1,14 +1,16 @@
 // Boxes: the outputs of a screen such as a dashboard, each saying what it shows (text, a number,
-// a list, a table, a chart or HTML) and what goes in it, in words. A rule whose answer fills boxes
-// asks its tool for them: the boxes add to its prompt (one of the call's fields) what each needs
-// and in what shape, and each box draws its piece of the answer, the JSON value under its key.
-// So the screen's layout writes the format half of the prompt. Pure, for the runner, the builder
-// and the tests.
+// a list, a table, a chart, HTML or a document) and what goes in it, in words. A rule whose answer
+// fills boxes asks its tool for them: the boxes add to its prompt (one of the call's fields) what
+// each needs and in what shape, and each box draws its piece of the answer, the JSON value under
+// its key. So the screen's layout writes the format half of the prompt. A document box also takes
+// a tool's {{document}} as it comes: Markdown it draws, and a whole HTML page or web app runs in a
+// frame of its own (runner.js). Pure, for the runner, the builder and the tests.
 
+import { renderMarkdown } from '../markdown.js';
 import { escapeHtml } from '../workbench/util.js';
-import { answerKey } from './flow.js';
+import { answerKey, isHtmlDocument } from './flow.js';
 
-export { answerKey };
+export { answerKey, isHtmlDocument };
 
 // What a box can show: its name in menus and in a prompt, what the Library says of it, the shape
 // of JSON it takes, the id a new one gets, and an example of what goes in one.
@@ -20,6 +22,7 @@ export const BOX_KINDS = {
     bar: { label: 'Bar chart', noun: 'bar chart', help: 'Numbers as bars, one for each label', shape: '{"labels": [string], "values": [number]}', base: 'chart', example: 'Tickets opened per week, the last 8 weeks, oldest first' },
     line: { label: 'Line chart', noun: 'line chart', help: 'Numbers over time, as a line', shape: '{"labels": [string], "values": [number]}', base: 'trend', example: 'Weekly active users, the last 12 weeks, oldest first' },
     html: { label: 'HTML', noun: 'HTML', help: 'HTML the model writes to fit this box', shape: 'a string of HTML', base: 'panel', example: 'A one-line status banner, green when things are on track' },
+    document: { label: 'Document', noun: 'document', help: 'A document as it comes: Markdown, or a whole HTML page or web app, which runs in a frame of its own', shape: 'a string of Markdown, or a whole HTML document', base: 'document', example: 'A one-page brief on the project, with a heading for each part' },
     conversation: { label: 'Conversation', noun: 'conversation', help: "Messages one after another, as a chat shows them: what's sent, the answers and the tools' results", shape: 'a string', base: 'conversation', example: 'The conversation so far' },
 };
 
@@ -28,7 +31,7 @@ export const WIDTHS = { full: 'Full width', 'two-thirds': 'Two thirds', half: 'H
 const FRACTION = { full: 1, 'two-thirds': 2 / 3, half: 1 / 2, third: 1 / 3 };
 
 // A box from the Library starts as wide as its kind usually is.
-export const BOX_WIDTHS = { text: 'full', number: 'third', list: 'half', table: 'full', bar: 'two-thirds', line: 'two-thirds', html: 'full', conversation: 'full' };
+export const BOX_WIDTHS = { text: 'full', number: 'third', list: 'half', table: 'full', bar: 'two-thirds', line: 'two-thirds', html: 'full', document: 'full', conversation: 'full' };
 
 // How wide a screen's content is, in a browser: narrow for a form, wide for a dashboard.
 export const SCREEN_SIZES = { narrow: 592, wide: 1032 };
@@ -47,6 +50,10 @@ export const ROUTE_ROLES = { sent: 'you', ok: 'reply', error: 'error' };
 // An output that takes part of an answer by shape: it shows something other than text, or says
 // what goes in it.
 export const isBox = element => element?.type === 'output' && !isConversation(element) && ((element.show && element.show !== 'text') || !!element.about);
+
+// What a box takes of an answer wired to it: a document box the tool's document, as it comes;
+// any other box its own key of the JSON its prompt asks for.
+export const boxShow = element => (element?.show === 'document' ? '{{document}}' : `{{json.${answerKey(element?.id)}}}`);
 
 // What a rule asks its tool for: one key for each element its answer fills as {{json.key}}, with
 // the element's kind and what goes in it. [{ key, kind, about, width, into }]
@@ -139,7 +146,12 @@ const axis = labels => {
 };
 
 const RENDER = {
-    text: value => `<p class="box-text">${escapeHtml(typeof value === 'string' ? tidy(value) : JSON.stringify(value, null, 2))}</p>`,
+    // Text that is only a web address is a link to it.
+    text(value) {
+        const url = safeUrl(value);
+        if (url) return `<p class="box-text box-link"><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`;
+        return `<p class="box-text">${escapeHtml(typeof value === 'string' ? tidy(value) : JSON.stringify(value, null, 2))}</p>`;
+    },
     number(value) {
         const record = isRecord(value);
         const shown = record ? value.value ?? value.number ?? value.count ?? value.total : value;
@@ -191,6 +203,13 @@ const RENDER = {
     html(value) {
         if (typeof value !== 'string') throw new BoxError('An HTML box takes a string of HTML.');
         return value;
+    },
+    // Markdown, without anchors on its headings, whose ids could be the screen's elements'. A
+    // whole HTML document isn't drawn here: the runner gives it a frame of its own.
+    document(value) {
+        if (typeof value !== 'string') throw new BoxError('A document box takes a string of Markdown, or a whole HTML document.');
+        if (isHtmlDocument(value)) return '<p class="box-none">An HTML page, which runs in a frame of its own.</p>';
+        return `<div class="md">${renderMarkdown(value, { anchors: false }).html}</div>`;
     },
 };
 

@@ -320,7 +320,11 @@ export class AppInspector extends AppElement {
         if (about) about.placeholder = `For example: ${box.example}`;
         const note = this.$('[data-box-note]');
         const as = kind === 'html' ? 'HTML' : box === BOX_KINDS.text ? 'text' : `a ${box.noun}`;
-        if (note) note.textContent = `Say what goes here, and a tool whose Answer is wired to it is asked for it as ${as}, which the box draws.`;
+        if (note && kind === 'document') {
+            note.textContent = "Put a tool's {{document}} here, such as what Glean's read_document reads: Markdown shows as a page, and a whole HTML page or web app runs in a frame of its own, sandboxed. Or say what goes here, and a model wired to it is asked for a document.";
+        } else if (note) {
+            note.textContent = `Say what goes here, and a tool whose Answer is wired to it is asked for it as ${as}, which the box draws.`;
+        }
     }
 
     // The rule's editor, in sections; `focus` (a wire's part) opens only the section it's in.

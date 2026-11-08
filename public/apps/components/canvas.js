@@ -15,9 +15,9 @@
 // canvas is zoomed and where it's scrolled stay in this browser, for each app.
 
 import { debounce, escapeHtml, schemaOf, serverLabel } from '../../workbench/util.js';
-import { answerKey, BOX_KINDS, BOX_WIDTHS, isBox, promptFieldOf } from '../boxes.js';
+import { BOX_KINDS, BOX_WIDTHS, boxShow, isBox, isConversation, promptFieldOf } from '../boxes.js';
 import { EVENTS, FlowError, flowProblems, isDefaultShow, newRule, routeSummary, routeTargets, triggersOf } from '../flow.js';
-import { canConnect, connect, goPairOf, parsePort, wiresOf } from '../graph.js';
+import { canConnect, connect, goPairOf, parsePort, takesTextList, wiresOf } from '../graph.js';
 import { AppRunner, ScreenStill } from '../runner.js';
 import { COMPONENT_TYPES, endOfScreen, freeId, GO_PLACES, newComponent, screenOfEach, screensOf } from '../screen.js';
 import { homeScreen, placeStoryboard, screenFinder, screenLinks } from '../storyboard.js';
@@ -1106,11 +1106,11 @@ export class AppCanvas extends AppElement {
         return this.element(id)?.kind || 'static';
     }
 
-    // What a new wire to the screen shows. A box takes its own key of the answer. As it's sent,
-    // an element shows what the call sends (the prompt, or the one value a field takes), and the
-    // field that value came from is cleared.
+    // What a new wire to the screen shows. A box takes its own key of the answer, and a document
+    // box the document in it. As it's sent, an element shows what the call sends (the prompt, or
+    // the one value a field takes), and the field that value came from is cleared.
     defaultShow(element, phase, rule) {
-        if (phase === 'ok') return isBox(this.element(element)) ? `{{json.${answerKey(element)}}}` : null;
+        if (phase === 'ok') return isBox(this.element(element)) ? boxShow(this.element(element)) : null;
         if (phase !== 'sent') return null;
         const lone = value => String(value ?? '').match(/^\s*\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}\s*$/)?.[1];
         const args = rule.call?.args || {};
@@ -1127,13 +1127,15 @@ export class AppCanvas extends AppElement {
                 const result = connect(flow, a, b, {
                     kindOf: id => this.kindOf(id),
                     defaultShow: ({ element, phase, rule }) => this.defaultShow(element, phase, rule),
+                    // A conversation's value is a list already, which a list field takes as it is.
+                    listOf: ({ rule, arg, element }) => !isConversation(this.element(element)) && takesTextList(schemaOf(this.toolOf(rule))?.properties?.[arg]),
                 });
                 made = result.made;
                 if (made.kind !== 'route') return result.flow;
                 // A box wired to a tool asks it, in the tool's prompt field, for what the box shows.
                 return result.flow.map(rule => {
                     const route = rule.id === made.ruleId ? rule.then[made.index] : null;
-                    if (!route || rule.prompt || route.if !== 'ok' || !isBox(this.element(route.into))) return rule;
+                    if (!route || rule.prompt || route.if !== 'ok' || !isBox(this.element(route.into)) || !/^\s*\{\{\s*json\./.test(route.show)) return rule;
                     const prompt = promptFieldOf(schemaOf(this.toolOf(rule)));
                     return prompt ? { ...rule, prompt } : rule;
                 });
@@ -1149,6 +1151,7 @@ export class AppCanvas extends AppElement {
             this.hint(made.kind === 'trigger' ? 'Connected: that starts the tool. Choose what it waits for in the Inspector.'
                 : made.kind === 'arg' ? 'Connected: that fills the field.'
                 : route?.if === 'sent' ? (route.show ? `Connected: ${route.into} shows ${route.show} as it's sent.` : `Connected: ${route.into} is cleared as it's sent.`)
+                : route?.if === 'ok' && route.show === '{{document}}' ? `Connected: ${route.into} shows the document in ${rule.call.toolName}'s answer, Markdown as a page and an HTML page in a frame of its own.`
                 : isBox(box) ? `Connected: ${box.id} asks ${rule.call.toolName} for ${box.show === 'html' ? 'HTML' : box.show === 'text' ? 'text' : `a ${BOX_KINDS[box.show].noun}`}, in ${rule.prompt}.`
                 : 'Connected: the answer goes there. Its transform says what of it shows.');
         } catch (error) {

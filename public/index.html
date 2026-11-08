@@ -256,10 +256,10 @@ python3 -m http.server 8000</code></pre>
                 </li>
                 <li>
                     <div class="guide-server-text">
-                        <strong>Glean artifacts (demo)</strong> <span class="guide-meta">a made-up team</span>
-                        <p>Try <code>get_artifact</code> with at <code>2</code>. The Team artifacts example in Apps comes with it; the Glean bridge serves your team's.</p>
+                        <strong>Glean (demo)</strong> <span class="guide-meta">a made-up team's artifacts</span>
+                        <p>Try <code>search</code> with query <code>*</code>, then <code>read_document</code> with one of the links it finds. The Team artifacts example in Apps uses it until you add your Glean above.</p>
                     </div>
-                    <button type="button" class="btn-sm" data-add-server="https://artifacts.demo.invalid/mcp" data-alias="Glean artifacts (demo)">Add and connect</button>
+                    <button type="button" class="btn-sm" data-add-server="https://glean.demo.invalid/mcp" data-alias="Glean (demo)">Add and connect</button>
                 </li>
             </ul>
             <p class="guide-note">They answer from inside the client's service worker, so nothing is sent anywhere. An app can move from one to your own server that has the same tools.</p>

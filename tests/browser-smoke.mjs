@@ -415,6 +415,66 @@ async function frameWaitFor(expression, ms = 15000, { inPage = null } = {}) {
     return null;
 }
 
+// A whole HTML page in a document box runs in a frame of its own inside the screen's
+// (apps/artifact.html), which Chrome keeps in the screen frame's process, so it's no target of its
+// own. This evaluates in each such frame of the running screens (with `inPage`, only those of that
+// tab), in the page's own scripts' world, and returns the first answer that isn't empty.
+async function artifactRun(expression, { inPage = null } = {}) {
+    const screens = (await (await fetch(`${HOST}:${PORTS.devtools}/json`)).json())
+        .filter(target => target.type === 'iframe' && target.url === 'about:srcdoc' && target.webSocketDebuggerUrl && (!inPage || target.parentId === inPage.id));
+    for (const screen of screens) {
+        const ws = new WebSocket(screen.webSocketDebuggerUrl);
+        try {
+            await new Promise((resolve, reject) => {
+                setTimeout(() => reject(new Error('The frame never answered.')), 3000);
+                ws.addEventListener('open', resolve, { once: true });
+                ws.addEventListener('error', reject, { once: true });
+            });
+            let nextId = 0;
+            const pending = new Map();
+            const contexts = [];
+            ws.addEventListener('message', event => {
+                const message = JSON.parse(event.data);
+                if (message.method === 'Runtime.executionContextCreated') contexts.push(message.params.context);
+                else if (pending.has(message.id)) pending.get(message.id)(message);
+            });
+            const send = (method, params = {}) => new Promise(resolve => {
+                const id = ++nextId;
+                pending.set(id, resolve);
+                setTimeout(() => resolve(null), 5000);
+                ws.send(JSON.stringify({ id, method, params }));
+            });
+            await send('Runtime.enable');
+            const tree = (await send('Page.getFrameTree'))?.result?.frameTree;
+            const evaluate = async (frameId, text) => {
+                const context = contexts.find(candidate => candidate.auxData?.frameId === frameId && candidate.auxData?.isDefault);
+                return context ? (await send('Runtime.evaluate', { expression: text, contextId: context.id, returnByValue: true, awaitPromise: true }))?.result?.result?.value : null;
+            };
+            if (!tree || await evaluate(tree.frame.id, `document.documentElement.hasAttribute('data-still')`) !== false) continue;
+            for (const child of tree.childFrames || []) {
+                if (!child.frame.url.endsWith('/apps/artifact.html')) continue;
+                const value = await evaluate(child.frame.id, expression);
+                if (value !== undefined && value !== null && value !== false && value !== '') return value;
+            }
+        } catch {
+            // The frame went away while it was asked.
+        } finally {
+            ws.close();
+        }
+    }
+    return null;
+}
+
+async function artifactWaitFor(expression, ms = 15000, { inPage = null } = {}) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        const value = await artifactRun(expression, { inPage });
+        if (value) return value;
+        await sleep(150);
+    }
+    return null;
+}
+
 // What the worker keeps in IndexedDB for a server's sign-in.
 function storedTokens(url) {
     return `new Promise((resolve, reject) => {
@@ -2355,6 +2415,97 @@ async function main() {
             check("Apps: each of Your apps has a ⋯ menu, always there on the one shown, whose Delete takes another app on a second click, with what was kept for it",
                 shownMenu === '1' && confirmingRow === 'Click again to confirm, menu open' && afterRowDelete === `Front desk shown, ${rowsBeforeDelete - 1} apps, its view forgotten, its answer forgotten`,
                 `${shownMenu}; ${confirmingRow}; ${afterRowDelete}`);
+
+            // Team artifacts, under Examples: a carousel of a team's six newest Glean artifacts, a
+            // slide on each screen. With no Glean added, it calls Glean (demo), built in, and runs
+            // as it opens: chat picks six links, each into the box that asks for it, then
+            // read_document reads each into its slide's document box, a paper as a page and an
+            // HTML page in a frame of its own.
+            await page.run(`document.querySelector('apps-rail [data-example="artifacts"]').click()`);
+            await page.waitFor(`!!document.querySelector('apps-add-dialog dialog[open] [data-add-copy]')`, 5000);
+            await page.run(`document.querySelector('apps-add-dialog [data-add-copy]').click()`);
+            const carousel = await frameWaitFor(`(() => {
+                const link = document.querySelector('#link1 a')?.href || '';
+                const pages = document.querySelectorAll('.box-document > iframe.artifact-frame');
+                const paper = document.querySelector('#doc2 .md h1')?.textContent;
+                if (!link.startsWith('https://app.glean.com/library/') || pages.length !== 4 || !paper) return null;
+                return [document.getElementById('status').textContent, [...document.querySelectorAll('[data-screen]')].map(screen => screen.id + (screen.hidden ? '' : '*')).join(' '),
+                    [...pages].map(frame => frame.closest('.box-document').id + ' ' + frame.getAttribute('sandbox')).join(', '), paper,
+                    document.querySelectorAll('#doc2 .md table, #doc2 .md .md-task, #doc2 .md pre, #doc2 .md a.md-image, #doc2 .md hr').length + ' table, tasks, code, image and rule'].join(' | ');
+            })()`, 20000);
+            check("Apps: Team artifacts, under Examples, runs on Glean (demo) as it opens: chat picks six links, and read_document reads each into its slide, a paper as a page and each HTML page in a sandboxed frame",
+                carousel === "Your team's six newest papers and pages, newest first. | slide1* slide2 slide3 slide4 slide5 slide6 | doc1 allow-scripts, doc3 allow-scripts, doc5 allow-scripts, doc6 allow-scripts | Q1 platform roadmap | 7 table, tasks, code, image and rule",
+                carousel);
+
+            // The page runs as it was made, scripts and all, with nothing of the client's: an
+            // opaque origin, storage that lasts as long as it does, and no network but the
+            // scripts, styles and pictures it loads. Its links open through the page.
+            const sandboxed = await artifactWaitFor(`document.title === 'Build health' && document.getElementById('chart').width ? [origin, (() => { try { return parent.document && 'reached the screen'; } catch { return 'not the screen'; } })(),
+                (() => { try { return top.location.href; } catch { return 'not the page'; } })(), 'week ' + localStorage.getItem('week'), JSON.stringify(document.cookie),
+                (() => { const chart = document.getElementById('chart'); return chart.getContext('2d').getImageData(0, 0, chart.width, chart.height).data.some(value => value) ? 'its chart drawn' : 'a blank chart'; })()].join(' | ') : null`, 10000);
+            await artifactRun(`document.title === 'Build health' && (document.getElementById('refresh').click(), true)`);
+            const offline = await artifactWaitFor(`document.title === 'Build health' && /^Couldn't reach CI/.test(document.getElementById('status').textContent) ? document.getElementById('status').textContent : null`, 5000);
+            const escapes = await artifactRun(`document.title === 'Build health' ? new Promise(resolve => {
+                const seen = new Set();
+                document.addEventListener('securitypolicyviolation', event => seen.add(event.effectiveDirective));
+                document.body.append(Object.assign(document.createElement('iframe'), { src: 'https://example.com/' }));
+                new Worker('data:text/javascript,postMessage(1)').onmessage = () => seen.add('a worker ran');
+                navigator.sendBeacon('https://example.com/beacon', 'x');
+                new WebSocket('wss://example.com/');
+                const form = Object.assign(document.createElement('form'), { action: 'https://example.com/' });
+                document.body.append(form);
+                form.submit();
+                setTimeout(() => resolve([...seen].sort().join(' ') + ' | ' + document.title), 1500);
+            }) : null`);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="run"]').click()`);
+            await artifactRun(`document.title === 'Build health' && (document.querySelector('.more a').click(), window.open('https://ci.example.com/builds'), true)`);
+            const linksOpened = await page.waitFor(`(() => {
+                const lines = [...document.querySelectorAll('app-canvas .app-trace-text')].map(line => line.textContent.trim()).filter(line => line.startsWith('Opened https://ci.example.com/'));
+                return lines.length === 2 ? lines.join(' / ') : null;
+            })()`, 5000);
+            const loadedOnce = await artifactRun(`document.title === 'Build health' ? new Promise(resolve => {
+                postMessage({ type: 'artifact', html: '<title>Replaced</title>' }, '*');
+                setTimeout(() => resolve(document.title + ', ' + (document.getElementById('chart') ? 'its own' : 'replaced')), 300);
+            }) : null`);
+            check("Apps: an HTML page in a document box runs its scripts with an opaque origin, can't reach the screen or the page, keeps storage in memory, has no network, and opens links through the page",
+                sandboxed === "null | not the screen | not the page | week 45 | \"\" | its chart drawn" && offline === "Couldn't reach CI from here, so these are this morning's numbers, from 7:00."
+                    && escapes === 'connect-src frame-src worker-src | Build health' && linksOpened === 'Opened https://ci.example.com/pipelines / Opened https://ci.example.com/builds'
+                    && loadedOnce === 'Build health, its own',
+                `${sandboxed}; ${offline}; ${escapes}; ${linksOpened}; ${loadedOnce}`);
+
+            // Next and Previous go round the slides; each slide's link is the artifact's in Glean.
+            const slideShown = `[...document.querySelectorAll('[data-screen]')].find(screen => !screen.hidden)?.id`;
+            await frameRun(`(document.getElementById('next1').click(), true)`);
+            const secondSlide = await frameWaitFor(`${slideShown} === 'slide2' ? document.querySelector('#doc2 .md h1').textContent + ' | ' + document.querySelector('#link2 a').textContent : null`, 5000);
+            await frameRun(`(document.getElementById('prev2').click(), true)`);
+            await frameWaitFor(`${slideShown} === 'slide1'`, 5000);
+            await frameRun(`(document.getElementById('prev1').click(), true)`);
+            const lastSlide = await frameWaitFor(`${slideShown} === 'slide6' ? document.querySelector('#doc6 iframe.artifact-frame')?.title : null`, 5000);
+            await frameRun(`(document.getElementById('next6').click(), true)`);
+            const roundTrip = await frameWaitFor(`${slideShown} === 'slide1' ? 'slide1' : null`, 5000);
+            await page.run(`document.querySelector('app-canvas').apps.select(null)`);
+            const artifactsServer = await page.waitFor(`(() => {
+                const use = document.querySelector('app-inspector [data-server-use]');
+                const instead = [...(use?.querySelectorAll('[data-call-instead] option') || [])].find(option => option.value === ${JSON.stringify(modernUrl)});
+                return use ? [use.dataset.serverUse, use.querySelector('.app-server-use-tools').textContent, use.querySelector('.badge')?.textContent, instead?.disabled ? instead.textContent.split(': ').pop() : 'mock offered'].join(' | ') : null;
+            })()`, 5000);
+            const artifactsDml = await page.run(`import('./apps/dml.js').then(({ toDml }) => toDml(document.querySelector('app-canvas').apps.app).match(/<app dml="\\d"/)[0])`);
+            await page.run(`document.querySelector('app-canvas [data-canvas-mode="design"]').click()`);
+            check("Apps: Team artifacts' Next and Previous go round its six slides, each with its link in Glean; it calls Glean (demo)'s chat and read_document, and is DML version 2",
+                secondSlide === 'Q1 platform roadmap | https://app.glean.com/library/7e2b9d41c0a54f6e8b3d1c9a5f7e2b64' && lastSlide === '6 of 6' && roundTrip === 'slide1'
+                    && artifactsServer === 'https://glean.demo.invalid/mcp | chat, read_document | Demo, built in | it has no read_document' && artifactsDml === '<app dml="2"',
+                `${secondSlide}; ${lastSlide}; ${roundTrip}; ${artifactsServer}; ${artifactsDml}`);
+
+            // The example page has the carousel in it, embedded with its embed code, and it runs
+            // there as it does here.
+            await page.send('Target.createTarget', { url: `${HOST}:${PORTS.app}/examples/team-home.html` });
+            const home = await openPage(target => target.url === `${HOST}:${PORTS.app}/examples/team-home.html`);
+            const embeddedCarousel = await frameWaitFor(`document.querySelector('#link1 a') && document.querySelectorAll('iframe.artifact-frame').length === 4 && document.querySelector('#doc2 .md h1')
+                ? document.getElementById('title').textContent + ' | ' + document.getElementById('status').textContent : null`, 30000, { inPage: home });
+            const embeddedPage = await artifactWaitFor(`document.title === 'Build health' ? 'Build health runs' : null`, 10000, { inPage: home });
+            await closeTab(home);
+            check('the example page runs the Team artifacts carousel embedded, with its HTML pages in frames of their own',
+                embeddedCarousel === "Team artifacts | Your team's six newest papers and pages, newest first." && embeddedPage === 'Build health runs', `${embeddedCarousel}; ${embeddedPage}`);
             await page.send('Emulation.clearDeviceMetricsOverride');
         }
         await page.run(showWorkbench);

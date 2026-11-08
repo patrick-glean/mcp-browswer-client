@@ -9,9 +9,9 @@ import { mcpServer } from './mcp.js';
 // What an app adds around what the person said, as agent.js and boxes.js write it: the tools its
 // model may call, and what its boxes need.
 const TOOLS_LISTED = 'The tools, by server:';
-const BOXES_ASKED = "This answer fills the boxes on an app's screen.";
+export const BOXES_ASKED = "This answer fills the boxes on an app's screen.";
 // A box's line in that request: - "key" (kind): what goes in it. As its shape.
-const BOX_LINE = /^- "([^"]+)" \(([^)]+)\): (.*)$/gm;
+export const BOX_LINE = /^- "([^"]+)" \(([^)]+)\): (.*)$/gm;
 const CALL_ASKED = /^call\s+([\w.-]+)(?:\s+with\s+([\s\S]+))?$/i;
 // The fields a tool's one value goes in, by name, before its first required text field.
 const VALUE_FIELDS = ['text', 'query', 'message', 'input', 'q'];

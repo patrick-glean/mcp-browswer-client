@@ -103,6 +103,7 @@ apps-start[hidden] {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+    justify-content: flex-start;
     gap: 4px;
     width: 100%;
     height: 100%;
@@ -112,6 +113,7 @@ apps-start[hidden] {
     background: var(--theme-background);
     font-size: 0.8125rem;
     text-align: left;
+    white-space: normal;
     cursor: pointer;
 }
 

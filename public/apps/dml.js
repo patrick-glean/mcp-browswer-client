@@ -26,13 +26,18 @@
 // start, and a <then into="…"> naming one goes there.
 //   </app>
 //
-// It's XML, read and written here without a DOM, so the worker and Node can use it too.
+// It's XML, read and written here without a DOM, so the worker and Node can use it too. Version 2
+// adds the box that shows a document (<output show="document">); an app is written in the oldest
+// version that has all it uses, so one without a document box is still version 1.
 
 import { BOX_KINDS, WIDTHS } from './boxes.js';
 import { EVENTS, ROUTE_HOW, ROUTE_WHEN, routeWhen, trigger, triggersOf, uid } from './flow.js';
 import { COMPONENT_TYPES } from './screen.js';
 
-export const DML_VERSION = 1;
+export const DML_VERSION = 2;
+
+// The oldest version of DML that has everything an app uses.
+export const dmlVersionOf = app => ((app?.screen?.components || []).some(component => component.type === 'output' && component.show === 'document') ? 2 : 1);
 
 export class DmlError extends Error {}
 
@@ -181,7 +186,7 @@ export function toDml(app, { standalone = false, serverNames = {} } = {}) {
             how: route.how && route.how !== 'replace' ? route.how : undefined,
         }, route.show ?? '']),
     ]);
-    const root = ['app', { dml: DML_VERSION, id: app.id, name: app.name || 'App', version: app.version || undefined },
+    const root = ['app', { dml: dmlVersionOf(app), id: app.id, name: app.name || 'App', version: app.version || undefined },
         ...(app.description ? [['description', {}, app.description]] : []),
         screenNode,
         ...(servers.length ? [['servers', {}, ...servers.map(url => ['server', { url, name: orUndefined(serverNames[url]) }])]] : []),

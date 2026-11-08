@@ -10,21 +10,22 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artifactsApp, embedCode, EXAMPLES } from '../public/apps/apps.js';
+import { embedCode, EXAMPLES, teamArtifactsApp } from '../public/apps/apps.js';
 import { toDml } from '../public/apps/dml.js';
 import { runLink } from '../public/apps/link.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
 
 export const PAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'examples', 'team-home.html');
-export const EMBED_HEIGHT = 720;
+export const EMBED_HEIGHT = 860;
 const MARKED = /(<!-- app -->\n)([ \t]*)[^\n]*(\n[ \t]*<!-- \/app -->)/;
 
-// The example, with an ID of its own so the page is the same each time it's written.
-export const exampleApp = () => ({ ...artifactsApp({ name: EXAMPLES.artifacts.name }), id: 'team-artifacts-example' });
+// The example as it is with no Glean added, so it calls Glean (demo), with an ID of its own so the
+// page is the same each time it's written.
+export const exampleApp = () => ({ ...teamArtifactsApp({ name: EXAMPLES.artifacts.name }), id: 'team-artifacts-example' });
 
 // The iframe that runs the app in the client beside the page.
 export async function embedOf(app = exampleApp()) {
-    const dml = toDml(app, { standalone: true, serverNames: { [DEMO_SERVERS.artifacts.url]: DEMO_SERVERS.artifacts.name } });
+    const dml = toDml(app, { standalone: true, serverNames: { [DEMO_SERVERS.glean.url]: DEMO_SERVERS.glean.name } });
     return embedCode(await runLink(dml, '../?embed'), { name: app.name, height: EMBED_HEIGHT });
 }
 
