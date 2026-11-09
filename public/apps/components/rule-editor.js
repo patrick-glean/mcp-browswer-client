@@ -4,7 +4,7 @@
 
 import { escapeHtml, schemaOf } from '../../workbench/util.js';
 import { composePrompt } from '../agent.js';
-import { answerKey, asksOf, BOX_KINDS, formatRequest, isBox } from '../boxes.js';
+import { answerKey, asksOf, BOX_KINDS, boxShow, formatRequest, isBox } from '../boxes.js';
 import {
     ANSWER_NAMES, DEFAULT_SHOW, describeRule, displayValue, ELEMENT_ID, EVENTS, EVENTS_BY_KIND, flowProblems, listed, ROUTE_HOW, ROUTE_WHEN, routeWhen,
     trigger, triggersOf,
@@ -19,6 +19,7 @@ const ANSWER_CHIPS = [
     ['structured', 'Its structured content; add .name for one value, as {{structured.count}}'],
     ['json', 'Its text read as JSON; add .name for one value, as {{json.items.0.title}}'],
     ['html', 'The HTML in its answer, to show as HTML'],
+    ['document', 'The document in its answer, for a document box: its Markdown, or a whole HTML page, without what only describes the call'],
     ['result', 'The whole result, as JSON'],
     ['error', 'Why it failed'],
 ];
@@ -399,14 +400,16 @@ export class RuleEditor {
             });
             this.fill();
         } else if (target.matches('[data-route-into]')) {
-            // An answer sent to a box takes the box's key of it, unless it was made to show more. A
-            // route to a screen shows nothing, and one from a screen to an element what it usually does.
-            const box = isBox(this.apps.elements().find(element => element.id === target.value));
+            // An answer sent to a box takes the box's key of it (a document box, the document in
+            // it), unless it was made to show more. A route to a screen shows nothing, and one from a
+            // screen to an element what it usually does.
+            const element = this.apps.elements().find(candidate => candidate.id === target.value);
+            const box = isBox(element);
             this.editRoute(target, route => {
-                const plain = route.show === DEFAULT_SHOW.ok || route.show === `{{json.${answerKey(route.into)}}}`;
+                const plain = route.show === DEFAULT_SHOW.ok || route.show === '{{document}}' || route.show === `{{json.${answerKey(route.into)}}}`;
                 if (this.isScreen(target.value)) Object.assign(route, { show: '', how: 'replace' });
-                else if (this.isScreen(route.into)) route.show = routeWhen(route) === 'ok' && box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW[routeWhen(route)];
-                else if (routeWhen(route) === 'ok' && plain) route.show = box ? `{{json.${answerKey(target.value)}}}` : DEFAULT_SHOW.ok;
+                else if (this.isScreen(route.into)) route.show = routeWhen(route) === 'ok' && box ? boxShow(element) : DEFAULT_SHOW[routeWhen(route)];
+                else if (routeWhen(route) === 'ok' && plain) route.show = box ? boxShow(element) : DEFAULT_SHOW.ok;
                 route.into = target.value;
             });
             this.fill();

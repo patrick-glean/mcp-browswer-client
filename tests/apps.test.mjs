@@ -11,17 +11,17 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { allowedCall, answerText, composePrompt, conversationFieldOf, REPLY_CALLS, serverWithTool, toolCallsIn, toolsForModel, TOOLS_INSTRUCTIONS } from '../public/apps/agent.js';
 import { DEMO_SERVERS } from '../public/demo-servers/index.js';
 import {
-    APP_URL, appIndexHtml, appInFolder, chatApp, clientPageCheck, dashboardApp, demoModel, embedCode, embedPage, foundModel, frontDeskApp, isLocalAddress,
-    modelName, normalizeClientAddress, openRules, readmeFor, startCallsOnlyDemos,
+    APP_URL, appIndexHtml, appInFolder, chatApp, clientPageCheck, dashboardApp, demoModel, embedCode, embedPage, EXAMPLES, foundModel, frontDeskApp, gleanFor,
+    isLocalAddress, modelName, normalizeClientAddress, openRules, readmeFor, startCallsOnlyDemos, teamArtifactsApp,
 } from '../public/apps/apps.js';
 import { askPrompt, modelArgs, modelCall } from '../public/apps/ask.js';
-import { asksOf, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
-import { DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
+import { asksOf, boxShow, formatRequest, isBox, isConversation, promptFieldOf, renderBox } from '../public/apps/boxes.js';
+import { DML_VERSION, dmlVersionOf, DmlError, fromDml, parseXml, serversOf, toDml } from '../public/apps/dml.js';
 import {
-    answerOf, callArguments, describeRule, elementIdProblem, FlowError, flowProblems, frameConfig, jsonIn, newRule, normalizeRule, renameInFlow,
-    renderTemplate, routeSummary, routeTargets, rulesFor, templateValue, triggerIndex, triggersOf,
+    answerOf, callArguments, describeRule, documentOf, elementIdProblem, FlowError, flowProblems, frameConfig, isHtmlDocument, jsonIn, newRule, normalizeRule,
+    renameInFlow, renderTemplate, routeSummary, routeTargets, rulesFor, templateValue, triggerIndex, triggersOf,
 } from '../public/apps/flow.js';
-import { canConnect, connect, disconnect, goPairOf, parsePort, placeRules, wiresOf } from '../public/apps/graph.js';
+import { canConnect, connect, disconnect, goPairOf, parsePort, placeRules, takesTextList, wiresOf } from '../public/apps/graph.js';
 import { clientRoot, packApp, RUN_HASH, runLink, unpackApp } from '../public/apps/link.js';
 import {
     canMove, componentsHtml, elementsOfComponents, endOfScreen, freeId, goOptions, htmlFromResult, movedComponents, newComponent, partElements, prefixIds,
@@ -159,7 +159,7 @@ test('broken DML says what is wrong and on which line', () => {
     const cases = [
         ['<app dml="1">\n  <screen built-from="components">\n  </scren>\n</app>', /^Line 3: <\/scren> can't close <screen> from line 2\./],
         ['<app dml="1" name="a & b"/>', /^Line 1: A & has to be written as &amp;\./],
-        ['<app dml="2"><screen built-from="components"/><flow/></app>', /DML version 2, and this client reads version 1/],
+        ['<app dml="3"><screen built-from="components"/><flow/></app>', /DML version 3, and this client reads version 2/],
         ['<!DOCTYPE app><app dml="1"/>', /can't have a DOCTYPE/],
         ['<flow/>', /starts with <app>, not <flow>/],
         ['<app dml="1">\n<screen built-from="components"/>\n<flow>\n<when element="x" event="hover"><call server="s" tool="t"/></when>\n</flow>\n</app>', /^Line 4: <when> needs event="…", one of click, enter, change, open\./],
@@ -422,6 +422,18 @@ test('connecting ports adds the part of the rule the wire is, and says why two p
     assert.deepEqual(without('error')[0].then.map(route => route.if), ['ok']);
     const mixed = [{ ...next[0], call: { ...next[0].call, args: { text: 'Hi {{q}}!' } } }];
     assert.deepEqual(disconnect(mixed, wiresOf(mixed, ['q']).find(wire => wire.kind === 'arg'))[0].call.args, { text: 'Hi !' });
+
+    // A field that takes a list of text, as Glean read_document's urls does, gets the value as its one item.
+    const listOf = ({ arg }) => arg === 'urls';
+    const listed = connect(flow, 'el:q', `arg:${id}:urls`, { kindOf, listOf }).flow;
+    assert.deepEqual(listed[0].call.args.urls, ['{{q}}']);
+    const urlsWire = wiresOf(listed, ['q']).find(wire => wire.kind === 'arg' && wire.arg === 'urls');
+    assert.deepEqual(disconnect(listed, urlsWire, { required: ['urls'] })[0].call.args.urls, [], 'unwired, a required list is left empty');
+    assert.equal('urls' in disconnect(listed, urlsWire)[0].call.args, false, 'and an optional one left out');
+    const more = [{ ...listed[0], call: { ...listed[0].call, args: { urls: ['https://example.com/a', '{{q}}'] } } }];
+    assert.deepEqual(disconnect(more, urlsWire)[0].call.args.urls, ['https://example.com/a']);
+    assert.deepEqual([{ type: 'array', items: { type: 'string' } }, { type: ['array', 'null'] }, { type: 'array', items: { type: 'object' } }, { type: 'string' }, undefined].map(takesTextList),
+        [true, true, false, false, false]);
 });
 
 test('tools nobody placed go in a column beside what they use, clear of each other', () => {
@@ -625,7 +637,7 @@ test('a dashboard comes back the same from its DML, and its boxes ask in the pro
     assert.match(html, /<div id="activity" class="output box box-bar"/);
     assert.match(html, /<div id="plain" class="output" /);
     const broken = (find, replace) => () => fromDml(dml.replace(find, replace));
-    assert.throws(broken('show="bar"', 'show="pie"'), /show="pie" isn't one of text, number, list, table, bar, line, html, conversation\./);
+    assert.throws(broken('show="bar"', 'show="pie"'), /show="pie" isn't one of text, number, list, table, bar, line, html, document, conversation\./);
     assert.throws(broken('width="third"', 'width="quarter"'), /width="quarter" isn't one of full, two-thirds, half, third\./);
     assert.throws(broken('size="wide"', 'size="huge"'), /size="huge" is narrow or wide\./);
     assert.throws(broken('role="prompt"', 'role="question"'), /role="question" isn't one an <arg> has/);
@@ -1148,4 +1160,137 @@ test("what Start calls holds nothing of anyone's when each of its rules calls a 
     assert.equal(startCallsOnlyDemos(onMock), false, 'a server of yours');
     assert.equal(startCallsOnlyDemos(sampleApp()), false);
     assert.equal(startCallsOnlyDemos(frontDeskApp({ name: 'Front desk' })), true, 'Start calls nothing');
+});
+
+// What Glean's read_document sends around a document: a listing of what it read, then the call's ID.
+const LISTING = 'documents[1]:\n  - artifactId: 0f3a\n    docType: PAPER\n    glean_doc_id: ARTIFACTS_paper_0f3a\n    snippets[1]: "A plan"\n    title: Plan.md\n    url: "https://app.glean.com/library/0f3a"';
+const INVOCATION = 'glean_invocation_id: 0d0e6a3c-2b0e-4d6e-9a59-7f1d3c2b1a00';
+const textBlocks = (...texts) => ({ content: texts.map(text => ({ type: 'text', text })) });
+
+test("a tool's document is what it read, without what only describes the call: Markdown, or a whole HTML page", () => {
+    assert.equal(documentOf(textBlocks(LISTING, '# Plan\n\nSteps.', INVOCATION)), '# Plan\n\nSteps.');
+    const page = '<!DOCTYPE html>\n<html><body><h1>Build health</h1><script>draw()</script></body></html>';
+    assert.equal(documentOf(textBlocks(LISTING, page, INVOCATION)), page, 'a page comes whole, its scripts too');
+    assert.equal(documentOf(textBlocks('Here it is:', page)), page, 'a page among other text is the document');
+    assert.equal(documentOf(textBlocks('The answer.\n\n---\nchatId: 06559dc0\nmessages[2]: …', INVOCATION)), 'The answer.', "without what Glean's chat puts after an answer");
+    assert.equal(documentOf(textBlocks('One', 'Two')), 'One\n\nTwo');
+    assert.equal(documentOf({ content: [{ type: 'resource', resource: { uri: 'ui://card', mimeType: 'text/html', text: '<p>Hi</p>' } }] }),
+        '<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body>\n<p>Hi</p>\n</body></html>', 'an HTML resource, made a whole page');
+    assert.equal(documentOf({ content: [{ type: 'resource', resource: { uri: 'file:///plan.md', mimeType: 'text/markdown', text: '# Plan' } }] }), '# Plan');
+    assert.equal(documentOf(null), '');
+    assert.equal(answerOf({ result: textBlocks(LISTING, '# Plan', INVOCATION) }).values.document, '# Plan', 'routes have it as {{document}}');
+    assert.deepEqual(['<!doctype html><p>', '  <!-- made in Glean -->\n<html lang="en">', '<HTML>'].map(isHtmlDocument), [true, true, true]);
+    assert.deepEqual(['<p>Hi</p>', '# <html>', '', null].map(isHtmlDocument), [false, false, false, false]);
+});
+
+// A file as Glean embeds one: base64, with its type.
+const embeddedFile = (mimeType, text) => ({ type: 'resource', resource: { uri: 'https://app.glean.com/library/0f3a', mimeType, blob: Buffer.from(text).toString('base64') } });
+
+test("a tool's document can be a file it embeds as base64, as Glean sends one, or else what Glean's listing holds of it", () => {
+    const page = '<!DOCTYPE html>\n<html><body><h1>Build health</h1><script>draw()</script></body></html>';
+    assert.equal(documentOf({ content: [{ type: 'text', text: LISTING }, embeddedFile('text/markdown', '# Plan — the whole of it\n\nSteps.'), { type: 'text', text: INVOCATION }] }), '# Plan — the whole of it\n\nSteps.');
+    assert.equal(documentOf({ content: [{ type: 'text', text: LISTING }, embeddedFile('text/html', page)] }), page);
+    assert.equal(answerOf({ result: { content: [embeddedFile('text/html', page)] } }).values.html, page, 'and {{html}} has the page');
+    assert.equal(documentOf({ content: [embeddedFile('image/png', 'not text'), { type: 'resource', resource: { uri: 'x', mimeType: 'text/plain', blob: '%%%' } }, { type: 'text', text: 'The answer.' }] }), 'The answer.',
+        "an image, or a blob that isn't base64, isn't a document");
+
+    assert.equal(documentOf(textBlocks(LISTING, INVOCATION)), 'A plan', "the listing alone: the document's snippets, which for one read whole are its start");
+    assert.equal(answerOf({ result: textBlocks(LISTING, INVOCATION) }).values.document, 'A plan');
+    const listingOf = fields => `documents[1]:\n  - artifactId: 0f3a\n${fields.map(field => `    ${field}`).join('\n')}\n    url: "https://app.glean.com/library/0f3a"`;
+    assert.equal(documentOf(textBlocks(listingOf(['richDocumentData:', '  content: "# Plan\\n\\nAll of it."', '  mimeType: text/markdown', 'snippets[1]: "# Plan"']))), '# Plan\n\nAll of it.',
+        'all of it, when the listing has it');
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(page)}`]))), page, 'a whole page');
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(page.slice(0, 40))}`]))),
+        "Glean sent only the start of this page's HTML, which doesn't show on its own. [Open it in Glean](https://app.glean.com/library/0f3a)", "the start of a page's HTML isn't a page");
+    const cut = `# Plan\n\n\`\`\`\n${'x'.repeat(4000)}`.slice(0, 4000);
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(cut)}`]))),
+        `> Glean sent only the start of this document. [Open it in Glean](https://app.glean.com/library/0f3a)\n\n${cut}`, 'one as long as Glean keeps says so, above it, as it may stop in a code block');
+    assert.equal(documentOf(textBlocks(`documents[2]:\n  - snippets[1]: One\n  - snippets[1]: Two`, INVOCATION)), 'One\n\n---\n\nTwo', 'one after another');
+    const broken = 'documents[2]:\n  - snippets[1]: One';
+    assert.equal(documentOf(textBlocks(broken, INVOCATION)), `${broken}\n${INVOCATION}`, "a listing that doesn't read stays as it is");
+});
+
+test('a document box shows Markdown as a page, and leaves a whole HTML page to a frame of its own; a text box shows a link as one', () => {
+    const { html } = renderBox('document', '# Plan\n\n- [x] Done\n\n![Diagram](https://example.com/d.png)\n\n<script>alert(1)</script>');
+    assert.equal(html, '<div class="md"><h1>Plan</h1>\n<ul><li class="md-task"><input type="checkbox" disabled checked> Done</li></ul>\n'
+        + '<p><a href="https://example.com/d.png" class="md-image">Diagram</a></p>\n<p>&lt;script&gt;alert(1)&lt;/script&gt;</p></div>', 'its headings have no ids, which the screen has');
+    assert.deepEqual(renderBox('document', '<!DOCTYPE html><html><body>Hi</body></html>'), { html: '<p class="box-none">An HTML page, which runs in a frame of its own.</p>', problem: null });
+    assert.equal(renderBox('document', { a: 1 }).problem, 'A document box takes a string of Markdown, or a whole HTML document.');
+    assert.equal(renderBox('text', 'https://app.glean.com/library/0f3a').html, '<p class="box-text box-link"><a href="https://app.glean.com/library/0f3a">https://app.glean.com/library/0f3a</a></p>');
+    assert.equal(renderBox('text', 'javascript:alert(1)').html, '<p class="box-text">javascript:alert(1)</p>');
+    assert.equal(boxShow({ id: 'doc1', type: 'output', show: 'document' }), '{{document}}', "wired to a tool, it takes the tool's document");
+    assert.equal(boxShow({ id: 'link1', type: 'output', show: 'text', about: 'A link' }), '{{json.link1}}');
+});
+
+test('an app with a document box is DML version 2; one without is still version 1, which older clients read', () => {
+    assert.equal(DML_VERSION, 2);
+    const app = teamArtifactsApp({ shell: { servers: {} }, name: 'Team artifacts' });
+    assert.equal(dmlVersionOf(app), 2);
+    const dml = toDml(app);
+    assert.match(dml, /<app dml="2" /);
+    assert.match(dml, /<output id="doc1" label="1 of 6" placeholder="It shows here once Glean has picked it\." show="document"\/>/);
+    assert.equal(toDml(fromDml(dml).app), dml);
+    assert.equal(fromDml(dml).app.screen.components.find(component => component.id === 'doc1').show, 'document');
+    assert.equal(dmlVersionOf(sampleApp()), 1);
+    assert.match(toDml(sampleApp()), /<app dml="1" /);
+});
+
+test("the Team artifacts example: six slides that go round, Glean's chat picking six links, then read_document reading each into its slide", () => {
+    const demo = DEMO_SERVERS.glean;
+    const servers = { [demo.url]: { url: demo.url, alias: demo.name, status: 'connected', tools: demo.tools } };
+    const app = teamArtifactsApp({ shell: { servers }, name: 'Team artifacts' });
+    assert.equal(EXAMPLES.artifacts.make, teamArtifactsApp);
+    assert.equal(app.screen.size, 'wide');
+    const components = app.screen.components;
+    assert.deepEqual(screensOf(components).map(screen => `${screen.id} ${screen.label}`), [1, 2, 3, 4, 5, 6].map(n => `slide${n} ${n} of 6`));
+    const elements = elementsOfComponents(components);
+    const on = screen => elements.filter(element => element.screen === screen && element.kind !== 'screen').map(element => element.id + (element.go ? ` → ${element.go}` : ''));
+    assert.deepEqual([null, 'slide1', 'slide2', 'slide6'].map(on), [
+        ['title', 'status'],
+        ['doc1', 'prev1 → slide6', 'link1', 'next1 → slide2'],
+        ['doc2', 'prev2 → slide1', 'link2', 'next2 → slide3'],
+        ['doc6', 'prev6 → slide5', 'link6', 'next6 → slide1'],
+    ]);
+    assert.deepEqual(elements.filter(isBox).map(element => `${element.id} ${element.show}`).slice(0, 2), ['doc1 document', 'link1 text']);
+    const [pick, ...reads] = app.flow;
+    assert.deepEqual(app.flow.map(rule => `${triggersOf(rule).map(candidate => candidate.event)} ${rule.call.toolName}`), ['open chat', ...Array(6).fill('open read_document')],
+        'they run as it opens, top to bottom, so the reads have the links');
+    assert.ok(app.flow.every(rule => rule.call.serverUrl === demo.url && rule.call.args._user_goal === "Show my team's newest artifacts"));
+    assert.equal(pick.prompt, 'message');
+    assert.match(pick.call.args.message, /^Search Glean once, with query \*, app artifacts, owner myteam and sort_by_recency, and list my team's six newest artifacts whose type is paper or html/);
+    assert.deepEqual(asksOf(pick, elements).map(ask => `${ask.key} (${ask.kind}): ${ask.about}`), [
+        'link1 (text): The Glean Library link of the newest', 'link2 (text): The Glean Library link of the second newest', 'link3 (text): The Glean Library link of the third newest',
+        'link4 (text): The Glean Library link of the fourth newest', 'link5 (text): The Glean Library link of the fifth newest', 'link6 (text): The Glean Library link of the sixth newest',
+    ]);
+    assert.deepEqual(pick.then.slice(-2), [
+        { if: 'ok', show: "Your team's six newest papers and pages, newest first.", into: 'status', how: 'replace' },
+        { if: 'error', show: '{{error}}', into: 'status', how: 'replace' },
+    ], "the chat's error goes above the slides, where every slide shows it");
+    assert.deepEqual(reads.map(rule => rule.call.args.urls), [1, 2, 3, 4, 5, 6].map(n => [`{{link${n}}}`]));
+    assert.deepEqual(reads[2].then, [{ if: 'ok', show: '{{document}}', into: 'doc3', how: 'replace' }, { if: 'error', show: '{{error}}', into: 'doc3', how: 'replace' }]);
+    assert.deepEqual(frameConfig(app.flow, elements.map(element => element.id)).read, [1, 2, 3, 4, 5, 6].map(n => `link${n}`));
+    assert.deepEqual(flowProblems(app.flow, { elements, servers }).map(([, problems]) => problems), Array(7).fill([]));
+    assert.deepEqual(callArguments(reads[0].call, { screen: { link1: 'https://app.glean.com/library/0f3a' }, schema: demo.tools.find(tool => tool.name === 'read_document').inputSchema }).sentArgs,
+        { urls: ['https://app.glean.com/library/0f3a'], _user_goal: "Show my team's newest artifacts" });
+    assert.deepEqual(serversOf(app), [demo.url]);
+    assert.equal(startCallsOnlyDemos(app), true, 'on the demo, it runs as it opens without asking');
+});
+
+test('the Team artifacts example calls your Glean when you have one, even before it has listed its tools, and Glean (demo) when you have none', () => {
+    const glean = 'https://acme-be.glean.com/mcp/default';
+    const tools = names => names.map(name => ({ name, inputSchema: { type: 'object' } }));
+    assert.equal(gleanFor({}), DEMO_SERVERS.glean.url);
+    assert.equal(gleanFor({ [MOCK]: { url: MOCK, tools: tools(['chat', 'read_document']) } }), DEMO_SERVERS.glean.url, 'a server that only has the same tools is not Glean');
+    assert.equal(gleanFor({ [glean]: { url: glean, tools: tools(['chat', 'read_document', 'search']) } }), glean);
+    assert.equal(gleanFor({ [glean]: { url: glean, status: 'disconnected', tools: [] } }), glean, "one you haven't signed in to yet");
+    assert.equal(gleanFor({ [glean]: { url: glean, tools: tools(['search']) } }), DEMO_SERVERS.glean.url, 'one without chat and read_document');
+    const app = teamArtifactsApp({ shell: { servers: { [glean]: { url: glean, tools: tools(['chat', 'read_document']) } } }, name: 'Team artifacts' });
+    assert.ok(app.flow.every(rule => rule.call.serverUrl === glean));
+    assert.equal(startCallsOnlyDemos(app), false, 'opening it asks first: it reads your Glean');
+});
+
+test("the demo model is the model found before another demo server's chat", () => {
+    const servers = Object.fromEntries(['glean', 'model'].map(id => [DEMO_SERVERS[id].url, { url: DEMO_SERVERS[id].url, tools: DEMO_SERVERS[id].tools }]));
+    assert.equal(foundModel(servers).serverUrl, DEMO_SERVERS.model.url);
+    assert.equal(foundModel({ [DEMO_SERVERS.glean.url]: servers[DEMO_SERVERS.glean.url] }).serverUrl, DEMO_SERVERS.glean.url, 'and that one when it is the only chat');
 });

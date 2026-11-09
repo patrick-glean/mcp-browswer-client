@@ -1,9 +1,9 @@
 // An app's flow: rules that say, in order, when something happens on the screen, which tool to
 // call with what, and where on the screen its answer goes. Values move with {{name}}: in a call's
 // arguments, {{question}} is what the screen's `question` element holds; in what a rule shows,
-// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{html}}, {{result.…}},
-// {{error}}). An element of a part (HTML a model or a tool made) is named part.element, as
-// {{dashboard.search}}.
+// {{text}} is the text the tool returned (and {{structured.…}}, {{json.…}}, {{html}}, {{document}},
+// {{result.…}}, {{error}}). An element of a part (HTML a model or a tool made) is named
+// part.element, as {{dashboard.search}}.
 //
 // A rule: { id, when: [trigger], call: { serverUrl, toolName, args }, then: [route], position?,
 //           prompt?, instructions?, tools? }
@@ -15,7 +15,9 @@
 // Pure functions, shared by the builder, the runner and the tests.
 
 import { resolveArguments, variablesIn } from '../workbench/template.js';
+import { base64Text, isTextType } from '../workbench/util.js';
 import { answerText } from './agent.js';
+import { decodeToon } from './toon.js';
 
 // What a rule can wait for. `open` belongs to the app itself, so its element is ''.
 export const EVENTS = {
@@ -40,7 +42,7 @@ export const ROUTE_HOW = {
 };
 
 // The names a tool's answer brings to a rule's routes, so no element may use them as its id.
-export const ANSWER_NAMES = ['text', 'structured', 'json', 'html', 'result', 'error'];
+export const ANSWER_NAMES = ['text', 'structured', 'json', 'html', 'document', 'result', 'error'];
 
 const PLACEHOLDERS = /\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
 export const ELEMENT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
@@ -159,19 +161,91 @@ export function jsonIn(text) {
     return null;
 }
 
+// The text an embedded resource holds: its text, or its blob read as UTF-8 when its type is text,
+// as Glean sends a document's file. Null when it holds neither.
+export function resourceText(resource) {
+    if (typeof resource?.text === 'string') return resource.text;
+    return typeof resource?.blob === 'string' && isTextType(resource.mimeType) ? base64Text(resource.blob) : null;
+}
+
+// The embedded resources in a tool's answer that hold text, each with its MIME type.
+const embedded = result => (Array.isArray(result?.content) ? result.content : [])
+    .map(item => (item?.type === 'resource' && item.resource ? { type: String(item.resource.mimeType || ''), text: resourceText(item.resource) } : null))
+    .filter(resource => typeof resource?.text === 'string');
+
 // The HTML in a tool's answer: an embedded text/html resource, structuredContent.html, or text that
 // is HTML (in a ```html block or on its own, as models write it). Null when there's none.
 export function htmlFromResult(result) {
-    const content = Array.isArray(result?.content) ? result.content : [];
-    for (const item of content) {
-        const resource = item?.type === 'resource' ? item.resource : null;
-        if (typeof resource?.text === 'string' && /^text\/html\b/i.test(resource.mimeType || '')) return resource.text;
-    }
+    const resource = embedded(result).find(({ type }) => /^text\/html\b/i.test(type));
+    if (resource) return resource.text;
     if (typeof result?.structuredContent?.html === 'string') return result.structuredContent.html;
     const text = resultText(result);
     const fenced = text.match(/```(?:html)?[ \t]*\r?\n([\s\S]*?)```/i);
     const candidate = (fenced ? fenced[1] : text).trim();
     return /<(!doctype\s+html|html|head|body|main|section|article|div|form|input|textarea|button|h[1-6]|p)\b/i.test(candidate) ? candidate : null;
+}
+
+// A whole HTML document, as a page or a web app is: a document box shows one in a frame of its own,
+// and anything else it shows as Markdown.
+export const isHtmlDocument = value => typeof value === 'string' && /^\s*(?:<!--[\s\S]*?-->\s*)*<(?:!doctype\s+html|html)[\s>]/i.test(value);
+
+// What Glean's read_document says of what it read, before the document itself: a list (TOON) of
+// the documents, each with its ID, type, title and link, and the snippets Glean's index keeps of
+// it, which for a document read whole are its start. And the ID of the call, which Glean says to
+// ignore. Glean sends the document itself as an embedded resource, but only to the apps it knows
+// show them; the others get the listing alone.
+const GLEAN_LISTING = /^\s*documents\[\d+\](?:\{[^}\n]*\})?:[^\n]*(?:\n[ \t]+[^\n]*)*/;
+const GLEAN_INVOCATION = /\s*glean_invocation_id:\s*[\w-]+\s*$/;
+
+// The documents Glean's listing at the start of a text names; [] when it doesn't start with one.
+function listedDocuments(text) {
+    const listing = GLEAN_LISTING.exec(text)?.[0];
+    if (!listing) return [];
+    try {
+        const { documents } = decodeToon(listing);
+        return Array.isArray(documents) ? documents.filter(document => document && typeof document === 'object') : [];
+    } catch {
+        return [];
+    }
+}
+
+// How much of a document read whole Glean's listing keeps as its snippet, from the start, cut there
+// without a mark.
+const GLEAN_SNIPPET_CHARS = 4000;
+
+// What Glean's listing holds of a document itself: all of it, in richDocumentData.content, when
+// Glean sends that; else its snippets, saying so above them when they're as long as Glean keeps,
+// so a cut paper doesn't look whole (above, since the cut can be inside a code block or a table).
+// The start of a page's HTML isn't a page, so for that it says so instead, with the page's link.
+function listedText(document) {
+    const whole = document.richDocumentData?.content;
+    if (typeof whole === 'string' && whole.trim()) return whole;
+    const snippets = (Array.isArray(document.snippets) ? document.snippets : [])
+        .map(snippet => (typeof snippet === 'string' ? snippet : typeof snippet?.text === 'string' ? snippet.text : ''));
+    const text = snippets.filter(snippet => snippet.trim()).join('\n\n');
+    const link = /^https?:\/\/\S+$/i.test(document.url || '') ? ` [Open it in Glean](${document.url})` : '';
+    if (isHtmlDocument(text) && !/<\/html>\s*$/i.test(text)) return `Glean sent only the start of this page's HTML, which doesn't show on its own.${link}`;
+    return text.length >= GLEAN_SNIPPET_CHARS ? `> Glean sent only the start of this document.${link}\n\n${text}` : text;
+}
+
+// The document in a tool's answer, as a box shows it: an embedded text/html resource (made a whole
+// document) or Markdown one, as text or as a blob; else a whole HTML document in its text; else
+// its text, without what only describes the call (Glean's listing and invocation ID, and the
+// details its chat puts after an answer). When that's all there is, it's what Glean's listing
+// holds of each document, and else the text as it is. '' when there's no text.
+export function documentOf(result) {
+    for (const { type, text } of embedded(result)) {
+        if (/^text\/html\b/i.test(type)) return isHtmlDocument(text) ? text : `<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body>\n${text}\n</body></html>`;
+        if (/^text\/(?:markdown|x-markdown|plain)\b/i.test(type)) return text;
+    }
+    const content = Array.isArray(result?.content) ? result.content : [];
+    const blocks = content.filter(item => item?.type === 'text' && typeof item.text === 'string').map(item => item.text);
+    const kept = blocks.map(block => answerText(block.replace(GLEAN_LISTING, '').replace(GLEAN_INVOCATION, ''))).filter(block => block.trim());
+    const listed = kept.length ? [] : blocks.flatMap(listedDocuments).map(listedText).filter(text => text.trim());
+    const found = kept.length ? kept : listed;
+    const page = found.find(isHtmlDocument);
+    if (page) return page.trim();
+    return (found.length ? found.join(kept.length ? '\n\n' : '\n\n---\n\n') : blocks.join('\n')).trim();
 }
 
 // What a call's answer gives its routes: whether it worked, and the values {{…}} can name. A
@@ -186,7 +260,7 @@ export function answerOf(message) {
     else if (result.isError) error = text || 'The tool reported an error.';
     return {
         ok: !error,
-        values: { text, structured: result?.structuredContent ?? null, json: jsonIn(text), html: htmlFromResult(result) ?? '', result, error },
+        values: { text, structured: result?.structuredContent ?? null, json: jsonIn(text), html: htmlFromResult(result) ?? '', document: documentOf(result), result, error },
     };
 }
 

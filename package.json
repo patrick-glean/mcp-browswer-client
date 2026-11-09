@@ -10,6 +10,7 @@
     "build:sdk": "node sdk-client/build.mjs",
     "build:wasm": "./wasm-build.sh",
     "build:files": "node scripts/client-files.mjs",
+    "build:example": "node scripts/example-page.mjs",
     "setup:python": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
     "start:mock-mcp": "python3 test_mcp_server.py",
     "start:reference-mcp": "venv/bin/python tests/reference_server.py",

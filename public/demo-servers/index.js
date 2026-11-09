@@ -7,6 +7,7 @@
 
 import { DEMO_CHAT, demoModelServer } from './demo-model.js';
 import { FRONT_DESK_TOOLS, frontDeskServer } from './front-desk.js';
+import { GLEAN_TOOLS, gleanServer } from './glean.js';
 
 const definition = ({ call, ...tool }) => tool;
 
@@ -27,6 +28,14 @@ export const DEMO_SERVERS = {
         about: 'A stand-in for a model: it repeats what you say, writes the tool calls you ask for, and makes up what boxes and pages need',
         tools: [definition(DEMO_CHAT)],
         make: demoModelServer,
+    },
+    glean: {
+        id: 'glean',
+        url: 'https://glean.demo.invalid/mcp',
+        name: 'Glean (demo)',
+        about: "A stand-in for Glean over a made-up team's artifacts: search finds them, read_document reads them and chat picks the newest, in the shapes Glean answers in",
+        tools: GLEAN_TOOLS.map(definition),
+        make: gleanServer,
     },
 };
 

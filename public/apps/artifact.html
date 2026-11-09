@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; media-src data: blob: https:; font-src data: https:; connect-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Document</title>
+<!--
+  Where a whole HTML page in an app's document box runs, such as a Glean artifact: a frame inside
+  the app's screen (runner.js), sandboxed with allow-scripts only, so its origin is opaque. The page
+  comes once, in a message from the screen, and replaces this one with its policy kept: its scripts
+  run, and it may load scripts, styles, images, fonts and media from https addresses, as artifacts'
+  charts do, but it can't fetch, open sockets, submit forms or frame pages, and it never reaches
+  this client, its storage or anyone's sign-in. Storage is kept in memory, for the page's own
+  settings. A link it opens, or window.open, goes back to the screen as open { url }, which the
+  client opens in a new tab; links within the page (#section) stay in it.
+-->
+<script>
+(() => {
+    const isWeb = url => /^https?:\/\//i.test(String(url ?? ''));
+    const open = url => parent.postMessage({ type: 'open', url: String(url) }, '*');
+    window.open = url => {
+        if (isWeb(url)) open(url);
+        return null;
+    };
+    const memory = () => {
+        const items = new Map();
+        return {
+            get length() { return items.size; },
+            key: index => [...items.keys()][index] ?? null,
+            getItem: key => (items.has(String(key)) ? items.get(String(key)) : null),
+            setItem: (key, value) => { items.set(String(key), String(value)); },
+            removeItem: key => { items.delete(String(key)); },
+            clear: () => items.clear(),
+        };
+    };
+    for (const name of ['localStorage', 'sessionStorage']) {
+        try {
+            Object.defineProperty(window, name, { configurable: true, value: memory() });
+        } catch {
+            // The browser's stays, which throws in a sandbox.
+        }
+    }
+    try {
+        Object.defineProperty(document, 'cookie', { configurable: true, get: () => '', set: () => {} });
+    } catch {
+        // As above.
+    }
+    // A link the page doesn't handle itself: a web address opens in a new tab; one of this frame's
+    // own (a relative link) goes nowhere, since the page isn't where it was made.
+    const clicked = event => {
+        const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+        if (event.defaultPrevented || !link) return;
+        const href = link.getAttribute('href').trim();
+        if (href.startsWith('#') || /^javascript:/i.test(href)) return;
+        event.preventDefault();
+        if (isWeb(href)) open(href);
+    };
+    addEventListener('message', function take(event) {
+        if (event.source !== parent || event.data?.type !== 'artifact' || typeof event.data.html !== 'string') return;
+        removeEventListener('message', take);
+        document.open();
+        document.write(event.data.html);
+        document.close();
+        addEventListener('click', clicked);
+    });
+})();
+</script>
+</head>
+<body></body>
+</html>

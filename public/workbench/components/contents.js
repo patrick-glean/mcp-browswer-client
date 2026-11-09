@@ -1,44 +1,17 @@
 // The response area while the tool list shows resources or prompts: what the last read returned
-// (text, with JSON indented; images and audio shown; other binary data to download) or the
-// messages the last prompt came back with, and the raw JSON. Each list keeps its own last answer.
+// (text, with JSON indented; images and audio shown; other binary data to download, and shown as
+// text too when its type is text) or the messages the last prompt came back with, and the raw
+// JSON. Each list keeps its own last answer.
 
-import { escapeHtml, formatMs, plural } from '../util.js';
+import { escapeHtml, formatMs } from '../util.js';
 import { WbElement } from './base.js';
-import { contentHtml } from './response.js';
+import { contentHtml, resourceBodyHtml } from './response.js';
 
-const BASE64 = /^[A-Za-z0-9+/=\s]+$/;
-
-function textHtml(text, mime) {
-    const trimmed = text.trim();
-    if (/json/i.test(mime) || /^[[{]/.test(trimmed)) {
-        try {
-            return `<pre class="wb-content-json">${escapeHtml(JSON.stringify(JSON.parse(trimmed), null, 2))}</pre>`;
-        } catch { /* not JSON after all */ }
-    }
-    return `<div class="wb-content-text">${escapeHtml(text)}</div>`;
-}
-
-const fileName = uri => String(uri || 'resource').split(/[/:]/).filter(Boolean).pop() || 'resource';
-
-// One item a resource read returned: its URI and type, then the text or the binary data.
+// One item a resource read returned: its URI and type, then what it holds.
 function resourceItemHtml(item) {
     const mime = String(item?.mimeType || '');
     const head = `<div class="wb-content-head"><span class="mono">${escapeHtml(item?.uri || '')}</span>${mime ? `<span class="badge">${escapeHtml(mime)}</span>` : ''}</div>`;
-    let body;
-    if (typeof item?.text === 'string') {
-        body = textHtml(item.text, mime);
-    } else if (typeof item?.blob === 'string' && BASE64.test(item.blob)) {
-        const data = item.blob.replace(/\s+/g, '');
-        const bytes = Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-        const src = `data:${mime || 'application/octet-stream'};base64,${data}`;
-        const preview = mime.startsWith('image/')
-            ? `<img class="wb-content-image" src="${escapeHtml(src)}" alt="${escapeHtml(item.uri || 'Image')}">`
-            : mime.startsWith('audio/') ? `<audio class="wb-content-audio" controls src="${escapeHtml(src)}"></audio>` : '';
-        body = `${preview}<p class="text-secondary">${plural(bytes, 'byte')} of ${escapeHtml(mime || 'binary data')} · <a href="${escapeHtml(src)}" download="${escapeHtml(fileName(item.uri))}">Download</a></p>`;
-    } else {
-        body = `<pre class="wb-content-json">${escapeHtml(JSON.stringify(item, null, 2))}</pre>`;
-    }
-    return `<div class="wb-content">${head}${body}</div>`;
+    return `<div class="wb-content">${head}${resourceBodyHtml(item)}</div>`;
 }
 
 function messageHtml(message) {

@@ -1,25 +1,32 @@
 // The demo servers built into MCP Browser Client (public/demo-servers/): MCP servers that answer in
 // the page's service worker. They speak both protocol eras through the fetch() the MCP client
-// library makes, the front desk's tools answer as the mock server's do, and the demo model reads
-// the prompts the app's rules write.
+// library makes, the front desk's tools answer as the mock server's do, the demo model reads the
+// prompts the app's rules write, and Glean (demo) answers in the shapes Glean's tools do.
 //
 //   node --test "tests/*.test.mjs"    (npm run test:unit)
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { composePrompt, toolCallsIn } from '../public/apps/agent.js';
-import { chatApp, dashboardApp, demoModel } from '../public/apps/apps.js';
+import { answerText } from '../public/apps/agent.js';
+import { chatApp, dashboardApp, demoModel, teamArtifactsApp } from '../public/apps/apps.js';
 import { askPrompt } from '../public/apps/ask.js';
 import { asksOf, formatRequest } from '../public/apps/boxes.js';
+import { answerOf, documentOf, isHtmlDocument } from '../public/apps/flow.js';
 import { elementsOfComponents } from '../public/apps/screen.js';
+import { decodeToon } from '../public/apps/toon.js';
 import { chatReply, saidIn, toolsIn } from '../public/demo-servers/demo-model.js';
 import { DEMO_SERVERS, demoServerAt, installDemoServers } from '../public/demo-servers/index.js';
 import { findVisit } from '../public/demo-servers/front-desk.js';
+import { linkOf } from '../public/demo-servers/glean.js';
+import { SAMPLE_ARTIFACTS } from '../public/demo-servers/glean-samples.js';
 import { mcpServer } from '../public/demo-servers/mcp.js';
+import { base64Text } from '../public/workbench/util.js';
 
 const META = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} };
 const DESK = DEMO_SERVERS.frontdesk.url;
 const MODEL = DEMO_SERVERS.model.url;
+const GLEAN = DEMO_SERVERS.glean.url;
 
 // A worker's global scope with the demo servers installed, whose network answers "network".
 function worker() {
@@ -71,7 +78,7 @@ test("installDemoServers answers only the demo servers' addresses, one instance 
     const before = scope.fetch;
     installDemoServers(scope);
     assert.equal(scope.fetch, before, 'installing twice changes nothing');
-    assert.deepEqual([demoServerAt(MODEL)?.id, demoServerAt('https://example.com/'), Object.keys(DEMO_SERVERS)], ['model', null, ['frontdesk', 'model']]);
+    assert.deepEqual([demoServerAt(MODEL)?.id, demoServerAt('https://example.com/'), Object.keys(DEMO_SERVERS)], ['model', null, ['frontdesk', 'model', 'glean']]);
 });
 
 test("the front desk's tools find today's visit by part of a name, check people in and call for help, as the mock server's do", async () => {
@@ -93,7 +100,7 @@ test("the front desk's tools find today's visit by part of a name, check people 
 
 test('a tool that throws fails as a tool, not as the server', async () => {
     const server = mcpServer({ name: 'Throws', tools: [{ name: 'boom', inputSchema: { type: 'object' }, call: () => { throw new Error('It broke.'); } }] });
-    const response = server.answer({ method: 'POST', headers: new Headers(), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'boom', _meta: META } }) });
+    const response = await server.answer({ method: 'POST', headers: new Headers(), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'boom', _meta: META } }) });
     assert.deepEqual((await response.json()).result, { resultType: 'complete', content: [{ type: 'text', text: 'It broke.' }], isError: true });
 });
 
@@ -131,4 +138,68 @@ test('Chat and Project pulse on the demo model call its chat, before the server 
     const pulse = dashboardApp({ shell, workbench: null, model: demoModel(), name: 'Project pulse' });
     assert.deepEqual([pulse.flow[0].call.toolName, pulse.flow[0].prompt], ['chat', 'message']);
     assert.match(pulse.screen.components[1].text, /from one question to the demo model:/);
+});
+
+test("Glean (demo) takes the fields Glean's tools take, and answers in their shapes: search in Markdown, read_document with a listing, the files and the call's ID", async () => {
+    const scope = worker();
+    assert.deepEqual(DEMO_SERVERS.glean.tools.map(tool => [tool.name, tool.inputSchema.required]), [['search', ['query', '_user_goal']], ['read_document', ['urls', '_user_goal']], ['chat', ['message', '_user_goal']]]);
+    assert.deepEqual(Object.keys(DEMO_SERVERS.glean.tools[2].inputSchema.properties), ['message', 'context', '_user_goal'], "chat's conversation goes in context, as Glean's does");
+    const found = await call(scope, GLEAN, 'search', { query: '*', app: 'artifacts', owner: 'myteam', sort_by_recency: true, _user_goal: 'Show my team’s newest artifacts' });
+    assert.match(found.content[0].text, /^# Search results \(8 found\)\n/);
+    assert.match(found.content[0].text, /\n## 1\. Build health\.html\n\*\*Source:\*\* artifacts • \*\*Type:\*\* html • \*\*Updated:\*\* \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ • /);
+    const links = [...found.content[0].text.matchAll(/\*\*Link:\*\* (\S+)/g)].map(match => match[1]);
+    assert.deepEqual(links, SAMPLE_ARTIFACTS.map(linkOf), 'newest first, each with its Library link');
+    assert.ok(links.every(link => /^https:\/\/app\.glean\.com\/library\/[0-9a-f]{32}$/.test(link)));
+    assert.match(found.content[1].text, /^glean_invocation_id: [0-9a-f-]{36}$/);
+    const narrowed = await call(scope, GLEAN, 'search', { query: 'roadmap', owner: 'Grace', _user_goal: 'x' });
+    assert.match(narrowed.content[0].text, /^# Search results \(1 found\)[\s\S]*Q1 platform roadmap\.md/);
+    assert.match((await call(scope, GLEAN, 'search', { query: '*', app: 'gmail', _user_goal: 'x' })).content[0].text, /\(0 found\)/);
+
+    const read = await call(scope, GLEAN, 'read_document', { urls: [links[1]], _user_goal: 'x' });
+    const roadmap = SAMPLE_ARTIFACTS[1];
+    assert.equal(read.content.length, 3);
+    assert.match(read.content[0].text, /^documents\[1\]:\n  - artifactId: 7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    docType: PAPER\n    glean_doc_id: ARTIFACTS_paper_7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    snippets\[1\]: "# Q1 platform roadmap\\n(?:[^"\\]|\\.)+"\n    title: Q1 platform roadmap\.md\n    url: "https:\/\/app\.glean\.com\/library\/7e2b9d41c0a54f6e8b3d1c9a5f7e2b64"$/);
+    assert.deepEqual(decodeToon(read.content[0].text).documents[0].snippets, [roadmap.content], "a paper shorter than Glean's snippet is all in it");
+    assert.deepEqual({ ...read.content[1], resource: { ...read.content[1].resource, blob: base64Text(read.content[1].resource.blob) } },
+        { type: 'resource', resource: { uri: links[1], mimeType: 'text/markdown', blob: roadmap.content } }, "then the paper's file, as Glean embeds it");
+    assert.match(read.content[2].text, /^glean_invocation_id: /);
+    assert.equal(documentOf(read), roadmap.content, 'the document box gets the document alone');
+    const pageRead = await call(scope, GLEAN, 'read_document', { urls: [`${links[0]}?source=carousel`], _user_goal: 'x' });
+    const page = documentOf(pageRead);
+    assert.ok(isHtmlDocument(page) && page.includes('<canvas id="chart"') && page.includes("fetch('https://ci.example.com/"), 'a page comes whole, its scripts too');
+    assert.equal(decodeToon(pageRead.content[0].text).documents[0].snippets[0], SAMPLE_ARTIFACTS[0].content.slice(0, 4000), "a longer one's start, as Glean's index keeps it");
+    assert.match(documentOf({ content: [pageRead.content[0], pageRead.content[2]] }), /^Glean sent only the start of this page's HTML, which doesn't show on its own\. \[Open it in Glean\]\(https:\/\/app\.glean\.com\/library\/[0-9a-f]{32}\)$/,
+        "without its file, as Glean answers the apps it doesn't know, a page is a link to it");
+    const review = await call(scope, GLEAN, 'read_document', { urls: [links[4]], _user_goal: 'x' });
+    assert.equal(decodeToon(review.content[0].text).documents[0].title, 'Incident review: remote cache outage.md', 'quoted where TOON says to');
+    const both = await call(scope, GLEAN, 'read_document', { urls: [links[1], links[3]], _user_goal: 'x' });
+    assert.deepEqual([both.content.length, /^documents\[2\]:/.test(both.content[0].text), both.content.slice(1, 3).map(item => item.resource.mimeType)], [4, true, ['text/markdown', 'text/html']]);
+    const others = await call(scope, GLEAN, 'read_document', { urls: [links[2], links[5]], _user_goal: 'x' });
+    assert.deepEqual([others.content.slice(1, 3).map(item => item.resource.mimeType), documentOf(others)], [['text/plain', 'text/markdown'], SAMPLE_ARTIFACTS[2].content],
+        'a message is plain text, as Glean types it, and the spreadsheet a Markdown table');
+    const missing = await call(scope, GLEAN, 'read_document', { urls: ['https://app.glean.com/library/0000'], _user_goal: 'x' });
+    assert.deepEqual(missing, { resultType: 'complete', content: [{ type: 'text', text: "The demo's made-up Glean has no document at https://app.glean.com/library/0000. Its documents are the ones search finds." }], isError: true });
+    assert.equal((await call(scope, GLEAN, 'read_document', { urls: [''], _user_goal: 'x' })).isError, true);
+});
+
+test("Glean (demo)'s chat gives boxes that ask for links the team's newest papers and pages, and otherwise answers as the demo model", async () => {
+    const scope = worker();
+    const app = teamArtifactsApp({ shell: { servers: {} }, name: 'Team artifacts' });
+    const [pick] = app.flow;
+    const message = composePrompt(pick.call.args.message, { request: formatRequest(asksOf(pick, elementsOfComponents(app.screen.components)), { size: 'wide' }) });
+    const answer = await call(scope, GLEAN, 'chat', { message, _user_goal: pick.call.args._user_goal });
+    assert.match(answer.content[0].text, /^```json\n[\s\S]*\n```\n\n---\nchatId: [0-9a-f]{32}$/, "with the conversation's ID after the answer, as Glean's chat puts it");
+    assert.match(answer.content[1].text, /^glean_invocation_id: /);
+    const newest = SAMPLE_ARTIFACTS.filter(artifact => artifact.type === 'paper' || artifact.type === 'html').slice(0, 6);
+    assert.deepEqual(newest.map(artifact => artifact.title), ['Build health', 'Q1 platform roadmap', 'Flaky test leaderboard', 'Incident review: remote cache outage', 'On-call handbook', 'Golden path: start a new service']);
+    assert.deepEqual(answerOf({ result: answer }).values.json, Object.fromEntries(newest.map((artifact, index) => [`link${index + 1}`, linkOf(artifact)])));
+
+    const mixed = formatRequest([{ key: 'top', kind: 'text', about: 'The link of the 3rd newest artifact' }, { key: 'health', kind: 'number', about: 'How the team is doing' }]);
+    const both = answerOf({ result: await call(scope, GLEAN, 'chat', { message: `Our artifacts?\n\n${mixed}`, _user_goal: 'x' }) }).values.json;
+    assert.deepEqual(both, { top: linkOf(newest[2]), health: { value: 'On track', note: 'Two open risks, neither blocking' } }, "other boxes get the demo model's made-up values");
+    const listed = answerText((await call(scope, GLEAN, 'chat', { message: 'What artifacts has my team made lately?', _user_goal: 'x' })).content[0].text);
+    assert.match(listed, /^Here is what Developer Experience, the demo's made-up team, made most recently, newest first:\n\n- \[Build health\]\(https:\/\/app\.glean\.com\/library\/4f8c2a19d7e64b0f9a3c5e7b1d2f6a80\): /);
+    assert.equal(listed.split('\n- ').length - 1, 6);
+    const hello = answerText((await call(scope, GLEAN, 'chat', { message: 'hello', context: ['User: hi'], _user_goal: 'x' })).content[0].text);
+    assert.equal(hello, 'You said: hello (1 earlier message came with it.)');
 });

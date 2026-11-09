@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Developer Experience · Example Co</title>
+<!-- An example of a page with an app in it: a made-up team's home page on a made-up intranet,
+     with the Team artifacts example embedded by its embed code (Share › Copy embed code), an
+     iframe of MCP Browser Client with the app in its address. The client is the one this page is
+     beside (../), so the page works wherever the client is served. scripts/example-page.mjs
+     writes the iframe, between the app markers, from the example as it is now. -->
+<style>
+:root { color-scheme: light; --ink: #151821; --muted: #5d6475; --line: #e2e5ee; --paper: #f5f6fa; --card: #ffffff; --brand: #343ced; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--brand); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
+.top { background: #10131c; color: #e8eaf2; }
+.top .wrap { display: flex; align-items: center; gap: 28px; height: 58px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
+.logo i { width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(135deg, #343ced, #a855f7); }
+.top nav { display: flex; gap: 22px; font-size: 14px; }
+.top nav a { color: #aab1c6; text-decoration: none; }
+.top nav a[aria-current] { color: #ffffff; font-weight: 600; }
+.search { margin-left: auto; width: 280px; padding: 7px 12px; border: 1px solid #2a3042; border-radius: 8px; background: #191d29; color: #8a91a6; font-size: 13px; }
+.hero { border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #ffffff 0%, #fbfbfe 60%, var(--paper) 100%); }
+.hero .wrap { padding-top: 30px; padding-bottom: 26px; }
+.crumbs { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.crumbs a { color: inherit; text-decoration: none; }
+.hero h1 { margin: 0; font-size: 32px; line-height: 1.15; letter-spacing: -0.025em; }
+.hero p.mission { max-width: 660px; margin: 8px 0 0; color: var(--muted); font-size: 16px; }
+.people { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 18px; }
+.faces { display: flex; }
+.face { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; color: #ffffff; font-size: 11px; font-weight: 700; }
+.faces .face { margin-left: -8px; border: 2px solid #ffffff; }
+.faces .face:first-child { margin-left: 0; }
+.people small { color: var(--muted); font-size: 13px; }
+.pill { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: #ffffff; color: var(--ink); font-size: 13px; font-weight: 600; text-decoration: none; }
+main.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; padding-top: 28px; padding-bottom: 40px; }
+.section-head h2 { margin: 0; font-size: 20px; letter-spacing: -0.015em; }
+.section-head p { margin: 4px 0 14px; color: var(--muted); }
+.embed { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #ffffff; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+.embed iframe { display: block; }
+aside { display: flex; flex-direction: column; gap: 16px; }
+.card { padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+.card h3 { margin: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.who { display: flex; align-items: center; gap: 10px; }
+.who strong { display: block; }
+.who small { color: var(--muted); font-size: 13px; }
+.card ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.card li a { text-decoration: none; }
+.card li a:hover { text-decoration: underline; }
+.team li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.team li span:last-child { margin-left: auto; color: var(--muted); font-size: 13px; }
+.team .face { width: 26px; height: 26px; font-size: 10px; }
+.note { margin: 0; color: var(--muted); font-size: 14px; }
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+footer .wrap { padding-top: 18px; padding-bottom: 28px; }
+@media (max-width: 1000px) { main.wrap { grid-template-columns: minmax(0, 1fr); } .search { display: none; } }
+@media (max-width: 640px) { .wrap { padding: 0 16px; } .top nav { display: none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="logo"><i aria-hidden="true"></i>Example Co</span>
+    <nav aria-label="Intranet">
+      <a href="#">Home</a>
+      <a href="#" aria-current="page">Teams</a>
+      <a href="#">Docs</a>
+      <a href="#">Help</a>
+    </nav>
+    <span class="search" aria-hidden="true">Search Example Co…</span>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="#">Teams</a> › Engineering</p>
+    <h1>Developer Experience</h1>
+    <p class="mission">We build the paved road: the CLI, CI and the golden paths that get an idea to production without a ticket.</p>
+    <div class="people">
+      <span class="faces" aria-hidden="true">
+        <span class="face" style="background: hsl(18 62% 42%)">MH</span>
+        <span class="face" style="background: hsl(208 62% 42%)">GH</span>
+        <span class="face" style="background: hsl(152 62% 36%)">BL</span>
+        <span class="face" style="background: hsl(268 52% 46%)">KT</span>
+        <span class="face" style="background: hsl(338 58% 44%)">FA</span>
+        <span class="face" style="background: hsl(42 70% 38%)">AK</span>
+      </span>
+      <small>6 people · Engineering</small>
+      <a class="pill" href="#">Join #devex</a>
+    </div>
+  </div>
+</section>
+
+<main class="wrap">
+  <section aria-labelledby="built">
+    <div class="section-head">
+      <h2 id="built">What we've been building</h2>
+      <p>Our six newest papers and pages in Glean, as we make them: dashboards, plans, reviews and guides. Previous and Next go through them, and each has its link in Glean.</p>
+    </div>
+    <div class="embed">
+      <!-- app -->
+      <iframe src="../?embed#run=1ZfbbuM2EIbv8xRT3qQtbKnxCcWupEW6xRYL9LDAbi-KoggYaWyxoUiWpCJ7jQB9mj5Yn6QgaTtWHDmG0SRIbiKZnOHM_41s_cmbecXhGrVhUqTkLPqGAIpcFkzMUvLrp3f9b8mb7CT5ot-HcwFUKbisGbfABPz09gN8p2VjUMNbzlDYCBKTa0SRATPQlNSCQqk4gkEEKgpIplw2WVgqqVIozAm4v6ZEAbbEBdQGgdlXgDQvIXGfZ5BTzg1QsFLynk_ErIHEukUDqrYuFKgwDWqQPhGESqKQfrn8q0ZjmRQ3N6526lNuqrzdf2pgvROQY4XCQil5YV7Dcmlxbtfx4XBgq_pdBrccLqTkoNHWWmARwftKSR1Wos9M9UBqsCUzMGUce1CLAjWcK2XAStC1cOt5ScXMCRFBv5-dJE75ouIpGRBgRUos0qpPtWVTmlvTxzmtFEcCglaYkk9IK9iskuwEICnQ5Jop11l2DjnVsjbIQU5hIWsNLuGpAcPmILBBY0FRhdp4tRWdoXF9_8CRiij8OzWuSguK5VfGdVcBNQGEUiAd28BKIy0uCpnXXk13ZwJdJqz0JA1nBUZJvF2jqzkwCSPXn2pZpSSXlZIChTUEDPuMKWlYgb5FgMQyyzEI5K5I1lYiif3Hq82ytm503G5jqa0NAU4vkafknZZVaJKA4jRHNwKoU3JurpiYhSWYSt2l3ebEf__-h8Sr81bd-PNcw2eb884chsmqiXZlhcx39rVrem_BlLIxUKJGkCLHVX0lNR4OusclIn6XT-hBrMsCSC5ra2UoTGm8vj3vg8ZrJp0wM7kqekKgYYUtU2JLpoutLFtFcyaubrP8olzXdjM_O_UbcAFbXUR3Dsk-leumfmSXmupFiJBTP29B9CQOFdzXlsC5vS3oZ5zbrZYG97eUxKsvs_vpDTbpBnvp7ex7ZHqDffTODqU3eDp6BnMpigMhDrogDo-CONykG-6FuLPvkSEO90HsmNddiMOng-g3Hchw2MVwdBTD0SbdaC_DnX2PzHC0j2HHuO4yHD0dw6mstS0PhDjqgjg-CuJ4k268F-LOvkeGON4HsWNedyGOnxAimx7McNzFsONH_gGGk026yV6GO_semeFkH8OOcd1lOHnCX0Q2P5jhpIthx0_9NsPWtUHtfOCarb-DWvOUlNYq8yqOZ_7lv8BKRkxcU86KuMrV2nOEdr50y1-Fw5J4K2dwfiG5N3t4jcKmxPmE20HxrixEPXyus1kpcR5kkwAgoXq2qqhCY-gMCWjJ0Y2CrJQl2UekOi9X8rvx6kHDbOl8n17A1z1vXzYv8D2QjUAN1cJ6KyEKMFLbi8vFhcYcRb4IJoczY6Fa7PMC0JTSINiFQuc8vb9yXq-0Fe-td0-ZNjaC76U4DV7JO6vXIAVfuEum_agYoNq9-GKBRZTEVM_uleCiNqgvZpJykn0sZbNV4d3qWkmS2JHY3DmvC2yaEnlFvGtbv-Jny-WfRorI393cJLF3xQ-EDVphg0PDhq2w4aFho1bY6NCwcStsfGjYpBU2OSRs5T2z3w6z4XcmpSs_ai313SOWS_9xu6okbm6v_9dHs2X8739Ga80N8Y9ESpxsJPudLJercSJ_PMdke8edLZfrwrsZtjReh70chQfPqPDgOIUHL0vh4TMqPDxO4eHLUnj0jAqPjlN49LIUHj-jwuPjFB6_LIUnz6jw5DiFJw8qnMThhT-JqVLZyX8" title="Team artifacts" width="100%" height="860" style="border: 0"></iframe>
+      <!-- /app -->
+    </div>
+  </section>
+
+  <aside>
+    <section class="card" aria-labelledby="oncall">
+      <h3 id="oncall">On call this week</h3>
+      <div class="who">
+        <span class="face" style="background: hsl(268 52% 46%)" aria-hidden="true">KT</span>
+        <span><strong>Ken Thompson</strong><small>Until Monday, 9:00 · #devex-oncall</small></span>
+      </div>
+    </section>
+    <section class="card" aria-labelledby="start">
+      <h3 id="start">Start here</h3>
+      <ul>
+        <li><a href="#">Start a new service on the golden path</a></li>
+        <li><a href="#">Ask for more CI runners</a></li>
+        <li><a href="#">Report a flaky test</a></li>
+        <li><a href="#">Ask us anything in #devex</a></li>
+      </ul>
+    </section>
+    <section class="card" aria-labelledby="hours">
+      <h3 id="hours">Office hours</h3>
+      <p class="note">Thursdays, 2:00 to 3:00 pm, in Lovelace or on video. Bring a build that's slow and we'll make it fast.</p>
+    </section>
+    <section class="card team" aria-labelledby="people">
+      <h3 id="people">The team</h3>
+      <ul>
+        <li><span class="face" style="background: hsl(18 62% 42%)" aria-hidden="true">MH</span><span>Margaret Hamilton</span><span>Lead</span></li>
+        <li><span class="face" style="background: hsl(208 62% 42%)" aria-hidden="true">GH</span><span>Grace Hopper</span><span>Platform</span></li>
+        <li><span class="face" style="background: hsl(152 62% 36%)" aria-hidden="true">BL</span><span>Barbara Liskov</span><span>CLI</span></li>
+        <li><span class="face" style="background: hsl(268 52% 46%)" aria-hidden="true">KT</span><span>Ken Thompson</span><span>CI</span></li>
+        <li><span class="face" style="background: hsl(338 58% 44%)" aria-hidden="true">FA</span><span>Frances Allen</span><span>Reliability</span></li>
+        <li><span class="face" style="background: hsl(42 70% 38%)" aria-hidden="true">AK</span><span>Alan Kay</span><span>Testing</span></li>
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  <div class="wrap">
+    An example page: Example Co, its team and their artifacts are made up. “What we've been building” is the Team artifacts app from MCP Browser Client, embedded with its embed code. It calls Glean (demo), built into the client, which has the made-up team's artifacts; made in the client with your Glean added, the app calls yours.
+  </div>
+</footer>
+</body>
+</html>

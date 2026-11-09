@@ -95,12 +95,19 @@ export function wiresOf(flow, elementIds = []) {
     return wires;
 }
 
+// Whether a field, by its JSON Schema, takes a list of text.
+export function takesTextList(property) {
+    return [property?.type].flat().includes('array') && [property?.items?.type ?? 'string'].flat().includes('string');
+}
+
 // The flow with a wire between two ports: { flow, made }, where `made` says which part of which
 // rule the wire is ({ kind: 'trigger' | 'arg' | 'route', ruleId, index | arg }), or that the rule
 // already had it ({ kind: 'already' }). `kindOf(id)` is an element's kind, for its trigger's event,
-// and `defaultShow({ element, phase, rule })` what a new route shows (else DEFAULT_SHOW's).
+// `defaultShow({ element, phase, rule })` what a new route shows (else DEFAULT_SHOW's), and
+// `listOf({ rule, arg, element })` whether the field takes a list of text, such as Glean
+// read_document's urls, which gets the element's value as its one item.
 // Throws a FlowError saying why when the ports don't join.
-export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () => null } = {}) {
+export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () => null, listOf = () => false } = {}) {
     const pair = pairOf(a, b);
     if (pair === 'el+el' || !canConnect(a, b, { kindOf })) throw new FlowError(whyNot(pair, elementKinds(a, b, kindOf)));
     const ports = [parsePort(a), parsePort(b)];
@@ -120,7 +127,8 @@ export function connect(flow, a, b, { kindOf = () => 'static', defaultShow = () 
         if (pair === 'arg+el') {
             const { arg } = port('arg');
             made = { kind: 'arg', ruleId, arg };
-            return { ...rule, call: { ...rule.call, args: { ...(rule.call?.args || {}), [arg]: `{{${element}}}` } } };
+            const value = `{{${element}}}`;
+            return { ...rule, call: { ...rule.call, args: { ...(rule.call?.args || {}), [arg]: listOf({ rule, arg, element }) ? [value] : value } } };
         }
         const phase = PHASE_OF[ports.find(candidate => candidate.kind !== 'el').kind];
         const then = rule.then || [];
@@ -139,7 +147,8 @@ function withoutName(value, name) {
         const left = value.replace(new RegExp(`\\{\\{\\s*${name.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\s*\\}\\}`, 'g'), '');
         return left.trim() ? left : '';
     }
-    if (Array.isArray(value)) return value.map(item => withoutName(item, name));
+    // An item of a list that held only the element's value goes with it.
+    if (Array.isArray(value)) return value.map(item => withoutName(item, name)).filter((left, index) => left !== '' || value[index] === '');
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withoutName(item, name)]));
     return value;
 }
@@ -153,7 +162,8 @@ export function disconnect(flow, wire, { required = [] } = {}) {
         if (wire.kind === 'arg') {
             const args = { ...(rule.call?.args || {}) };
             const left = withoutName(args[wire.arg], wire.element);
-            if (left === '' && !required.includes(wire.arg)) delete args[wire.arg];
+            const empty = left === '' || (Array.isArray(left) && !left.length);
+            if (empty && !required.includes(wire.arg)) delete args[wire.arg];
             else args[wire.arg] = left;
             return { ...rule, call: { ...rule.call, args } };
         }

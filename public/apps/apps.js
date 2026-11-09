@@ -191,12 +191,14 @@ export function modelOf(server, tool) {
 }
 
 // The model, unless you choose another: Glean's chat if you've added Glean, else a server's chat
-// tool, else the demo model's, a stand-in. Null when no server has one.
+// tool, else the demo model's, a stand-in, before another demo server's chat. Null when no server
+// has one.
 export function foundModel(servers) {
     const list = Object.values(servers || {});
     const chatOf = server => (server.tools || []).find(tool => tool.name === 'chat');
     const real = list.filter(server => !demoServerAt(server.url));
-    const server = real.find(candidate => isGlean(candidate) && chatOf(candidate)) || real.find(chatOf) || list.find(chatOf);
+    const server = real.find(candidate => isGlean(candidate) && chatOf(candidate)) || real.find(chatOf)
+        || list.find(candidate => candidate.url === DEMO_SERVERS.model.url && chatOf(candidate)) || list.find(chatOf);
     return server ? modelOf(server, chatOf(server)) : null;
 }
 
@@ -342,13 +344,72 @@ export function frontDeskApp({ name }) {
     return newApp({ name, screen: { kind: 'components', components }, flow: [find, checkIn, desk] });
 }
 
+// The Glean an example calls: yours, if you've added it (one with chat and read_document, or one
+// whose tools aren't listed yet because it isn't connected), else Glean (demo), a stand-in.
+export function gleanFor(servers = {}) {
+    const yours = Object.values(servers || {}).filter(isGlean);
+    const has = server => ['chat', 'read_document'].every(name => (server.tools || []).some(tool => tool.name === name));
+    return (yours.find(has) || yours.find(server => !server.tools?.length))?.url || DEMO_SERVERS.glean.url;
+}
+
+// How many of the team's newest artifacts the carousel goes through, and how its boxes ask for each.
+const ARTIFACTS_SHOWN = 6;
+const NEWEST = ['newest', 'second newest', 'third newest', 'fourth newest', 'fifth newest', 'sixth newest'];
+const ARTIFACTS_ASKED = "Search Glean once, with query *, app artifacts, owner myteam and sort_by_recency, and list my team's six newest artifacts whose type is paper or html, newest first. Don't read them; only their links are needed.";
+const ARTIFACTS_GOAL = "Show my team's newest artifacts";
+
+// The Team artifacts example: a carousel of the six newest artifacts your team made in Glean, to
+// put in other pages. Each is a screen, a slide, with its document box, the link to it in Glean,
+// and Previous and Next, which go round. As it opens, Glean's chat picks the six, filling the
+// link boxes, which each ask for one; then read_document reads each link into its slide's box,
+// which shows a paper as a page and runs an HTML page or web app in a frame of its own. Each
+// rule runs after the one before it, so the reads have the links. It calls your Glean if you've
+// added it, else Glean (demo), which has the same tools, over a made-up team's.
+export function teamArtifactsApp({ shell, name }) {
+    const glean = gleanFor(shell?.servers);
+    const add = (type, props) => newComponent(type, [], props);
+    const slides = Array.from({ length: ARTIFACTS_SHOWN }, (_, index) => index + 1);
+    const slide = n => `slide${((n - 1 + ARTIFACTS_SHOWN) % ARTIFACTS_SHOWN) + 1}`;
+    const components = [
+        add('title', { id: 'title', text: name }),
+        add('output', { id: 'status', label: 'From Glean', placeholder: "Asking Glean for your team's six newest artifacts…" }),
+        ...slides.flatMap(n => [
+            add('screen', { id: `slide${n}`, label: `${n} of ${ARTIFACTS_SHOWN}` }),
+            add('output', { id: `doc${n}`, label: `${n} of ${ARTIFACTS_SHOWN}`, show: 'document', width: 'full', placeholder: 'It shows here once Glean has picked it.' }),
+            add('button', { id: `prev${n}`, label: 'Previous', width: 'third', go: slide(n - 1) }),
+            add('output', { id: `link${n}`, label: 'Open it in Glean', about: `The Glean Library link of the ${NEWEST[n - 1]}`, width: 'third', placeholder: 'Its link shows here.' }),
+            add('button', { id: `next${n}`, label: 'Next', width: 'third', go: slide(n + 1) }),
+        ]),
+    ];
+    const pick = {
+        ...newRule({ event: 'open', serverUrl: glean, toolName: 'chat', args: { message: ARTIFACTS_ASKED, _user_goal: ARTIFACTS_GOAL }, into: null, prompt: 'message' }),
+        then: [
+            ...slides.map(n => ({ if: 'ok', show: `{{json.link${n}}}`, into: `link${n}`, how: 'replace' })),
+            { if: 'ok', show: "Your team's six newest papers and pages, newest first.", into: 'status', how: 'replace' },
+            { if: 'error', show: '{{error}}', into: 'status', how: 'replace' },
+        ],
+    };
+    const reads = slides.map(n => ({
+        ...newRule({ event: 'open', serverUrl: glean, toolName: 'read_document', args: { urls: [`{{link${n}}}`], _user_goal: ARTIFACTS_GOAL }, into: null }),
+        then: [
+            { if: 'ok', show: '{{document}}', into: `doc${n}`, how: 'replace' },
+            { if: 'error', show: '{{error}}', into: `doc${n}`, how: 'replace' },
+        ],
+    }));
+    return {
+        ...newApp({ name, screen: { kind: 'components', size: 'wide', components }, flow: [pick, ...reads] }),
+        description: "A carousel of your team's six newest papers and pages in Glean. Glean's chat picks them as the app opens, and read_document reads each into its slide.",
+    };
+}
+
 // What create() starts from: the examples, and a blank app. Each with the name its app gets, what
-// it is in a few words (`kind`) and in a sentence (`about`), the demo servers it calls
-// (`servers`), and whether it calls the model (`model`), the demo model when there's no other.
+// it is in a few words (`kind`) and in a sentence (`about`), and whether it calls the model
+// (`model`), the demo model when there's no other.
 export const EXAMPLES = {
     chat: { name: 'Chat', make: chatApp, kind: 'agent loop', model: true, about: "A conversation with a model, which can call your servers' tools" },
     dashboard: { name: 'Project pulse', make: dashboardApp, kind: 'dashboard', model: true, about: 'A dashboard whose boxes each ask the model for their piece of one answer' },
-    frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', servers: ['frontdesk'], about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, on a demo server of its own" },
+    frontdesk: { name: 'Front desk', make: frontDeskApp, kind: 'screens', about: "A visitor kiosk over four screens: it finds today's visit, asks if it's you and checks you in, on a demo server of its own" },
+    artifacts: { name: 'Team artifacts', make: teamArtifactsApp, kind: 'carousel', about: "A carousel of your team's newest Glean artifacts, to embed in other pages: a paper shows as a page, and an HTML page runs in a frame of its own. It calls your Glean, or Glean (demo) until you add yours" },
     blank: { name: 'New app', make: starterApp, kind: 'blank', about: 'A text box, a button and an output, wired to a tool' },
 };
 
@@ -716,9 +777,15 @@ export class Apps {
         return !openRules(app).length || this.runOnOpen(app?.id) === 'yes';
     }
 
-    // What the app calls as it opens, in words: "chat on Glean and search on Glean".
+    // What the app calls as it opens, in words, each tool once with the server it's on: "chat and
+    // read_document on Glean".
     openCallsText(app = this.app) {
-        return listed(openRules(app).map(rule => `${rule.call?.toolName || 'a tool'} on ${this.serverName(rule.call?.serverUrl, app)}`));
+        const tools = new Map();
+        for (const rule of openRules(app)) {
+            const server = this.serverName(rule.call?.serverUrl, app);
+            tools.set(server, new Set([...(tools.get(server) || []), rule.call?.toolName || 'a tool']));
+        }
+        return listed([...tools].map(([server, names]) => `${listed([...names])} on ${server}`));
     }
 
     // What What happened says when the app opened without running what Start calls.
@@ -968,15 +1035,17 @@ export class Apps {
         return EXAMPLES[example] && example !== 'blank' ? { ...app, example } : app;
     }
 
-    // A new app from an example: `chat`, `dashboard`, `frontdesk`, or `blank` (a text box, a
-    // button and an output). Chat and the dashboard call the model, the demo model when you have
-    // none; Front desk calls its demo server. Both are added for it. `runOnOpen` answers, for an
-    // app that calls tools as it opens, whether opening it runs them.
+    // A new app from an example (EXAMPLES), or `blank` (a text box, a button and an output). Chat
+    // and Project pulse call the model, the demo model when you have none; Front desk calls its
+    // demo server, and Team artifacts your Glean, or Glean (demo) when you have none. The demo
+    // servers it calls are added for it. `runOnOpen` answers, for an app that calls tools as it
+    // opens, whether opening it runs them.
     async create(example = 'blank', { runOnOpen = null } = {}) {
-        const { servers = [], model: callsModel = false } = EXAMPLES[example] || EXAMPLES.blank;
         const app = this.exampleApp(example);
-        servers.forEach(id => this.addDemoServer(id));
-        if (callsModel && !this.model()) this.addDemoServer('model');
+        for (const url of serversOf(app)) {
+            const demo = demoServerAt(url);
+            if (demo) this.addDemoServer(demo.id);
+        }
         if (runOnOpen) this.setRunOnOpen(runOnOpen, app.id);
         await store.saveApp(app);
         this.list.push(app);

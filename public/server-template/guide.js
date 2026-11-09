@@ -2,7 +2,7 @@
 // the Markdown on GitHub are always the same guide; adds contents, Copy buttons and the theme
 // toggle; and shows the files the guide links to (example.json, the examples) in a side viewer.
 
-import { escapeHtml, renderMarkdown } from './markdown.js';
+import { escapeHtml, renderMarkdown } from '../markdown.js';
 
 const REPO = 'https://github.com/patrick-glean/mcp-browswer-client';
 // Where README.md is in the repo, to resolve its relative links.

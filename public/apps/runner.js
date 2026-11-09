@@ -15,18 +15,28 @@
 // `screen` says which of the app's screens shows, after a button (`button`) or the page went
 // there, and `restart` is a button that starts the app over, which the page does by loading it
 // again.
+//
+// A whole HTML page in a document box (show with how 'artifact'), such as a Glean artifact, runs
+// in a frame of its own inside the screen: artifact.html, sandboxed with an opaque origin, which
+// takes the page in one message and lets its scripts run and load from https addresses, but not
+// reach the network (fetch, WebSockets), storage or this page. Its only message is open { url },
+// for a link, which the screen passes on as its own.
 
 import { schemaOf, serverLabel } from '../workbench/util.js';
 import { allowedCall, composePrompt, serverWithTool, toolCallsIn } from './agent.js';
-import { asksOf, BOX_KINDS, CONVERSATION_ROLES, formatRequest, isBox, isConversation, renderBox, ROUTE_ROLES } from './boxes.js';
+import { asksOf, BOX_KINDS, CONVERSATION_ROLES, formatRequest, isBox, isConversation, isHtmlDocument, renderBox, ROUTE_ROLES } from './boxes.js';
 import {
     answerOf, callArguments, displayValue, frameConfig, listed, renderTemplate, routeWhen, rulesFor, templateValue, triggerIndex, triggersOf,
 } from './flow.js';
 import { elementsOf, screenHtml } from './screen.js';
 
+// The page a document box runs an HTML page in.
+export const ARTIFACT_PAGE = new URL('./artifact.html', import.meta.url).href;
+
 // The screen's runtime. It's injected into the frame as source, so it may use nothing from outside;
-// `roles` names who each entry of a conversation is from, as its value says.
-export function frameRuntime({ config, token, roles = {} }) {
+// `roles` names who each entry of a conversation is from, as its value says, and `artifact` is the
+// page whole HTML documents run in (ARTIFACT_PAGE).
+export function frameRuntime({ config, token, roles = {}, artifact = '' }) {
     let { watch, read, track = [] } = config;
     const send = message => parent.postMessage({ ...message, token }, '*');
     const byId = id => document.getElementById(id);
@@ -169,6 +179,19 @@ export function frameRuntime({ config, token, roles = {} }) {
         }
         return nodes;
     };
+    // A whole HTML page, in a frame of its own: the artifact page, which takes it once loaded.
+    const artifacts = new WeakSet();
+    const runPage = (html, element) => {
+        const frame = document.createElement('iframe');
+        frame.className = 'artifact-frame';
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.referrerPolicy = 'no-referrer';
+        frame.title = element.getAttribute('aria-label') || 'Document';
+        frame.addEventListener('load', () => frame.contentWindow?.postMessage({ type: 'artifact', html }, '*'), { once: true });
+        frame.src = artifact;
+        artifacts.add(frame);
+        element.replaceChildren(frame);
+    };
     const show = ({ element: id, value, how, failed, role }) => {
         const element = byId(id);
         if (!element) return;
@@ -176,6 +199,8 @@ export function frameRuntime({ config, token, roles = {} }) {
             element.value = how === 'append' && element.value ? `${element.value}\n${value}` : value;
         } else if (how === 'html') {
             element.replaceChildren(...fragment(value, element));
+        } else if (how === 'artifact' && artifact) {
+            runPage(value, element);
         } else if (how === 'append') {
             const entry = document.createElement('div');
             entry.className = 'entry';
@@ -212,6 +237,12 @@ export function frameRuntime({ config, token, roles = {} }) {
         highlighted[0]?.scrollIntoView({ block: 'nearest' });
     };
     window.addEventListener('message', event => {
+        // An artifact frame's link, which the page opens as the screen's own.
+        const fromArtifact = [...document.querySelectorAll('iframe.artifact-frame')].some(frame => artifacts.has(frame) && frame.contentWindow === event.source);
+        if (fromArtifact) {
+            if (event.data?.type === 'open' && typeof event.data.url === 'string') send({ type: 'open', url: event.data.url });
+            return;
+        }
         if (event.source !== parent || event.data?.token !== token) return;
         const message = event.data;
         if (message.type === 'config') {
@@ -239,24 +270,26 @@ const scriptJson = value => JSON.stringify(value).replace(/</g, '\\u003c').repla
 
 // The frame's document: the screen's HTML without its scripts, under a policy that lets nothing
 // load from the network and only the runtime run. With `screen`, it shows that one of the app's
-// screens from the start.
-export function frameDocument(html, { config, token, screen = null }) {
+// screens from the start. With `artifact` (ARTIFACT_PAGE), whole HTML pages run in frames of that
+// page, the one frame the policy lets it load.
+export function frameDocument(html, { config, token, screen = null, artifact = '' }) {
     const nonce = randomToken();
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
     doc.querySelectorAll('script, base, meta[http-equiv]').forEach(node => node.remove());
     if (screen && doc.getElementById(screen)?.hasAttribute('data-screen')) {
         doc.querySelectorAll('[data-screen]').forEach(section => { section.hidden = section.id !== screen; });
     }
+    const page = /^https?:\/\/[^\s;,']+$/.test(artifact) ? artifact : '';
     const policy = doc.createElement('meta');
     policy.httpEquiv = 'Content-Security-Policy';
-    policy.content = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'`;
+    policy.content = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; ${page ? `frame-src ${page}; ` : ''}form-action 'none'; base-uri 'none'`;
     doc.head.prepend(policy);
     const style = doc.createElement('style');
     style.textContent = FRAME_CSS;
     doc.head.append(style);
     const script = doc.createElement('script');
     script.setAttribute('nonce', nonce);
-    script.textContent = `(${frameRuntime.toString()})(${scriptJson({ config, token, roles: CONVERSATION_ROLES })});`;
+    script.textContent = `(${frameRuntime.toString()})(${scriptJson({ config, token, roles: CONVERSATION_ROLES, artifact: page })});`;
     doc.body.append(script);
     return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
 }
@@ -355,7 +388,7 @@ export class AppRunner {
         const elements = elementsOf(app.screen);
         this.screenAfterLoad = !start && elements.some(element => element.id === screen && element.kind === 'screen') ? screen : null;
         this.elementIds = elements.map(element => element.id);
-        showDocument(frame, frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token, screen: this.screenAfterLoad }));
+        showDocument(frame, frameDocument(screenHtml(app), { config: frameConfig(app.flow, this.elementIds), token: this.token, screen: this.screenAfterLoad, artifact: ARTIFACT_PAGE }));
     }
 
     // Shows one of the app's screens, as a button that goes there would.
@@ -602,6 +635,12 @@ export class AppRunner {
             }
             if (answer.ok && isBox(box) && route.how !== 'append') {
                 const value = templateValue(route.show, values);
+                if (box.show === 'document' && isHtmlDocument(value)) {
+                    this.post({ type: 'show', element: route.into, value, how: 'artifact' });
+                    screen[route.into] = '';
+                    this.trace({ kind: 'route', text: `Put an HTML page into ${route.into}, which runs in a frame of its own` });
+                    continue;
+                }
                 const { html, problem } = renderBox(box.show, value);
                 this.post({ type: 'show', element: route.into, value: html, how: 'html', failed: !!problem });
                 screen[route.into] = displayValue(value);

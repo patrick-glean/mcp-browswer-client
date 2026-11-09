@@ -5,7 +5,7 @@
 import { hunks, lineDiff } from '../diff.js';
 import { comparedValue, normalize } from '../runs.js';
 import * as store from '../store.js';
-import { escapeHtml, formatMs, plural, SOURCE_LABELS, timeAgo, verdictChip, verdictOf } from '../util.js';
+import { base64Text, escapeHtml, formatMs, isTextType, plural, SOURCE_LABELS, timeAgo, verdictChip, verdictOf } from '../util.js';
 import { WbElement } from './base.js';
 
 const TABS = [['result', 'Result'], ['changes', 'Changes'], ['json', 'JSON'], ['sent', 'Sent'], ['runs', 'Runs']];
@@ -28,6 +28,35 @@ function dataUri(item, kind) {
 }
 
 const safeLink = uri => (/^https?:\/\//i.test(uri || '') ? uri : null);
+const fileName = uri => String(uri || 'resource').split(/[/:]/).filter(Boolean).pop() || 'resource';
+
+function textHtml(text, mime) {
+    const trimmed = text.trim();
+    if (/json/i.test(mime) || /^[[{]/.test(trimmed)) {
+        try {
+            return `<pre class="wb-content-json">${escapeHtml(JSON.stringify(JSON.parse(trimmed), null, 2))}</pre>`;
+        } catch { /* not JSON after all */ }
+    }
+    return `<div class="wb-content-text">${escapeHtml(text)}</div>`;
+}
+
+// What a resource holds, as a read returns it and a tool result embeds it: its text, with JSON
+// indented, or its binary data, to download, shown when it's an image or audio and as text when
+// its type is text.
+export function resourceBodyHtml(item) {
+    const mime = String(item?.mimeType || '');
+    if (typeof item?.text === 'string') return textHtml(item.text, mime);
+    if (typeof item?.blob !== 'string' || !BASE64.test(item.blob)) return `<pre class="wb-content-json">${escapeHtml(JSON.stringify(item, null, 2))}</pre>`;
+    const data = item.blob.replace(/\s+/g, '');
+    const bytes = Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+    const src = `data:${mime || 'application/octet-stream'};base64,${data}`;
+    const text = isTextType(mime) ? base64Text(data) : null;
+    let preview = '';
+    if (text !== null) preview = textHtml(text, mime);
+    else if (mime.startsWith('image/')) preview = `<img class="wb-content-image" src="${escapeHtml(src)}" alt="${escapeHtml(item.uri || 'Image')}">`;
+    else if (mime.startsWith('audio/')) preview = `<audio class="wb-content-audio" controls src="${escapeHtml(src)}"></audio>`;
+    return `${preview}<p class="text-secondary">${plural(bytes, 'byte')} of ${escapeHtml(mime || 'binary data')} · <a href="${escapeHtml(src)}" download="${escapeHtml(fileName(item.uri))}">Download</a></p>`;
+}
 
 // One content block of a tool result or a prompt message. Text that is JSON is shown indented.
 export function contentHtml(item) {
@@ -54,11 +83,9 @@ export function contentHtml(item) {
         return `<div class="wb-content-link"><span class="badge">link</span> ${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span class="mono">${label}</span>`}${item.description ? ` <span class="text-secondary">${escapeHtml(item.description)}</span>` : ''}</div>`;
     }
     if (item?.type === 'resource' && item.resource) {
-        const resource = item.resource;
-        const body = typeof resource.text === 'string'
-            ? `<pre class="wb-content-json">${escapeHtml(resource.text)}</pre>`
-            : `<p class="text-secondary">${escapeHtml(resource.mimeType || 'Binary')} content, not shown.</p>`;
-        return `<div class="wb-content-resource"><span class="badge">resource</span> <span class="mono">${escapeHtml(resource.uri || '')}</span>${body}</div>`;
+        const { uri, mimeType } = item.resource;
+        const head = `<div class="wb-content-head"><span class="badge">resource</span> <span class="mono">${escapeHtml(uri || '')}</span>${mimeType ? `<span class="badge">${escapeHtml(mimeType)}</span>` : ''}</div>`;
+        return `<div class="wb-content-resource">${head}${resourceBodyHtml(item.resource)}</div>`;
     }
     return `<div class="tool-content-unknown"><span class="text-secondary">Content this client doesn't show yet:</span><pre class="wb-content-json">${escapeHtml(JSON.stringify(item, null, 2))}</pre></div>`;
 }

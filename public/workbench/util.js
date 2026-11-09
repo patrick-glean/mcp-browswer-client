@@ -48,6 +48,19 @@ export function download(filename, text, type = 'application/json') {
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+// Whether content of a MIME type is text: text/*, and JSON, XML and YAML however they're named.
+export const isTextType = mime => /^text\/|^application\/(?:json|xml|yaml|x-yaml|javascript)\b|\+(?:json|xml|yaml)\b/i.test(String(mime || ''));
+
+// The text a base64 blob holds, read as UTF-8; null when it isn't base64 of UTF-8 text.
+export function base64Text(data) {
+    try {
+        const binary = atob(String(data).replace(/\s+/g, ''));
+        return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(binary, char => char.charCodeAt(0)));
+    } catch {
+        return null;
+    }
+}
+
 // The name the person gave the server, else the title it gave itself, else its name, else its host.
 export function serverLabel(server, url = server?.url) {
     const label = [server?.alias, server?.serverInfo?.title, server?.name].find(text => typeof text === 'string' && text.trim());

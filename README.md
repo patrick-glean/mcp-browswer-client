@@ -169,6 +169,23 @@ To build one:
 
 In the Inspector, a screen has its name, what's on it and how people get there (the buttons and rules that go there). Move up and Move down move it with what's on it, and Delete takes that along too, on a second click. The Outline shows each screen with what's on it set in under it, and Preview's bar names the screen showing.
 
+### A carousel to embed: your team's Glean artifacts
+
+Glean artifacts (the papers, pages and dashboards people make in Glean) open in Glean, and are hard to show anywhere else. Choose **Team artifacts** under Examples for an app that shows them in other pages: a carousel of your team's six newest papers and pages, to embed with Share's embed code. [`examples/team-home.html`](https://patrick-glean.github.io/mcp-browswer-client/examples/team-home.html) is a made-up team's home page with it embedded.
+
+It has six screens, a slide on each: the artifact in a **document box** as wide as the screen, and under it Previous, its link in Glean, and Next. Previous and Next go round, so Previous on the first goes to the sixth. The title, and a line that says how the asking went, are above the first screen, so they show on every slide.
+
+Its seven rules call your Glean's MCP server, the one you added from the Guide, when the app opens:
+
+1. **`chat` picks the six.** Its message asks Glean to search once for the team's newest artifacts that are papers or pages. Each slide's link box says what goes in it ("The Glean Library link of the second newest"), so the call asks for one JSON object with a key for each box, and each box takes its own.
+2. **`read_document` reads each one** (`urls: ["{{link1}}"]`, and so on) into its slide's document box, which shows the document as it comes (`{{document}}`). A paper's Markdown shows as a page, with its headings, lists, tables, task lists, code and links. A page's HTML runs in a frame of its own: a whole web app, scripts and all.
+
+The rules run in order, each waiting for the one before, so the reads have the links chat picked. If chat fails, the line under the title says why, and each slide says what `read_document` said.
+
+**An HTML page runs on its own.** Its frame is inside the screen's, sandboxed with scripts allowed and nothing else, so its origin is opaque and it never reaches the app, the client, its storage or anyone's sign-in. It may load scripts, styles, fonts, pictures and media from https addresses, as artifacts' charts do. It can't fetch, open sockets, submit forms, frame other pages or start workers. Its storage lasts as long as it does, and it has no cookies. Its links open in a new tab through the app, and links to its own sections (`#…`) stay in it.
+
+Until you add Glean, it calls **Glean (demo)**, built in: a stand-in with Glean's `search`, `read_document` and `chat`, answering in Glean's shapes, over a made-up team's artifacts (two dashboards, a roadmap, release notes, an incident review, a forecast, a handbook and a guide). Creating the app adds Glean (demo) only when it calls it. With your Glean added, it calls yours. An embed calls it from the client's address, which Glean has to allow (see [Glean](#glean)). In a page at the client's own address, as the example page is, the embed has your servers and sign-ins. In a page on another site, it has none, so its bar says to open the app on its own to sign in.
+
 ### Demo servers built in
 
 The examples come with MCP servers of their own, built into the client, so they work before you've added a server or run anything:
@@ -177,10 +194,11 @@ The examples come with MCP servers of their own, built into the client, so they 
 | --- | --- | --- |
 | Front desk (demo) | `https://frontdesk.demo.invalid/mcp` | A front desk's visitor system: `find_visit`, `check_in` and `call_front_desk` over four made-up visits today, answering as the mock server's tools do |
 | Demo model | `https://model.demo.invalid/mcp` | A stand-in for a model, `chat`: it repeats what you say, writes the tool call you ask for ("call find_visit with Ada"), fills an app's boxes with made-up data in their shapes, and writes a page when asked for HTML |
+| Glean (demo) | `https://glean.demo.invalid/mcp` | A stand-in for Glean over a made-up team's artifacts: `search` finds them, `read_document` reads them (a paper as Markdown, a page as HTML) and `chat` picks the newest, in the shapes Glean answers in |
 
 They answer inside the client's service worker. Their addresses end in `.invalid`, which no network answers, and the worker answers the requests the MCP client library sends there, so the library talks to them as it talks to any server: they connect, list their tools and answer calls in MCP 2026-07-28, or in the 2025 handshake, and every call is a run in History. Nothing leaves the browser. What they keep, such as the next badge number, lasts while the worker runs.
 
-Front desk adds its demo server when you create it. Chat and Project pulse call the model found among your servers (Glean's `chat`, else another `chat` tool) and add the demo model when there's none, so Chat's agent loop runs end to end in the page: ask the demo model to "call find_visit with Ada" and the call runs on the Front desk server. The Guide lists both servers to add, the Model picker offers the demo model, and importing an app that calls one adds it.
+Front desk adds its demo server when you create it, and Team artifacts adds Glean (demo) when you haven't added Glean. Chat and Project pulse call the model found among your servers (Glean's `chat`, else another `chat` tool) and add the demo model when there's none, so Chat's agent loop runs end to end in the page: ask the demo model to "call find_visit with Ada" and the call runs on the Front desk server. The Guide lists all three to add, the Model picker offers the demo model, and importing an app that calls one adds it.
 
 **Moving to your own server.** An app's **Servers it calls** (in the Inspector when nothing is picked, and at the top of the Outline's Flow) lists each server it calls and the tools it calls there. **Call instead** offers your servers that have those tools and take what the app sends; one that can't says what's missing ("it has no find_visit"). Choose one, and every rule's call moves there, with the calls of parts a tool made. So an app built on the Front desk demo server moves to your visitor system's server once it's connected and answers the same calls, or to the mock server, which has the same tools.
 
@@ -419,6 +437,8 @@ Only needed to change it; the deployed site needs nothing installed. Prerequisit
 - `npm run build`: Build both MCP client libraries: the TypeScript SDK one (`npm run build:sdk`) and Rust/WASM (`npm run build:wasm`), then the list of the client's files that an app's download ships (`npm run build:files`, `public/client-files.json`), which `npm run test:unit` checks is up to date
 - `npm run start:mock-mcp`: Start the mock MCP server on port 8081 (pass flags after `--`, e.g. `npm run start:mock-mcp -- --mode legacy`)
 - `npm run start:reference-mcp`: Start the official-SDK reference server on port 8082 (needs the venv)
+- `npm run start:bridge`: Start the Glean bridge on port 8095: your team's artifacts with `GLEAN_MCP_URL` and `GLEAN_API_TOKEN` set, else the demo's made-up team (see [`glean-bridge/`](glean-bridge/README.md))
+- `npm run build:example`: Write the Team artifacts example into `public/examples/team-home.html`'s iframe, as the example is now, which `npm run test:unit` checks
 - `npm run test:unit`: Check Pre-fill's test data (valid for each schema, hints first, required fields only unless asked, values and not prose from real servers' descriptions, the same every time), the URIs resource templates make, that the server template is valid MCP and follows its guide, and the app builder's DML, zips, links and flow
 - `npm run test:rust`: Run the Rust library's unit tests
 - `npm run test:browser`: Run the browser smoke test on the default library, the TypeScript SDK one (add `-- --reference` to include the Python SDK server); `npm run test:browser:wasm` runs it on the Rust/WASM library
@@ -479,6 +499,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   │                  #   they share (rule, HTML source, call, model, trace)
 │   │   ├── link.js        # An app in a link: the client's root, #run= and its DML, deflated
 │   │   ├── flow.js        # Rules: triggers, templates, call arguments, renaming, problems, sentences
+│   │   ├── toon.js        # Reads TOON, the notation Glean's MCP server lists what it found in
 │   │   ├── graph.js       # The flow as the canvas draws it: ports, wires, connecting, placing tools
 │   │   ├── storyboard.js  # The canvas's layout: screens in the order people reach them, tools beside them
 │   │   ├── boxes.js       # Boxes and conversations: what each shows, the request a rule adds to its prompt, drawing answers
@@ -486,6 +507,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   ├── screen.js      # Components to HTML, screens, parts (ids, scoped styles, sanitizing), the elements of HTML
 │   │   ├── ask.js         # Asking the model for a screen or a part, and the arguments of a call to it
 │   │   ├── runner.js      # Runs an app: the sandboxed frame's runtime and the flow in the page
+│   │   ├── artifact.html  # Where a whole HTML page in a document box runs, in a frame of its own inside the screen's
 │   │   ├── dml.js         # An app as DML (XML), read and written without a DOM
 │   │   ├── servers.js     # The servers an app calls, and moving its calls to another with the same tools
 │   │   ├── zip.js         # The download's zip: written and read, stored or deflated
@@ -494,7 +516,11 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   ├── index.js       # The catalog (addresses, names, tools) and the worker's fetch() that answers them
 │   │   ├── mcp.js         # A small MCP server: Streamable HTTP in both protocol eras, JSON replies
 │   │   ├── front-desk.js  # Front desk (demo): find_visit, check_in, call_front_desk over made-up visits
-│   │   └── demo-model.js  # The demo model: a chat tool that stands in for a model
+│   │   ├── demo-model.js  # The demo model: a chat tool that stands in for a model
+│   │   ├── glean.js       # Glean (demo): search, read_document and chat, in Glean's shapes
+│   │   └── glean-samples.js # Its made-up team's artifacts: papers in Markdown and pages in HTML
+│   ├── examples/team-home.html # A made-up team's page with the Team artifacts example embedded (npm run build:example)
+│   ├── markdown.js        # The Markdown renderer: the server guide's pages and an app's document boxes
 │   ├── sw.js              # The service worker: messages, sign-in, runs
 │   ├── mcp-clients.js     # The MCP client libraries and how to load each
 │   ├── client-runtime.js  # Keeps the chosen library loaded in the worker and forwards its logs
@@ -522,7 +548,6 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   ├── README.md      # The guide: each descriptive field, where the client shows it and what to put in it
 │   │   ├── example.json   # A well-described server's replies, by method (test_mcp_server.py --replies serves them)
 │   │   ├── index.html     # The guide as a page of the site, rendered from README.md (guide.js, guide.css)
-│   │   ├── markdown.js    # The Markdown renderer behind it
 │   │   └── examples/      # The same server on the official Go, TypeScript, Python, Rust, Java and C# SDKs
 │   ├── oauth-callback.html # Where authorization servers send the browser back after sign-in
 │   ├── client-files.json  # The client's own files, which an app's download ships (npm run build:files)
@@ -535,7 +560,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   ├── browser-smoke.mjs  # Drives the real UI in headless Chrome against test servers, on either library
 │   ├── apps.test.mjs      # The app builder's DML, zip, links, flow and screen, the examples and the agent loop
 │   ├── client-files.test.mjs # The client's files a download ships: up to date, and everything it loads
-│   ├── demo-servers.test.mjs # The demo servers built in: both protocol eras, their tools, the demo model
+│   ├── demo-servers.test.mjs # The demo servers built in: both protocol eras, their tools, the demo model, Glean (demo)
 │   ├── workbench.test.mjs # What opening a run from history fills in: as written, or as an app sent it
 │   ├── bench.mjs          # Runs the benchmark headlessly against the mock server
 │   ├── examples.mjs       # Runs each SDK example and checks it against example.json
@@ -549,6 +574,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 ├── generate-build-info.sh # Build metadata for the Rust library
 ├── deploy-gh-pages.sh     # Publishes public/ to the gh-pages branch
 ├── scripts/client-files.mjs # Writes public/client-files.json
+├── scripts/example-page.mjs # Writes the example app into public/examples/team-home.html
 └── setup.sh               # Project setup script
 ```
 
@@ -575,6 +601,7 @@ With `npm start` and `npm run start:mock-mcp` running, open http://localhost:808
 15. **Screens.** Choose Front desk under Examples, then Add a copy. It adds Front desk (demo), its server built in, which connects at once. The canvas shows its four screens as blue cards: Welcome, then Confirm and Not found, then Checked in, with arrows between them and the whole app in view, and its three tools as violet nodes beside them. find_visit's Answer says it goes to `visit` and to the screen Confirm; point at its pin and those two wires light up. Choose Run, type `ada` on Welcome's card and choose Find my visit: the app moves to Confirm's card. Drag Confirm's card by its title, then Tidy up to put it back. Choose Preview, then Tablet. Type `ada` and choose Find my visit: Confirm shows Ada Lovelace's visit at 10:00. Choose Yes, check me in, and Checked in gives a badge number (`V-1001` on the first check-in); Done starts over. Type `Bob`: Not found says there's no visit for him; Call the front desk answers there, and Try again goes back with `Bob` still typed. `Alan` matches two visits, so it asks for a full name.
 16. **Your own server instead.** With nothing picked on Front desk's canvas, the Inspector's Servers it calls lists Front desk (demo) and its three tools. Under Call instead, Mock server is offered, since it has the same tools; a server without them says so ("it has no find_visit"). Choose Mock server, and the next check-in in Preview is a run on the mock, with a badge number from the mock's own count.
 17. **Launch, a link, and asking first.** Choose Launch: Front desk opens on its own in a new tab, the whole window, with Restart and Open in the builder above it. Back in the builder, choose Copy a link that runs it in the header's ⋯, and open the link in a private window: the app runs there too, its bar offers to add Mock server and to add the app to Your apps. Choose Share, then Download embed.html, and open the file: Front desk runs in it, from the client, with Open on its own above it, and offers to add Mock server, since an embed has storage of its own. Then pick Project pulse under Your apps, pick Start on its canvas and choose Ask in the Inspector; pick Front desk and Project pulse again. It asks whether to run its call as it opens and calls nothing until you answer. Choose Don't run it, and opening it again runs nothing, which What happened says; Restart runs it. Under Your apps, ⋯ beside an app deletes it, on a second click.
+18. **A carousel in a page.** Open http://localhost:8080/examples/team-home.html. Under What we've been building, the Team artifacts app runs at once, since it calls only Glean (demo), built in. The line under its title reads "Your team's six newest papers and pages, newest first.", and the first slide is Build health, a page that runs its own scripts: a chart of week 45, which Week 44 changes, and Refresh, which says it couldn't reach CI from here, since the page has no network. Next shows Q1 platform roadmap, a paper, as a page with a table, a task list and code; Previous on the first slide goes to the sixth, Start a new service. Then, at http://127.0.0.1:8888 with your Glean added from the Guide (see [Glean](#glean)), choose Team artifacts under Examples: it calls your Glean and shows your team's.
 
 ### More server behaviors
 
