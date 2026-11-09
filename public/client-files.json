@@ -36,6 +36,7 @@
     "apps/servers.js",
     "apps/store.js",
     "apps/storyboard.js",
+    "apps/toon.js",
     "apps/zip.js",
     "authStore.js",
     "build-sdk.js",

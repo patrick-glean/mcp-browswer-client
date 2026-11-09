@@ -3,8 +3,10 @@
 // take the fields Glean's take and answer in the shapes Glean's do, so an app made with it can
 // call your Glean instead:
 //   search         what it finds, in Markdown, each with its Library link;
-//   read_document  what it reads, in three text blocks: a listing of the documents read, then each
-//                  document (a paper's Markdown, a page's whole HTML), then the call's ID;
+//   read_document  what it reads: a listing (TOON) of the documents read, each with the start of
+//                  it as its snippet, then each document's file as an embedded resource (a paper's
+//                  Markdown, a page's whole HTML), then the call's ID. Glean sends the files only
+//                  to the apps it knows show embedded resources, and the others the rest;
 //   chat           what the demo model says, except that boxes asking for links get the links of
 //                  the team's newest papers and pages, newest first, and a question about the
 //                  team's artifacts gets a list of them.
@@ -18,6 +20,11 @@ export const LIBRARY = 'https://app.glean.com/library/';
 export const linkOf = artifact => `${LIBRARY}${artifact.id}`;
 
 const HOUR = 3_600_000;
+// How much of the start of a document Glean's index keeps as its snippet.
+const SNIPPET_CHARS = 4000;
+// Each kind of artifact's file, as Glean types them; Glean has no spreadsheets, and the demo's is a
+// Markdown table.
+const FILE_TYPES = { paper: 'text/markdown', html: 'text/html', message: 'text/plain', spreadsheet: 'text/markdown' };
 const READS = { readOnlyHint: true, openWorldHint: false };
 const USER_GOAL = { type: 'string', description: 'What the person asked that led to this call, in their words.' };
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
@@ -78,15 +85,25 @@ function searchResults(found, now) {
     ].join('\n'))].join('\n\n---\n\n');
 }
 
+// A string as TOON writes it: in quotes, escaped as JSON escapes them, when TOON says it must be.
+const toon = value => (/^$|^\s|\s$|^(?:true|false|null)$|^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$|[:"\\[\]{},\u0000-\u001f]|^[-#]/i.test(value) ? JSON.stringify(value) : value);
+
 // What read_document read, in the shape of Glean's listing.
 const listing = found => [`documents[${found.length}]:`, ...found.flatMap(artifact => [
     `  - artifactId: ${artifact.id}`,
     `    docType: ${artifact.type.toUpperCase()}`,
     `    glean_doc_id: ARTIFACTS_${artifact.type}_${artifact.id}`,
-    `    snippets[1]: ${JSON.stringify(artifact.summary)}`,
-    `    title: ${fileOf(artifact)}`,
-    `    url: ${JSON.stringify(linkOf(artifact))}`,
+    `    snippets[1]: ${toon(artifact.content.slice(0, SNIPPET_CHARS))}`,
+    `    title: ${toon(fileOf(artifact))}`,
+    `    url: ${toon(linkOf(artifact))}`,
 ])].join('\n');
+
+// A document's file as Glean embeds it: base64, with its type, at its Library link.
+function embeddedFile(artifact) {
+    let binary = '';
+    for (const byte of new TextEncoder().encode(artifact.content)) binary += String.fromCharCode(byte);
+    return { type: 'resource', resource: { uri: linkOf(artifact), mimeType: FILE_TYPES[artifact.type], blob: btoa(binary) } };
+}
 
 export const GLEAN_TOOLS = [
     {
@@ -121,7 +138,7 @@ export const GLEAN_TOOLS = [
     {
         name: 'read_document',
         title: 'Read documents (demo)',
-        description: "Reads documents in the demo's made-up Glean by their Library links, as Glean's read_document does: a listing of what it read, then each document (a paper's Markdown, a page's whole HTML), then the call's ID. Fails, saying so, for a link it doesn't have.",
+        description: "Reads documents in the demo's made-up Glean by their Library links, as Glean's read_document does: a listing of what it read, with the start of each, then each document's file as an embedded resource (a paper's Markdown, a page's whole HTML), then the call's ID. Fails, saying so, for a link it doesn't have.",
         inputSchema: {
             type: 'object',
             properties: {
@@ -137,7 +154,7 @@ export const GLEAN_TOOLS = [
             const missing = asked.filter(url => !artifactAt(url));
             if (missing.length) throw new Error(`The demo's made-up Glean has no document at ${missing.join(', ')}. Its documents are the ones search finds.`);
             const found = asked.map(artifactAt);
-            return { content: [text(listing(found)), ...found.map(artifact => text(artifact.content)), invocation()] };
+            return { content: [text(listing(found)), ...found.map(embeddedFile), invocation()] };
         },
     },
     {

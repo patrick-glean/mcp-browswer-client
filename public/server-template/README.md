@@ -95,7 +95,7 @@ The response pane's Result tab draws each content block of a `tools/call` result
 | `image` | The image, from base64 `data` with an `image/*` `mimeType` |
 | `audio` | A player, from base64 `data` with an `audio/*` `mimeType` |
 | `resource_link` | Its `title` (or `name`, or `uri`) and `description`. An `http` or `https` URI is a link that opens in a new tab; other URIs are shown as text |
-| `resource` (embedded) | Its `uri`, then its `text` as written. A `blob` is named by its `mimeType`, not shown |
+| `resource` (embedded) | Its `uri` and `mimeType`, then what it holds, as a read shows it (below): its `text`, or a `blob` with its size and a Download link, shown as text when its type is text (`text/*`, JSON, XML or YAML) and shown or played when it's an image or audio |
 | Anything else | The block's JSON |
 
 - **`structuredContent`** shows under "Structured content", open when there are no content blocks. A tool that declares an `outputSchema` must return `structuredContent` that matches it: the TypeScript SDK library, the client's default, fails the call when it's missing or doesn't match (unless `isError` is `true`). Return the same JSON as a `text` block too, as the protocol recommends: older clients and the Chat app's model only read text.
@@ -116,7 +116,7 @@ The response pane's Result tab draws each content block of a `tools/call` result
 | `size`, `annotations` (`audience`, `priority`, `lastModified`), `icons` | Not shown yet; the Chat app's model gets them | |
 | `uriTemplate` | A field for each variable (RFC 6570, such as `{id}` or `{+path}`), with the URI they make shown below | Variables named for what they hold. A variable has no schema, so say what it looks like in the template's description: "id is the ticket's ID, such as T-1042" |
 
-`resources/read` returns `contents`, each item with its `uri`, `mimeType` and either `text` or a base64 `blob`. Text is shown as written, indented when the `mimeType` mentions `json` or the text is a JSON object or array. A `blob` with an `image/*` or `audio/*` type is shown or played, and every `blob` gets its size and a Download link, named after the URI's last segment.
+`resources/read` returns `contents`, each item with its `uri`, `mimeType` and either `text` or a base64 `blob`. Text is shown as written, indented when the `mimeType` mentions `json` or the text is a JSON object or array. A `blob` whose type is text (`text/*`, JSON, XML or YAML) and that is UTF-8 is shown as text too, one with an `image/*` or `audio/*` type is shown or played, and every `blob` gets its size and a Download link, named after the URI's last segment.
 
 ## Prompts
 

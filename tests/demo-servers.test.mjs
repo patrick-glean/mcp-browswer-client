@@ -14,12 +14,14 @@ import { askPrompt } from '../public/apps/ask.js';
 import { asksOf, formatRequest } from '../public/apps/boxes.js';
 import { answerOf, documentOf, isHtmlDocument } from '../public/apps/flow.js';
 import { elementsOfComponents } from '../public/apps/screen.js';
+import { decodeToon } from '../public/apps/toon.js';
 import { chatReply, saidIn, toolsIn } from '../public/demo-servers/demo-model.js';
 import { DEMO_SERVERS, demoServerAt, installDemoServers } from '../public/demo-servers/index.js';
 import { findVisit } from '../public/demo-servers/front-desk.js';
 import { linkOf } from '../public/demo-servers/glean.js';
 import { SAMPLE_ARTIFACTS } from '../public/demo-servers/glean-samples.js';
 import { mcpServer } from '../public/demo-servers/mcp.js';
+import { base64Text } from '../public/workbench/util.js';
 
 const META = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} };
 const DESK = DEMO_SERVERS.frontdesk.url;
@@ -138,7 +140,7 @@ test('Chat and Project pulse on the demo model call its chat, before the server 
     assert.match(pulse.screen.components[1].text, /from one question to the demo model:/);
 });
 
-test("Glean (demo) takes the fields Glean's tools take, and answers in their shapes: search in Markdown, read_document in three blocks", async () => {
+test("Glean (demo) takes the fields Glean's tools take, and answers in their shapes: search in Markdown, read_document with a listing, the files and the call's ID", async () => {
     const scope = worker();
     assert.deepEqual(DEMO_SERVERS.glean.tools.map(tool => [tool.name, tool.inputSchema.required]), [['search', ['query', '_user_goal']], ['read_document', ['urls', '_user_goal']], ['chat', ['message', '_user_goal']]]);
     assert.deepEqual(Object.keys(DEMO_SERVERS.glean.tools[2].inputSchema.properties), ['message', 'context', '_user_goal'], "chat's conversation goes in context, as Glean's does");
@@ -154,15 +156,27 @@ test("Glean (demo) takes the fields Glean's tools take, and answers in their sha
     assert.match((await call(scope, GLEAN, 'search', { query: '*', app: 'gmail', _user_goal: 'x' })).content[0].text, /\(0 found\)/);
 
     const read = await call(scope, GLEAN, 'read_document', { urls: [links[1]], _user_goal: 'x' });
+    const roadmap = SAMPLE_ARTIFACTS[1];
     assert.equal(read.content.length, 3);
-    assert.match(read.content[0].text, /^documents\[1\]:\n  - artifactId: 7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    docType: PAPER\n    glean_doc_id: ARTIFACTS_paper_7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    snippets\[1\]: "[^"]+"\n    title: Q1 platform roadmap\.md\n    url: "https:\/\/app\.glean\.com\/library\/7e2b9d41c0a54f6e8b3d1c9a5f7e2b64"$/);
-    assert.match(read.content[1].text, /^# Q1 platform roadmap\n/);
+    assert.match(read.content[0].text, /^documents\[1\]:\n  - artifactId: 7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    docType: PAPER\n    glean_doc_id: ARTIFACTS_paper_7e2b9d41c0a54f6e8b3d1c9a5f7e2b64\n    snippets\[1\]: "# Q1 platform roadmap\\n(?:[^"\\]|\\.)+"\n    title: Q1 platform roadmap\.md\n    url: "https:\/\/app\.glean\.com\/library\/7e2b9d41c0a54f6e8b3d1c9a5f7e2b64"$/);
+    assert.deepEqual(decodeToon(read.content[0].text).documents[0].snippets, [roadmap.content], "a paper shorter than Glean's snippet is all in it");
+    assert.deepEqual({ ...read.content[1], resource: { ...read.content[1].resource, blob: base64Text(read.content[1].resource.blob) } },
+        { type: 'resource', resource: { uri: links[1], mimeType: 'text/markdown', blob: roadmap.content } }, "then the paper's file, as Glean embeds it");
     assert.match(read.content[2].text, /^glean_invocation_id: /);
-    assert.equal(documentOf(read), read.content[1].text.trim(), 'the document box gets the document alone');
-    const page = documentOf(await call(scope, GLEAN, 'read_document', { urls: [`${links[0]}?source=carousel`], _user_goal: 'x' }));
+    assert.equal(documentOf(read), roadmap.content, 'the document box gets the document alone');
+    const pageRead = await call(scope, GLEAN, 'read_document', { urls: [`${links[0]}?source=carousel`], _user_goal: 'x' });
+    const page = documentOf(pageRead);
     assert.ok(isHtmlDocument(page) && page.includes('<canvas id="chart"') && page.includes("fetch('https://ci.example.com/"), 'a page comes whole, its scripts too');
+    assert.equal(decodeToon(pageRead.content[0].text).documents[0].snippets[0], SAMPLE_ARTIFACTS[0].content.slice(0, 4000), "a longer one's start, as Glean's index keeps it");
+    assert.match(documentOf({ content: [pageRead.content[0], pageRead.content[2]] }), /^Glean sent only the start of this page's HTML, which doesn't show on its own\. \[Open it in Glean\]\(https:\/\/app\.glean\.com\/library\/[0-9a-f]{32}\)$/,
+        "without its file, as Glean answers the apps it doesn't know, a page is a link to it");
+    const review = await call(scope, GLEAN, 'read_document', { urls: [links[4]], _user_goal: 'x' });
+    assert.equal(decodeToon(review.content[0].text).documents[0].title, 'Incident review: remote cache outage.md', 'quoted where TOON says to');
     const both = await call(scope, GLEAN, 'read_document', { urls: [links[1], links[3]], _user_goal: 'x' });
-    assert.deepEqual([both.content.length, /^documents\[2\]:/.test(both.content[0].text)], [4, true]);
+    assert.deepEqual([both.content.length, /^documents\[2\]:/.test(both.content[0].text), both.content.slice(1, 3).map(item => item.resource.mimeType)], [4, true, ['text/markdown', 'text/html']]);
+    const others = await call(scope, GLEAN, 'read_document', { urls: [links[2], links[5]], _user_goal: 'x' });
+    assert.deepEqual([others.content.slice(1, 3).map(item => item.resource.mimeType), documentOf(others)], [['text/plain', 'text/markdown'], SAMPLE_ARTIFACTS[2].content],
+        'a message is plain text, as Glean types it, and the spreadsheet a Markdown table');
     const missing = await call(scope, GLEAN, 'read_document', { urls: ['https://app.glean.com/library/0000'], _user_goal: 'x' });
     assert.deepEqual(missing, { resultType: 'complete', content: [{ type: 'text', text: "The demo's made-up Glean has no document at https://app.glean.com/library/0000. Its documents are the ones search finds." }], isError: true });
     assert.equal((await call(scope, GLEAN, 'read_document', { urls: [''], _user_goal: 'x' })).isError, true);

@@ -499,6 +499,7 @@ The app builder (`public/apps/`) is built the same way: components for the Apps 
 │   │   │                  #   they share (rule, HTML source, call, model, trace)
 │   │   ├── link.js        # An app in a link: the client's root, #run= and its DML, deflated
 │   │   ├── flow.js        # Rules: triggers, templates, call arguments, renaming, problems, sentences
+│   │   ├── toon.js        # Reads TOON, the notation Glean's MCP server lists what it found in
 │   │   ├── graph.js       # The flow as the canvas draws it: ports, wires, connecting, placing tools
 │   │   ├── storyboard.js  # The canvas's layout: screens in the order people reach them, tools beside them
 │   │   ├── boxes.js       # Boxes and conversations: what each shows, the request a rule adds to its prompt, drawing answers

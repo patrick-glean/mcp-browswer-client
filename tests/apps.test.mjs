@@ -1177,11 +1177,37 @@ test("a tool's document is what it read, without what only describes the call: M
     assert.equal(documentOf({ content: [{ type: 'resource', resource: { uri: 'ui://card', mimeType: 'text/html', text: '<p>Hi</p>' } }] }),
         '<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body>\n<p>Hi</p>\n</body></html>', 'an HTML resource, made a whole page');
     assert.equal(documentOf({ content: [{ type: 'resource', resource: { uri: 'file:///plan.md', mimeType: 'text/markdown', text: '# Plan' } }] }), '# Plan');
-    assert.equal(documentOf(textBlocks(LISTING, INVOCATION)), `${LISTING}\n${INVOCATION}`, 'when that is all there is, it stays');
     assert.equal(documentOf(null), '');
     assert.equal(answerOf({ result: textBlocks(LISTING, '# Plan', INVOCATION) }).values.document, '# Plan', 'routes have it as {{document}}');
     assert.deepEqual(['<!doctype html><p>', '  <!-- made in Glean -->\n<html lang="en">', '<HTML>'].map(isHtmlDocument), [true, true, true]);
     assert.deepEqual(['<p>Hi</p>', '# <html>', '', null].map(isHtmlDocument), [false, false, false, false]);
+});
+
+// A file as Glean embeds one: base64, with its type.
+const embeddedFile = (mimeType, text) => ({ type: 'resource', resource: { uri: 'https://app.glean.com/library/0f3a', mimeType, blob: Buffer.from(text).toString('base64') } });
+
+test("a tool's document can be a file it embeds as base64, as Glean sends one, or else what Glean's listing holds of it", () => {
+    const page = '<!DOCTYPE html>\n<html><body><h1>Build health</h1><script>draw()</script></body></html>';
+    assert.equal(documentOf({ content: [{ type: 'text', text: LISTING }, embeddedFile('text/markdown', '# Plan — the whole of it\n\nSteps.'), { type: 'text', text: INVOCATION }] }), '# Plan — the whole of it\n\nSteps.');
+    assert.equal(documentOf({ content: [{ type: 'text', text: LISTING }, embeddedFile('text/html', page)] }), page);
+    assert.equal(answerOf({ result: { content: [embeddedFile('text/html', page)] } }).values.html, page, 'and {{html}} has the page');
+    assert.equal(documentOf({ content: [embeddedFile('image/png', 'not text'), { type: 'resource', resource: { uri: 'x', mimeType: 'text/plain', blob: '%%%' } }, { type: 'text', text: 'The answer.' }] }), 'The answer.',
+        "an image, or a blob that isn't base64, isn't a document");
+
+    assert.equal(documentOf(textBlocks(LISTING, INVOCATION)), 'A plan', "the listing alone: the document's snippets, which for one read whole are its start");
+    assert.equal(answerOf({ result: textBlocks(LISTING, INVOCATION) }).values.document, 'A plan');
+    const listingOf = fields => `documents[1]:\n  - artifactId: 0f3a\n${fields.map(field => `    ${field}`).join('\n')}\n    url: "https://app.glean.com/library/0f3a"`;
+    assert.equal(documentOf(textBlocks(listingOf(['richDocumentData:', '  content: "# Plan\\n\\nAll of it."', '  mimeType: text/markdown', 'snippets[1]: "# Plan"']))), '# Plan\n\nAll of it.',
+        'all of it, when the listing has it');
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(page)}`]))), page, 'a whole page');
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(page.slice(0, 40))}`]))),
+        "Glean sent only the start of this page's HTML, which doesn't show on its own. [Open it in Glean](https://app.glean.com/library/0f3a)", "the start of a page's HTML isn't a page");
+    const cut = `# Plan\n\n\`\`\`\n${'x'.repeat(4000)}`.slice(0, 4000);
+    assert.equal(documentOf(textBlocks(listingOf([`snippets[1]: ${JSON.stringify(cut)}`]))),
+        `> Glean sent only the start of this document. [Open it in Glean](https://app.glean.com/library/0f3a)\n\n${cut}`, 'one as long as Glean keeps says so, above it, as it may stop in a code block');
+    assert.equal(documentOf(textBlocks(`documents[2]:\n  - snippets[1]: One\n  - snippets[1]: Two`, INVOCATION)), 'One\n\n---\n\nTwo', 'one after another');
+    const broken = 'documents[2]:\n  - snippets[1]: One';
+    assert.equal(documentOf(textBlocks(broken, INVOCATION)), `${broken}\n${INVOCATION}`, "a listing that doesn't read stays as it is");
 });
 
 test('a document box shows Markdown as a page, and leaves a whole HTML page to a frame of its own; a text box shows a link as one', () => {
